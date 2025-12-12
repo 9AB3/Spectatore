@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.btn {
+  @apply px-4 py-2 rounded-2xl shadow text-white font-semibold;
+}
+.btn-primary {
+  @apply bg-sky-600 hover:bg-sky-700;
+}
+.btn-secondary {
+  @apply bg-slate-700 hover:bg-slate-800;
+}
+.input {
+  @apply border rounded-lg px-3 py-2 w-full;
+}
+.card {
+  @apply bg-white rounded-2xl shadow p-4;
+}
+
+:root {
+  --brand: #3b2a1a; /* dark brown */
+  --brand-press: #2e2016;
+  --bg: #fdf1e3; /* cream */
+  --card: #fff8ee; /* lighter cream */
+  --input: #f6e8d7; /* tan */
+  --text: #2a1b10;
+  --muted: #6b5b4f;
+  --ok: #16a34a; /* green */
+  --warn: #d97706; /* orange */
+  --bad: #dc2626; /* red */
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.card {
+  @apply rounded-2xl shadow p-5;
+  background: var(--card);
+}
+.input {
+  @apply border rounded-xl px-3 py-2 w-full outline-none;
+  background: var(--input);
+  border-color: #e9d9c3;
+}
+.btn {
+  @apply px-4 py-3 rounded-2xl shadow text-white font-semibold tracking-wide;
+  background: var(--brand);
+}
+.btn:hover {
+  background: var(--brand-press);
+}
+.btn-secondary {
+  background: var(--brand);
+} /* keep same look per request */
+
+.header-bar {
+  @apply flex justify-between items-center p-4 shadow;
+  background: var(--card);
+}
+.logo-title {
+  @apply font-bold;
+  color: var(--text);
+}
+
+.sync-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  display: inline-block;
+  margin-left: 8px;
+}
+.sync-ok {
+  background: var(--ok);
+}
+.sync-warn {
+  background: var(--warn);
+}
+.sync-bad {
+  background: var(--bad);
+}
+
+a.link {
+  color: var(--brand);
+  text-decoration: underline;
+}

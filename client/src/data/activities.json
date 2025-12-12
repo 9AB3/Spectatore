@@ -1,0 +1,464 @@
+{
+  "Development": {
+    "Rehab": [
+      {
+        "field": "Equipment",
+        "required": 1,
+        "unit": "",
+        "input": "select|equipment"
+      },
+      {
+        "field": "Location",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "Bolt Length",
+        "required": 1,
+        "unit": "m",
+        "input": "select|1.8m;2.4m;3.0m;6.0m"
+      },
+      {
+        "field": "Bolt Type",
+        "required": 1,
+        "unit": "",
+        "input": "select|-;Friction;Mechanical;Resin"
+      },
+      {
+        "field": "No. of Bolts",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|0-300"
+      },
+      {
+        "field": "Agi Volume",
+        "required": 1,
+        "unit": "m3",
+        "input": "number|0-100000"
+      },
+      {
+        "field": "Spray Volume",
+        "required": 1,
+        "unit": "m3",
+        "input": "number|0-100000"
+      }
+    ],
+    "Face Drilling": [
+      {
+        "field": "Equipment",
+        "required": 1,
+        "unit": "",
+        "input": "select|equipment"
+      },
+      {
+        "field": "Location",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "No of Reamers",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|1-10"
+      },
+      {
+        "field": "No of Holes",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|1-100"
+      },
+      {
+        "field": "Cut Length",
+        "required": 1,
+        "unit": "m",
+        "input": "number|1-6|1dp"
+      }
+    ],
+    "Ground Support": [
+      {
+        "field": "Equipment",
+        "required": 1,
+        "unit": "",
+        "input": "select|equipment"
+      },
+      {
+        "field": "Location",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "Bolt Length",
+        "required": 1,
+        "unit": "m",
+        "input": "select|-;1.8m;2.4m;3.0m;6.0m"
+      },
+      {
+        "field": "Bolt Type",
+        "required": 1,
+        "unit": "",
+        "input": "select|-;Friction;Mechanical;Resin"
+      },
+      {
+        "field": "No. of Bolts",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|0-300"
+      },
+      {
+        "field": "Agi Volume",
+        "required": 1,
+        "unit": "m3",
+        "input": "number|0-50"
+      },
+      {
+        "field": "Spray Volume",
+        "required": 1,
+        "unit": "m3",
+        "input": "number|0-50"
+      }
+    ]
+  },
+  "Production Drilling": {
+    "Stope": [
+      {
+        "field": "Equipment",
+        "required": 1,
+        "unit": "",
+        "input": "select|equipment"
+      },
+      {
+        "field": "Location",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "Metres Drilled",
+        "required": 1,
+        "unit": "m",
+        "input": "number|0-400"
+      },
+      {
+        "field": "Cleanouts Drilled",
+        "required": 1,
+        "unit": "m",
+        "input": "number|0-400"
+      },
+      {
+        "field": "Redrills",
+        "required": 1,
+        "unit": "m",
+        "input": "number|0-400"
+      }
+    ],
+    "Service Hole": [
+      {
+        "field": "Equipment",
+        "required": 1,
+        "unit": "",
+        "input": "select|equipment"
+      },
+      {
+        "field": "Location",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "Metres Drilled",
+        "required": 1,
+        "unit": "m",
+        "input": "number|0-400"
+      },
+      {
+        "field": "Cleanouts Drilled",
+        "required": 1,
+        "unit": "m",
+        "input": "number|0-400"
+      },
+      {
+        "field": "Redrills",
+        "required": 1,
+        "unit": "m",
+        "input": "number|0-400"
+      }
+    ]
+  },
+  "Hauling": {
+    "Production": [
+      {
+        "field": "Equipment",
+        "required": 1,
+        "unit": "",
+        "input": "select|equipment"
+      },
+      {
+        "field": "Source",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "From",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "To",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "Trucks",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|1-30"
+      },
+      {
+        "field": "Weight",
+        "required": 1,
+        "unit": "t",
+        "input": "number|0-100"
+      },
+      {
+        "field": "Distance",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|1-50"
+      }
+    ],
+    "Development": [
+      {
+        "field": "Equipment",
+        "required": 1,
+        "unit": "",
+        "input": "select|equipment"
+      },
+      {
+        "field": "Source",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "From",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "To",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "Trucks",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|1-30"
+      },
+      {
+        "field": "Weight",
+        "required": 1,
+        "unit": "t",
+        "input": "number|0-100"
+      },
+      {
+        "field": "Distance",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|1-50"
+      },
+      {
+        "field": "Material",
+        "required": 1,
+        "unit": "",
+        "input": "select|Ore;Waste"
+      }
+    ]
+  },
+  "Loading": {
+    "Production": [
+      {
+        "field": "Equipment",
+        "required": 1,
+        "unit": "",
+        "input": "select|equipment"
+      },
+      {
+        "field": "Source",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "Stope to Truck",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|0-200"
+      },
+      {
+        "field": "Stope to SP",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|0-200"
+      },
+      {
+        "field": "SP to Truck",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|0-200"
+      },
+      {
+        "field": "SP to SP",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|0-200"
+      }
+    ],
+    "Development": [
+      {
+        "field": "Equipment",
+        "required": 1,
+        "unit": "",
+        "input": "select|equipment"
+      },
+      {
+        "field": "Source",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "Material",
+        "required": 1,
+        "unit": "",
+        "input": "select|Ore;Waste"
+      },
+      {
+        "field": "Heading to Truck",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|0-200"
+      },
+      {
+        "field": "Heading to SP",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|0-200"
+      },
+      {
+        "field": "SP to Truck",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|0-200"
+      },
+      {
+        "field": "SP to SP",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|0-200"
+      }
+    ]
+  },
+  "Charging": {
+    "Development": [
+      {
+        "field": "Equipment",
+        "required": 1,
+        "unit": "",
+        "input": "select|equipment"
+      },
+      {
+        "field": "Location",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "No of Holes",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|1-500"
+      },
+      {
+        "field": "Charge Metres",
+        "required": 1,
+        "unit": "m",
+        "input": "number|1-500"
+      },
+      {
+        "field": "Charge kg",
+        "required": 1,
+        "unit": "Kg",
+        "input": "number|1-2000"
+      },
+      {
+        "field": "Cut Length",
+        "required": 1,
+        "unit": "m",
+        "input": "number|1-10"
+      }
+    ],
+    "Production": [
+      {
+        "field": "Equipment",
+        "required": 1,
+        "unit": "",
+        "input": "select|equipment"
+      },
+      {
+        "field": "Location",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "No of Holes",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|1-500"
+      },
+      {
+        "field": "Charge Metres",
+        "required": 1,
+        "unit": "m",
+        "input": "number|1-500"
+      },
+      {
+        "field": "Charge kg",
+        "required": 1,
+        "unit": "Kg",
+        "input": "number|1-2000"
+      },
+      {
+        "field": "Tonnes Fired",
+        "required": 1,
+        "unit": "t",
+        "input": "number|"
+      }
+    ]
+  },
+  "Hoisting": {
+    "": [
+      {
+        "field": "Ore Tonnes",
+        "required": 1,
+        "unit": "t",
+        "input": "number|0-10000"
+      },
+      {
+        "field": "Waste Tonnes",
+        "required": 1,
+        "unit": "t",
+        "input": "number|0-10000"
+      }
+    ]
+  }
+}
