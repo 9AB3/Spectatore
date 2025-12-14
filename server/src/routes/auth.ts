@@ -98,7 +98,7 @@ router.post('/confirm', (req, res) => {
   const { email, code } = req.body;
   const normEmail = normaliseEmail(email);
 
-  db.get('SELECT * FROM users WHERE email=?', [normEmail], (err, user) => {
+  db.get('SELECT * FROM users WHERE email=?', [normEmail], (err, user: any) => {
     if (err || !user) return res.status(400).json({ error: 'invalid email' });
     if (user.confirm_code !== code) return res.status(400).json({ error: 'incorrect code' });
     db.run('UPDATE users SET email_confirmed=1, confirm_code=NULL WHERE id=?', [user.id]);
@@ -121,7 +121,7 @@ router.post('/login', (req, res) => {
         .json({ error: 'Too many attempts. Try again in 5 minutes' });
     }
 
-    db.get('SELECT * FROM users WHERE email=?', [normEmail], (err, user) => {
+    db.get('SELECT * FROM users WHERE email=?', [normEmail], (err, user: any) => {
       if (err || !user) {
         recordFailed(normEmail);
         return res.status(401).json({ error: 'invalid credentials' });
@@ -140,7 +140,7 @@ router.post('/forgot', (req, res) => {
   const { email } = req.body;
   const normEmail = normaliseEmail(email);
 
-  db.get('SELECT * FROM users WHERE email=?', [normEmail], async (err, user) => {
+  db.get('SELECT * FROM users WHERE email=?', [normEmail], async (err, user: any) => {
     if (err || !user) return res.json({ ok: true }); // don't leak
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     db.run('UPDATE users SET reset_code=? WHERE id=?', [code, user.id]);
@@ -157,7 +157,7 @@ router.post('/reset', (req, res) => {
   const { email, code, password } = req.body;
   const normEmail = normaliseEmail(email);
 
-  db.get('SELECT * FROM users WHERE email=?', [normEmail], (err, user) => {
+  db.get('SELECT * FROM users WHERE email=?', [normEmail], (err, user: any) => {
     if (err || !user) return res.status(400).json({ error: 'invalid email' });
     if (user.reset_code !== code) return res.status(400).json({ error: 'incorrect code' });
     const hash = bcrypt.hashSync(password, 10);
@@ -173,7 +173,7 @@ router.get('/dev-token', (req, res) => {
   const normEmail = normaliseEmail(email);
   if (!normEmail) return res.status(400).json({ error: 'email required' });
 
-  db.get('SELECT * FROM users WHERE email=?', [normEmail], (err, user) => {
+  db.get('SELECT * FROM users WHERE email=?', [normEmail], (err, user: any) => {
     if (err || !user) return res.status(404).json({ error: 'user not found' });
     const token = jwt.sign(
       { id: user.id, email: user.email, is_admin: !!user.is_admin },
