@@ -3,7 +3,7 @@ import { db } from '../lib/db.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
-import { sendEmail } from '../lib/email';
+import { sendEmail } from '../lib/email.js';
 
 dotenv.config();
 const DEV_SKIP = process.env.DEV_SKIP_EMAIL_CONFIRM === '1';
