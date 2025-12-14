@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db } from '../lib/db';
+import { db } from '../lib/db.js';
 import { authMiddleware } from '../lib/auth';
 
 const router = Router();
