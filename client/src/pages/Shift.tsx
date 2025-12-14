@@ -5,19 +5,6 @@ import { useNavigate } from 'react-router-dom';
 import useToast from '../hooks/useToast';
 
 export default function Shift() {
-  async function cancel() {
-    const db = await getDB();
-    // Clear activities for current local device (since activities aren't tagged by shift yet)
-    const tx = (await getDB()).transaction('activities', 'readwrite');
-    const store = tx.objectStore('activities');
-    const all = await store.getAll();
-    for (const row of all) await store.delete(row.id);
-    await tx.done;
-    // Clear shift state
-    await (await getDB()).delete('shift', 'current');
-    localStorage.removeItem('spectatore-shift');
-    alert('Shift cancelled and activities cleared');
-  }
   const nav = useNavigate();
   const { setMsg, Toast } = useToast();
   const [loaded, setLoaded] = useState(false);
@@ -34,11 +21,30 @@ export default function Shift() {
     })();
   }, []);
 
-  function cancel() {
-    if (confirm('Are you sure you want to cancel your shift?')) {
+  async function cancelShift() {
+    if (!confirm('Are you sure you want to cancel your shift?')) return;
+
+    try {
+      const db = await getDB();
+
+      // Clear activities for current local device (since activities aren't tagged by shift yet)
+      const tx = db.transaction('activities', 'readwrite');
+      const store = tx.objectStore('activities');
+      const all = await store.getAll();
+      for (const row of all) {
+        await store.delete(row.id);
+      }
+      await tx.done;
+
+      // Clear shift state
+      await db.delete('shift', 'current');
       localStorage.removeItem('spectatore-shift');
+
       setMsg('Shift cancelled');
       setTimeout(() => nav('/Main'), 500);
+    } catch (e) {
+      console.error(e);
+      setMsg('Failed to cancel shift');
     }
   }
 
@@ -58,7 +64,7 @@ export default function Shift() {
         <button className="btn btn-primary" onClick={() => nav('/FinalizeShift')}>
           FINALIZE SHIFT
         </button>
-        <button className="btn btn-secondary" onClick={cancel}>
+        <button className="btn btn-secondary" onClick={cancelShift}>
           CANCEL SHIFT
         </button>
       </div>
