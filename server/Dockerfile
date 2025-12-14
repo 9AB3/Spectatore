@@ -5,6 +5,5 @@ COPY package.json package-lock.json* tsconfig.json ./
 RUN npm install
 COPY src ./src
 COPY .env.example ./.env
-RUN npm run build || true
-EXPOSE 5000
-CMD ["npm","run","dev"]
+RUN npm run build
+CMD ["npm","start"]
