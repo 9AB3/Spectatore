@@ -312,7 +312,10 @@ export default function PerformanceReview() {
 
   // graph data (current user)
   const [rowsGraph, setRowsGraph] = useState<ShiftRow[]>([]);
-  const [rollupGraph, setRollupGraph] = useState<Rollup>({});
+  const [rollupGraph, setRollupGraph] = useState<Rollup>({}); // date-range rollup (kept for reference)
+
+  // ✅ options rollup (all time) so graph date range never changes dropdown availability
+  const [rollupGraphOptions, setRollupGraphOptions] = useState<Rollup>({});
 
   // graph data (crew)
   const [rowsGraphCrew, setRowsGraphCrew] = useState<ShiftRow[]>([]);
@@ -327,6 +330,7 @@ export default function PerformanceReview() {
   // ✅ Make graph the default left-most tab
   const [tab, setTab] = useState<'graph' | 'table'>('graph');
 
+  // global dates-with-any-data (useful for Table calendars)
   const [datesWithData, setDatesWithData] = useState<Set<string>>(() => new Set());
 
   // crew list + selection + current user name
@@ -373,7 +377,7 @@ export default function PerformanceReview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ initial load for graph data (but selectors stay blank until user chooses)
+  // ✅ initial load for graph data (selectors stay blank until user chooses)
   useEffect(() => {
     fetchGraphData(fromGraph, toGraph);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -400,7 +404,7 @@ export default function PerformanceReview() {
     return () => clearTimeout(t);
   }, [selectedCrewId, fromGraph, toGraph]);
 
-  // dates with data (used for both calendars)
+  // global dates with any data (TABLE calendars)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -427,6 +431,23 @@ export default function PerformanceReview() {
       } catch (e) {
         console.error('Failed to load all-time milestones data', e);
         if (!cancelled) setRowsMilestones([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ✅ load options rollup once (all-time) so graph date range doesn't affect dropdown availability
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api(`/api/reports/summary?from=0001-01-01&to=9999-12-31`);
+        if (!cancelled) setRollupGraphOptions(res.rollup || {});
+      } catch (e) {
+        console.error('Failed to load graph options rollup', e);
+        if (!cancelled) setRollupGraphOptions({});
       }
     })();
     return () => {
@@ -495,22 +516,53 @@ export default function PerformanceReview() {
     };
   }, []);
 
-  // -------------------- FILTERED ROLLUPS (OPTIONS) --------------------
-  const filteredRollupGraph: Rollup = useMemo(() => {
+  // -------------------- TABLE: non-zero counts for averages --------------------
+  const nonZeroCounts = useMemo(() => {
+    const counts: Record<string, Record<string, Record<string, number>>> = {};
+    const ALLOWED_HAUL = new Set(['Total Trucks', 'Total Distance', 'Total Weight', 'Total TKMS']);
+
+    for (const r of rowsTable) {
+      const t = r.totals_json || {};
+      for (const rawAct of Object.keys(t || {})) {
+        const canAct = canonAct(rawAct);
+        for (const sub of Object.keys(t[rawAct] || {})) {
+          for (const rawK of Object.keys(t[rawAct][sub] || {})) {
+            if (lc(canAct) === 'hauling') {
+              const rk = lc(rawK);
+              if (rk === 'trucks' || rk === 'weight' || rk === 'distance') continue;
+              if (!ALLOWED_HAUL.has(rawK)) continue;
+            }
+            const disp = displayNameFor(rawK);
+            if (!isAllowedMetric(canAct, disp)) continue;
+            const v = Number(t[rawAct][sub][rawK] ?? 0);
+            if (v > 0) {
+              counts[canAct] ||= {};
+              counts[canAct][sub] ||= {};
+              counts[canAct][sub][disp] = (counts[canAct][sub][disp] || 0) + 1;
+            }
+          }
+        }
+      }
+    }
+    return counts;
+  }, [rowsTable]);
+
+  // filtered rollup for table
+  const filteredRollupTable: Rollup = useMemo(() => {
     const out: Rollup = {};
-    for (const rawAct of Object.keys(rollupGraph || {})) {
+    for (const rawAct of Object.keys(rollupTable || {})) {
       const canAct = canonAct(rawAct);
       if (!allowedByActivity[lc(canAct)]) continue;
 
-      for (const sub of Object.keys(rollupGraph[rawAct] || {})) {
-        for (const rawK of Object.keys(rollupGraph[rawAct][sub] || {})) {
+      for (const sub of Object.keys(rollupTable[rawAct] || {})) {
+        for (const rawK of Object.keys(rollupTable[rawAct][sub] || {})) {
           if (lc(canAct) === 'hauling') {
             const rk = lc(rawK);
             if (rk === 'trucks' || rk === 'weight' || rk === 'distance') continue;
           }
           const disp = displayNameFor(rawK);
           if (!isAllowedMetric(canAct, disp)) continue;
-          const v = Number(rollupGraph[rawAct][sub][rawK] ?? 0);
+          const v = Number(rollupTable[rawAct][sub][rawK] ?? 0);
 
           out[canAct] ||= {};
           out[canAct][sub] ||= {};
@@ -519,9 +571,40 @@ export default function PerformanceReview() {
       }
     }
     return out;
-  }, [rollupGraph]);
+  }, [rollupTable]);
 
-  const activityOptionsGraph = useMemo(() => Object.keys(filteredRollupGraph), [filteredRollupGraph]);
+  const activityOptionsTable = useMemo(() => Object.keys(filteredRollupTable), [filteredRollupTable]);
+
+  // -------------------- GRAPH: options rollup (INDEPENDENT OF GRAPH DATES) --------------------
+  const filteredRollupGraph: Rollup = useMemo(() => {
+    const out: Rollup = {};
+    for (const rawAct of Object.keys(rollupGraphOptions || {})) {
+      const canAct = canonAct(rawAct);
+      if (!allowedByActivity[lc(canAct)]) continue;
+
+      for (const sub of Object.keys(rollupGraphOptions[rawAct] || {})) {
+        for (const rawK of Object.keys(rollupGraphOptions[rawAct][sub] || {})) {
+          if (lc(canAct) === 'hauling') {
+            const rk = lc(rawK);
+            if (rk === 'trucks' || rk === 'weight' || rk === 'distance') continue;
+          }
+          const disp = displayNameFor(rawK);
+          if (!isAllowedMetric(canAct, disp)) continue;
+          const v = Number(rollupGraphOptions[rawAct][sub][rawK] ?? 0);
+
+          out[canAct] ||= {};
+          out[canAct][sub] ||= {};
+          out[canAct][sub][disp] = (out[canAct][sub][disp] || 0) + v;
+        }
+      }
+    }
+    return out;
+  }, [rollupGraphOptions]);
+
+  const activityOptionsGraph = useMemo(
+    () => Object.keys(filteredRollupGraph),
+    [filteredRollupGraph],
+  );
 
   const subsByActivityGraph = useMemo(() => {
     const out: Record<string, string[]> = {};
@@ -536,7 +619,7 @@ export default function PerformanceReview() {
     return Object.keys(filteredRollupGraph[graphActivity]?.[graphSub] || {});
   }, [filteredRollupGraph, graphActivity, graphSub]);
 
-  // -------------------- ✅ YOUR NEW RULE: changing Activity blanks everything else --------------------
+  // -------------------- ✅ Your rule: changing Activity blanks everything else --------------------
   function handleGraphActivityChange(newAct: string) {
     setGraphActivity(newAct);
 
@@ -544,17 +627,30 @@ export default function PerformanceReview() {
     setGraphSub('');
     setGraphMetric('');
 
-    // also blank crew matchup so comparison doesn't stay "skewed" to old selection
+    // blank crew matchup so comparison doesn't stay skewed
     setSelectedCrewId('');
     setRowsGraphCrew([]);
     setRowsMilestonesCrew([]);
   }
 
-  // also: when Sub-activity changes, blank metric (forced re-select)
+  // when Sub-activity changes, blank metric (forced re-select)
   function handleGraphSubChange(newSub: string) {
     setGraphSub(newSub);
     setGraphMetric('');
+
+    // also drop crew matchup (metric meaning changes)
+    setSelectedCrewId('');
+    setRowsGraphCrew([]);
+    setRowsMilestonesCrew([]);
   }
+
+  // when Metric changes, also drop crew matchup (forced to reselect)
+  useEffect(() => {
+    setSelectedCrewId('');
+    setRowsGraphCrew([]);
+    setRowsMilestonesCrew([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graphMetric]);
 
   // -------------------- Milestones helpers --------------------
   function getShiftValueForSelection(row: ShiftRow): number {
@@ -738,8 +834,7 @@ export default function PerformanceReview() {
 
   function PctPill({ value }: { value: number | null }) {
     if (value === null || !Number.isFinite(value)) return <span className="text-slate-400">–</span>;
-    const cls =
-      value > 0 ? 'text-emerald-700' : value < 0 ? 'text-red-600' : 'text-slate-600';
+    const cls = value > 0 ? 'text-emerald-700' : value < 0 ? 'text-red-600' : 'text-slate-600';
     const sign = value > 0 ? '+' : '';
     return <span className={cls}>{`${sign}${value.toFixed(0)}%`}</span>;
   }
@@ -768,6 +863,17 @@ export default function PerformanceReview() {
       </div>
     );
   }
+
+  // ✅ dates-with-data for the CURRENT selection (graph calendars should be green only for selected metric)
+  const datesWithDataForSelection = useMemo(() => {
+    const s = new Set<string>();
+    if (!graphActivity || !graphSub || !graphMetric) return s;
+    for (const r of rowsMilestones) {
+      const v = getShiftValueForSelection(r);
+      if (v > 0) s.add(r.date);
+    }
+    return s;
+  }, [rowsMilestones, graphActivity, graphSub, graphMetric]);
 
   // helper to build daily + cumulative series for a given set of rows (graph range)
   const computeSeries = (rows: ShiftRow[]) => {
@@ -1012,6 +1118,7 @@ export default function PerformanceReview() {
                   )}
 
                   <div className="grid grid-cols-1 gap-2 text-sm">
+                    {/* Record Shift */}
                     <div className="bg-white border rounded p-2">
                       <div className="text-xs text-slate-600">Record Shift</div>
                       <CompareRowWithPct
@@ -1024,6 +1131,7 @@ export default function PerformanceReview() {
                             : undefined
                         }
                       />
+                      {/* date below number (like other milestones) */}
                       <div className="grid items-center gap-2 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem] mt-1">
                         <div className="text-xs text-slate-600">
                           {formatDMY(milestonesAllTime.bestDay.date)}
@@ -1035,6 +1143,7 @@ export default function PerformanceReview() {
                       </div>
                     </div>
 
+                    {/* Record Week */}
                     <div className="bg-white border rounded p-2">
                       <div className="text-xs text-slate-600">Record Week</div>
                       <CompareRowWithPct
@@ -1070,6 +1179,7 @@ export default function PerformanceReview() {
                       </div>
                     </div>
 
+                    {/* Record Month */}
                     <div className="bg-white border rounded p-2">
                       <div className="text-xs text-slate-600">Record Month</div>
                       <CompareRowWithPct
@@ -1093,6 +1203,7 @@ export default function PerformanceReview() {
                       </div>
                     </div>
 
+                    {/* Most Productive Shift */}
                     <div className="bg-white border rounded p-2">
                       <div className="text-xs text-slate-600">Most Productive Shift</div>
                       <div className="grid items-center gap-2 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem]">
@@ -1102,26 +1213,28 @@ export default function PerformanceReview() {
                         <div className="text-right font-semibold truncate">
                           {milestonesAllTimeCrew ? milestonesAllTimeCrew.shiftCompare.bestShiftLabel : ''}
                         </div>
-                        <div className="text-right">{selectedCrewId ? <span className="text-slate-400">–</span> : ''}</div>
+                        <div className="text-right">
+                          {selectedCrewId ? <span className="text-slate-400">–</span> : ''}
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* 3) Graph date range */}
+              {/* 3) Graph date range (green depends on selected metric; does NOT affect dropdown availability) */}
               <div className="flex flex-wrap gap-2 items-end">
                 <CalendarDropdown
                   label="From"
                   value={fromGraph}
                   onChange={setFromGraph}
-                  datesWithData={datesWithData}
+                  datesWithData={selectionReady ? datesWithDataForSelection : new Set()}
                 />
                 <CalendarDropdown
                   label="To"
                   value={toGraph}
                   onChange={setToGraph}
-                  datesWithData={datesWithData}
+                  datesWithData={selectionReady ? datesWithDataForSelection : new Set()}
                 />
               </div>
 
@@ -1160,15 +1273,169 @@ export default function PerformanceReview() {
                 <div className="text-sm text-slate-500">No data for this selection</div>
               ) : (
                 <div className="border rounded p-3 overflow-x-auto">
-                  <svg width={320} height={60}>
-                    <text x={10} y={30} fontSize={12} fill="#64748b">
-                      (graph svg block unchanged — keep your existing one here)
+                  <svg width={svgWidth} height={svgHeight} className="block">
+                    {/* axes */}
+                    <line
+                      x1={chartPaddingLeft - 6}
+                      y1={chartPaddingTop}
+                      x2={chartPaddingLeft - 6}
+                      y2={chartPaddingTop + innerHeight}
+                      stroke="#94a3b8"
+                      strokeWidth={1}
+                    />
+                    <line
+                      x1={svgWidth - chartPaddingRight + 6}
+                      y1={chartPaddingTop}
+                      x2={svgWidth - chartPaddingRight + 6}
+                      y2={chartPaddingTop + innerHeight}
+                      stroke="#94a3b8"
+                      strokeWidth={1}
+                    />
+
+                    {/* left axis label */}
+                    <text x={chartPaddingLeft - 24} y={chartPaddingTop - 4} fontSize={10} fill="#475569">
+                      Daily total
                     </text>
+                    {/* right axis label */}
+                    <text
+                      x={svgWidth - chartPaddingRight + 10}
+                      y={chartPaddingTop - 4}
+                      fontSize={10}
+                      fill="#475569"
+                    >
+                      Cumulative
+                    </text>
+
+                    {/* left ticks (daily) */}
+                    {Array.from({ length: 4 }).map((_, i) => {
+                      const frac = i / 3;
+                      const v = dailyMax * frac;
+                      const y = chartPaddingTop + innerHeight - frac * innerHeight;
+                      return (
+                        <g key={`lt-${i}`}>
+                          <line
+                            x1={chartPaddingLeft - 8}
+                            y1={y}
+                            x2={chartPaddingLeft - 6}
+                            y2={y}
+                            stroke="#94a3b8"
+                            strokeWidth={1}
+                          />
+                          <text
+                            x={chartPaddingLeft - 12}
+                            y={y + 3}
+                            fontSize={9}
+                            fill="#64748b"
+                            textAnchor="end"
+                          >
+                            {Math.round(v).toLocaleString()}
+                          </text>
+                        </g>
+                      );
+                    })}
+
+                    {/* right ticks (cumulative) */}
+                    {Array.from({ length: 4 }).map((_, i) => {
+                      const frac = i / 3;
+                      const v = cumMax * frac;
+                      const y = chartPaddingTop + innerHeight - frac * innerHeight;
+                      return (
+                        <g key={`rt-${i}`}>
+                          <line
+                            x1={svgWidth - chartPaddingRight + 6}
+                            y1={y}
+                            x2={svgWidth - chartPaddingRight + 8}
+                            y2={y}
+                            stroke="#94a3b8"
+                            strokeWidth={1}
+                          />
+                          <text
+                            x={svgWidth - chartPaddingRight + 12}
+                            y={y + 3}
+                            fontSize={9}
+                            fill="#64748b"
+                            textAnchor="start"
+                          >
+                            {Math.round(v).toLocaleString()}
+                          </text>
+                        </g>
+                      );
+                    })}
+
+                    {/* bars for daily totals: you + comparison */}
+                    {seriesCurrent.map((pt, i) => {
+                      const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
+
+                      const userVal = pt.value;
+                      const crewVal = seriesCrew[i]?.value ?? 0;
+
+                      const baseY = chartPaddingTop + innerHeight;
+                      const singleWidth = barWidth / 2 - 1;
+
+                      // Your bar (left)
+                      const xUser = xCenter - singleWidth - 1;
+                      const yUser = yDaily(userVal);
+                      const hUser = Math.max(baseY - yUser, 0);
+
+                      // Crew bar (right)
+                      const xCrew = xCenter + 1;
+                      const yCrew = yDaily(crewVal);
+                      const hCrew = Math.max(baseY - yCrew, 0);
+
+                      return (
+                        <g key={`bar-${pt.date}`}>
+                          <rect x={xUser} y={yUser} width={singleWidth} height={hUser} fill="#64748b" />
+                          {selectedCrewId && (
+                            <rect x={xCrew} y={yCrew} width={singleWidth} height={hCrew} fill="#f59e0b" />
+                          )}
+                        </g>
+                      );
+                    })}
+
+                    {/* cumulative line (you) */}
+                    {cumPathCurrent && <path d={cumPathCurrent} fill="none" stroke="#0f766e" strokeWidth={2} />}
+
+                    {/* cumulative line (crew) */}
+                    {selectedCrewId && cumPathCrew && (
+                      <path
+                        d={cumPathCrew}
+                        fill="none"
+                        stroke="#f97316"
+                        strokeWidth={2}
+                        strokeDasharray="4 3"
+                      />
+                    )}
+
+                    {/* points on cumulative lines */}
+                    {seriesCurrent.map((pt, i) => {
+                      const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
+                      const y = yCum(pt.cumulative);
+                      return <circle key={`dot-me-${pt.date}`} cx={xCenter} cy={y} r={3} fill="#0f766e" />;
+                    })}
+                    {selectedCrewId &&
+                      seriesCrew.map((pt, i) => {
+                        const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
+                        const y = yCum(pt.cumulative);
+                        return <circle key={`dot-crew-${pt.date}`} cx={xCenter} cy={y} r={2} fill="#f97316" />;
+                      })}
+
+                    {/* x-axis labels */}
+                    {seriesCurrent.map((pt, i) => {
+                      const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
+                      return (
+                        <text
+                          key={`lbl-${pt.date}`}
+                          x={xCenter}
+                          y={chartPaddingTop + innerHeight + 14}
+                          fontSize={9}
+                          fill="#64748b"
+                          textAnchor="middle"
+                        >
+                          {pt.date.slice(5)}
+                        </text>
+                      );
+                    })}
                   </svg>
-                  {/* ✅ IMPORTANT:
-                      Paste your full existing SVG graph block here (the big one),
-                      unchanged from your current file.
-                  */}
                 </div>
               )}
             </div>
@@ -1176,9 +1443,80 @@ export default function PerformanceReview() {
 
           {tab === 'table' && (
             <div className="space-y-4">
-              {/* keep your existing table tab unchanged */}
-              <div className="text-sm text-slate-500">
-                (table tab unchanged — keep your existing table code here)
+              {/* date selection for TABLE */}
+              <div className="flex flex-wrap gap-2 items-end">
+                <CalendarDropdown
+                  label="From"
+                  value={fromTable}
+                  onChange={setFromTable}
+                  datesWithData={datesWithData}
+                />
+                <CalendarDropdown
+                  label="To"
+                  value={toTable}
+                  onChange={setToTable}
+                  datesWithData={datesWithData}
+                />
+                <button className="btn" onClick={() => fetchTableData(fromTable, toTable)} disabled={loading}>
+                  Apply
+                </button>
+              </div>
+
+              {activityOptionsTable.length === 0 ? (
+                <div className="text-sm text-slate-500">No data</div>
+              ) : (
+                Object.entries(filteredRollupTable).map(([act, subs]) => {
+                  return (
+                    <div key={act}>
+                      <div className="font-bold mb-1">{act}</div>
+                      {Object.entries(subs).map(([sub, sums]) => (
+                        <div key={sub} className="ml-3">
+                          <div className="font-medium">{sub}</div>
+                          <table className="w-full text-sm mt-2 table-fixed">
+                            <thead>
+                              <tr className="text-left text-slate-600">
+                                <th className="py-1 pr-4 w-1/4">Metric</th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Sum</th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Shift Avg</th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Non-zero shifts</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {Object.entries(sums).map(([dispKey, sum]) => {
+                                const denom =
+                                  (nonZeroCounts[act] &&
+                                    nonZeroCounts[act][sub] &&
+                                    nonZeroCounts[act][sub][dispKey]) ||
+                                  0;
+                                const avg = denom ? (Number(sum) || 0) / denom : NaN;
+                                return (
+                                  <tr key={dispKey}>
+                                    <td className="py-1 pr-4 w-1/4 text-slate-700">{dispKey}</td>
+                                    <td className="py-1 pr-4 w-1/4 text-right font-semibold">
+                                      {Number(sum).toLocaleString()}
+                                    </td>
+                                    <td className="py-1 pr-4 w-1/4 text-right">
+                                      {Number.isFinite(avg)
+                                        ? avg.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                                        : '–'}
+                                    </td>
+                                    <td className="py-1 pr-4 w-1/4 text-right">{denom}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })
+              )}
+
+              <div className="flex gap-2">
+                <a href="/Main" className="btn flex-1 text-center">
+                  BACK
+                </a>
               </div>
             </div>
           )}
