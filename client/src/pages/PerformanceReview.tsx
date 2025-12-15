@@ -28,31 +28,17 @@ function formatYmd(d: Date): string {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
-
-// ----- milestone date formatting helpers -----
-function fmtDdMmYy(ymd: string) {
+function formatDmyShort(ymd: string) {
   if (!ymd) return '–';
-  const d = parseYmd(ymd);
-  if (isNaN(d.getTime())) return '–';
-  const dd = String(d.getDate()).padStart(2, '0');
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const yy = String(d.getFullYear()).slice(-2);
-  return `${dd}/${mm}/${yy}`;
+  const [y, m, d] = ymd.split('-');
+  if (!y || !m || !d) return '–';
+  return `${d}/${m}/${String(y).slice(-2)}`;
 }
-function fmtMonthMmYy(ym: string) {
-  // ym = "YYYY-MM"
-  if (!ym || ym.length < 7) return '–';
-  const [y, m] = ym.split('-').map((x) => parseInt(x, 10));
+function formatMyShort(ym: string) {
+  if (!ym) return '–';
+  const [y, m] = ym.split('-');
   if (!y || !m) return '–';
-  const mm = String(m).padStart(2, '0');
-  const yy = String(y).slice(-2);
-  return `${mm}/${yy}`;
-}
-function pctDiff(userVal: number, crewVal: number) {
-  // % difference vs crew (crew baseline)
-  if (!Number.isFinite(userVal) || !Number.isFinite(crewVal)) return null;
-  if (crewVal === 0) return null;
-  return ((userVal - crewVal) / crewVal) * 100;
+  return `${m}/${String(y).slice(-2)}`;
 }
 
 // Allowed metrics per activity (display filter)
@@ -319,6 +305,24 @@ async function fetchCrewGraphData(
   }
 }
 
+// helper to fetch crew milestones (all-time) on-demand
+async function fetchCrewMilestonesAllTime(
+  userId: string,
+  setRows: (rows: ShiftRow[]) => void,
+) {
+  if (!userId) {
+    setRows([]);
+    return;
+  }
+  try {
+    const res = await api(`/api/reports/summary?from=0001-01-01&to=9999-12-31&user_id=${userId}`);
+    setRows(res.rows || []);
+  } catch (e) {
+    console.error('Failed to load crew milestones all-time data', e);
+    setRows([]);
+  }
+}
+
 export default function PerformanceReview() {
   // separate date ranges
   const [fromTable, setFromTable] = useState(formatDate(startOfMonth(new Date())));
@@ -337,8 +341,9 @@ export default function PerformanceReview() {
   // graph data (crew)
   const [rowsGraphCrew, setRowsGraphCrew] = useState<ShiftRow[]>([]);
 
-  // milestones (all-time, hidden fetch)
+  // milestones (all-time, hidden fetch) - current user
   const [rowsMilestones, setRowsMilestones] = useState<ShiftRow[]>([]);
+  // milestones (all-time) - crew
   const [rowsMilestonesCrew, setRowsMilestonesCrew] = useState<ShiftRow[]>([]);
 
   const [loading, setLoading] = useState(false);
@@ -412,7 +417,7 @@ export default function PerformanceReview() {
     };
   }, []);
 
-  // hidden all-time fetch for milestones (you)
+  // hidden all-time fetch for milestones (current user)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -429,7 +434,7 @@ export default function PerformanceReview() {
     };
   }, []);
 
-  // hidden all-time fetch for milestones (crew, only when selected)
+  // when crew matchup changes, fetch crew milestones (all-time)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -606,7 +611,8 @@ export default function PerformanceReview() {
     const sub = graphSub && subs.includes(graphSub) ? graphSub : subs[0] || undefined;
 
     const metrics = act && sub ? Object.keys(filteredRollupGraph[act]?.[sub] || {}) : [];
-    const metric = graphMetric && metrics.includes(graphMetric) ? graphMetric : metrics[0] || undefined;
+    const metric =
+      graphMetric && metrics.includes(graphMetric) ? graphMetric : metrics[0] || undefined;
 
     setGraphActivity(act);
     setGraphSub(sub);
@@ -656,10 +662,9 @@ export default function PerformanceReview() {
     return acc;
   }
 
-  // ✅ Milestones:
-  // - Record Week works even when span < 7 days (uses smaller window)
-  // - DS/NS averages are per NON-ZERO shift
-  // - Adds bestShiftAvgValue so we can compute % diff for "Most Productive Shift"
+  // ✅ FIXED:
+  // - Best 7-day works even when you have < 7 calendar days of data (sums what exists + implicit zeros)
+  // - DS/NS productivity uses NON-ZERO shifts as the denominator (avg = total / nonZeroShifts)
   function computeMilestonesAllTime(rows: ShiftRow[]) {
     if (!graphActivity || !graphSub || !graphMetric) return null;
 
@@ -667,7 +672,7 @@ export default function PerformanceReview() {
     const dates = Object.keys(acc).sort();
     if (!dates.length) return null;
 
-    // Record shift
+    // Best daily total
     let bestDayVal = -Infinity;
     let bestDayDate = dates[0];
     for (const d of dates) {
@@ -694,13 +699,14 @@ export default function PerformanceReview() {
       }
     }
 
-    // Record week (rolling window, implicit zeros). If span < 7, use span length.
+    // Best 7-day rolling (calendar window, implicit zeros)
+    // If total span < 7 days, use window = span length
     const window = Math.min(7, allDays.length);
     let best7Val = -Infinity;
     let best7Start = allDays[0]?.date || '';
     let best7End = allDays[allDays.length - 1]?.date || '';
-    let windowSum = 0;
 
+    let windowSum = 0;
     for (let i = 0; i < allDays.length; i++) {
       windowSum += allDays[i].value;
       if (i >= window) windowSum -= allDays[i - window].value;
@@ -715,7 +721,7 @@ export default function PerformanceReview() {
     }
     if (!Number.isFinite(best7Val)) best7Val = 0;
 
-    // Record month
+    // Best month total
     const byMonth: Record<string, number> = {};
     for (const pt of allDays) {
       const ym = pt.date.slice(0, 7);
@@ -735,14 +741,15 @@ export default function PerformanceReview() {
       if (!bestMonthKey) return '';
       const [y, m] = bestMonthKey.split('-').map((x) => parseInt(x, 10));
       const d = new Date(y, (m || 1) - 1, 1);
-      return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(d);
+      return new Intl.DateTimeFormat(undefined, {
+        month: 'long',
+        year: 'numeric',
+      }).format(d);
     })();
 
     // DS/NS productivity (avg per NON-ZERO shift)
     let dsSum = 0,
       nsSum = 0;
-    let dsN = 0,
-      nsN = 0;
     let dsNonZero = 0,
       nsNonZero = 0;
 
@@ -751,13 +758,11 @@ export default function PerformanceReview() {
       const v = getShiftValueForSelection(r);
 
       if (dn === 'DS') {
-        dsN += 1;
         if (v > 0) {
           dsNonZero += 1;
           dsSum += v;
         }
       } else if (dn === 'NS') {
-        nsN += 1;
         if (v > 0) {
           nsNonZero += 1;
           nsSum += v;
@@ -768,47 +773,26 @@ export default function PerformanceReview() {
     const dsAvg = dsNonZero ? dsSum / dsNonZero : NaN;
     const nsAvg = nsNonZero ? nsSum / nsNonZero : NaN;
 
-    const dsOk = Number.isFinite(dsAvg);
-    const nsOk = Number.isFinite(nsAvg);
-
     let bestShiftLabel = '–';
-    let bestShiftAvgValue = NaN;
-
-    if (dsOk || nsOk) {
-      if (dsOk && !nsOk) {
-        bestShiftLabel = 'DS';
-        bestShiftAvgValue = dsAvg;
-      } else if (!dsOk && nsOk) {
-        bestShiftLabel = 'NS';
-        bestShiftAvgValue = nsAvg;
-      } else if (dsOk && nsOk) {
-        if (dsAvg === nsAvg) {
-          bestShiftLabel = 'DS = NS';
-          bestShiftAvgValue = dsAvg;
-        } else if (dsAvg > nsAvg) {
-          bestShiftLabel = 'DS';
-          bestShiftAvgValue = dsAvg;
-        } else {
-          bestShiftLabel = 'NS';
-          bestShiftAvgValue = nsAvg;
-        }
-      }
+    if (Number.isFinite(dsAvg) || Number.isFinite(nsAvg)) {
+      if (!Number.isFinite(nsAvg)) bestShiftLabel = 'DS';
+      else if (!Number.isFinite(dsAvg)) bestShiftLabel = 'NS';
+      else if (dsAvg === nsAvg) bestShiftLabel = 'DS = NS';
+      else bestShiftLabel = dsAvg > nsAvg ? 'DS' : 'NS';
     }
+
+    const bestAvg = (() => {
+      const d = Number.isFinite(dsAvg) ? dsAvg : -Infinity;
+      const n = Number.isFinite(nsAvg) ? nsAvg : -Infinity;
+      const m = Math.max(d, n);
+      return Number.isFinite(m) ? m : NaN;
+    })();
 
     return {
       bestDay: { total: bestDayVal, date: bestDayDate },
       best7: { total: best7Val, start: best7Start, end: best7End },
       bestMonth: { total: bestMonthVal, ym: bestMonthKey, label: bestMonthPretty },
-      shiftCompare: {
-        dsAvg,
-        nsAvg,
-        dsN,
-        nsN,
-        dsNonZero,
-        nsNonZero,
-        bestShiftLabel,
-        bestShiftAvgValue,
-      },
+      shiftCompare: { dsAvg, nsAvg, bestShiftLabel, bestAvg },
     };
   }
 
@@ -818,11 +802,22 @@ export default function PerformanceReview() {
     [rowsMilestones, graphActivity, graphSub, graphMetric],
   );
 
-  const milestonesCrewAllTime = useMemo(
+  const milestonesAllTimeCrew = useMemo(
     () => (selectedCrewId ? computeMilestonesAllTime(rowsMilestonesCrew) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rowsMilestonesCrew, selectedCrewId, graphActivity, graphSub, graphMetric],
   );
+
+  function pctDiff(userVal: number, crewVal: number): { text: string; cls: string } {
+    const u = Number(userVal);
+    const c = Number(crewVal);
+    if (!Number.isFinite(u) || !Number.isFinite(c) || c === 0) return { text: '–', cls: 'text-slate-400' };
+    const pct = ((u - c) / c) * 100;
+    if (!Number.isFinite(pct)) return { text: '–', cls: 'text-slate-400' };
+    const cls = pct >= 0 ? 'text-green-700' : 'text-red-700';
+    const sign = pct >= 0 ? '+' : '';
+    return { text: `${sign}${pct.toFixed(0)}%`, cls };
+  }
 
   // helper to build daily + cumulative series for a given set of rows (graph range)
   const computeSeries = (rows: ShiftRow[]) => {
@@ -917,7 +912,10 @@ export default function PerformanceReview() {
   const svgWidth =
     seriesCurrent.length > 0
       ? Math.max(
-          chartPaddingLeft + chartPaddingRight + seriesCurrent.length * (barWidth + gap) - gap,
+          chartPaddingLeft +
+            chartPaddingRight +
+            seriesCurrent.length * (barWidth + gap) -
+            gap,
           minWidth,
         )
       : minWidth;
@@ -951,6 +949,35 @@ export default function PerformanceReview() {
 
   const crewMatch = crew.find((c) => c.id === Number(selectedCrewId || 0));
   const crewName = crewMatch?.name || '';
+
+  // ---------- Milestones UI helpers ----------
+  function CompareRow({
+    left,
+    right,
+    pct,
+    pctCls,
+    sub = false,
+  }: {
+    left: React.ReactNode;
+    right?: React.ReactNode;
+    pct?: React.ReactNode;
+    pctCls?: string;
+    sub?: boolean;
+  }) {
+    return (
+      <div className={`grid ${selectedCrewId ? 'grid-cols-3' : 'grid-cols-1'} items-center gap-2`}>
+        <div className={`${sub ? 'text-xs text-slate-600' : 'font-semibold'}`}>{left}</div>
+        {selectedCrewId && (
+          <>
+            <div className={`${sub ? 'text-xs text-slate-600' : 'font-semibold'} text-right`}>
+              {right}
+            </div>
+            <div className={`text-right font-semibold ${pctCls || ''}`}>{pct}</div>
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -1056,8 +1083,7 @@ export default function PerformanceReview() {
                     const faceHolesCount = getCount('Face Drilling', 'No of Holes');
                     const faceCutCount = getCount('Face Drilling', 'Cut Length');
 
-                    const allTotalDrillmCount =
-                      rehabGsDrillmCount + gsGsDrillmCount + faceDevDrillmCount;
+                    const allTotalDrillmCount = rehabGsDrillmCount + gsGsDrillmCount + faceDevDrillmCount;
                     const allNoBoltsCount = rehabNoBoltsCount + gsNoBoltsCount;
                     const allCutCount = faceCutCount;
                     const allHolesCount = faceHolesCount;
@@ -1411,9 +1437,7 @@ export default function PerformanceReview() {
                                     </td>
                                     <td className="py-1 pr-4 w-1/4 text-right">
                                       {Number.isFinite(avg)
-                                        ? avg.toLocaleString(undefined, {
-                                            maximumFractionDigits: 2,
-                                          })
+                                        ? avg.toLocaleString(undefined, { maximumFractionDigits: 2 })
                                         : '–'}
                                     </td>
                                     <td className="py-1 pr-4 w-1/4 text-right">{denom}</td>
@@ -1515,6 +1539,7 @@ export default function PerformanceReview() {
                           const newId = e.target.value;
                           setSelectedCrewId(newId);
                           fetchCrewGraphData(newId, fromGraph, toGraph, setRowsGraphCrew);
+                          fetchCrewMilestonesAllTime(newId, setRowsMilestonesCrew);
                         }}
                       >
                         <option value="">None</option>
@@ -1556,189 +1581,243 @@ export default function PerformanceReview() {
                     <div className="border rounded p-3 bg-slate-50">
                       <div className="font-semibold mb-2">Milestones</div>
 
+                      {/* Optional column headers when comparing */}
+                      {selectedCrewId && (
+                        <div className="grid grid-cols-3 gap-2 text-[11px] text-slate-500 mb-2">
+                          <div>{currentUserName}</div>
+                          <div className="text-right">{crewName || 'Crew'}</div>
+                          <div className="text-right">Δ</div>
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
                         {/* Record Shift */}
                         <div className="bg-white border rounded p-2">
                           <div className="text-xs text-slate-600">Record Shift</div>
 
-                          <div className="font-semibold">
-                            {milestonesAllTime.bestDay.total.toLocaleString()} on{' '}
-                            {fmtDdMmYy(milestonesAllTime.bestDay.date)}
-                          </div>
-
-                          {selectedCrewId && milestonesCrewAllTime && (
-                            <div className="mt-1 text-xs text-slate-700">
-                              <span className="font-medium">{crewName}:</span>{' '}
-                              {milestonesCrewAllTime.bestDay.total.toLocaleString()} on{' '}
-                              {fmtDdMmYy(milestonesCrewAllTime.bestDay.date)}
-                              {(() => {
-                                const d = pctDiff(
-                                  milestonesAllTime.bestDay.total,
-                                  milestonesCrewAllTime.bestDay.total,
-                                );
-                                if (d === null) return null;
-                                const cls = d >= 0 ? 'text-green-700' : 'text-red-700';
-                                const sign = d >= 0 ? '+' : '';
-                                return (
-                                  <span className={`ml-2 font-semibold ${cls}`}>
-                                    ({sign}
-                                    {d.toFixed(1)}%)
-                                  </span>
-                                );
-                              })()}
-                            </div>
-                          )}
+                          {(() => {
+                            const uTotal = milestonesAllTime.bestDay.total || 0;
+                            const cTotal = milestonesAllTimeCrew?.bestDay.total ?? 0;
+                            const d = pctDiff(uTotal, cTotal);
+                            return (
+                              <>
+                                <CompareRow
+                                  left={uTotal.toLocaleString()}
+                                  right={selectedCrewId ? cTotal.toLocaleString() : undefined}
+                                  pct={selectedCrewId ? d.text : undefined}
+                                  pctCls={selectedCrewId ? d.cls : undefined}
+                                />
+                                <CompareRow
+                                  sub
+                                  left={formatDmyShort(milestonesAllTime.bestDay.date || '')}
+                                  right={
+                                    selectedCrewId ? formatDmyShort(milestonesAllTimeCrew?.bestDay.date || '') : undefined
+                                  }
+                                  pct={selectedCrewId ? '' : undefined}
+                                  pctCls="text-slate-400"
+                                />
+                              </>
+                            );
+                          })()}
                         </div>
 
                         {/* Record Week */}
                         <div className="bg-white border rounded p-2">
                           <div className="text-xs text-slate-600">Record Week</div>
 
-                          <div className="font-semibold">
-                            {milestonesAllTime.best7.total.toLocaleString()}
-                          </div>
-                          <div className="text-xs text-slate-600">
-                            {milestonesAllTime.best7.start && milestonesAllTime.best7.end
-                              ? `${fmtDdMmYy(milestonesAllTime.best7.start)} → ${fmtDdMmYy(
-                                  milestonesAllTime.best7.end,
-                                )}`
-                              : '–'}
-                          </div>
-
-                          {selectedCrewId && milestonesCrewAllTime && (
-                            <div className="mt-1 text-xs text-slate-700">
-                              <span className="font-medium">{crewName}:</span>{' '}
-                              {milestonesCrewAllTime.best7.total.toLocaleString()}
-                              <span className="text-slate-600">
-                                {' '}
-                                (
-                                {milestonesCrewAllTime.best7.start && milestonesCrewAllTime.best7.end
-                                  ? `${fmtDdMmYy(milestonesCrewAllTime.best7.start)} → ${fmtDdMmYy(
-                                      milestonesCrewAllTime.best7.end,
-                                    )}`
-                                  : '–'}
-                                )
-                              </span>
-                              {(() => {
-                                const d = pctDiff(
-                                  milestonesAllTime.best7.total,
-                                  milestonesCrewAllTime.best7.total,
-                                );
-                                if (d === null) return null;
-                                const cls = d >= 0 ? 'text-green-700' : 'text-red-700';
-                                const sign = d >= 0 ? '+' : '';
-                                return (
-                                  <span className={`ml-2 font-semibold ${cls}`}>
-                                    ({sign}
-                                    {d.toFixed(1)}%)
-                                  </span>
-                                );
-                              })()}
-                            </div>
-                          )}
+                          {(() => {
+                            const uTotal = milestonesAllTime.best7.total || 0;
+                            const cTotal = milestonesAllTimeCrew?.best7.total ?? 0;
+                            const d = pctDiff(uTotal, cTotal);
+                            return (
+                              <>
+                                <CompareRow
+                                  left={uTotal.toLocaleString()}
+                                  right={selectedCrewId ? cTotal.toLocaleString() : undefined}
+                                  pct={selectedCrewId ? d.text : undefined}
+                                  pctCls={selectedCrewId ? d.cls : undefined}
+                                />
+                                <CompareRow
+                                  sub
+                                  left={
+                                    milestonesAllTime.best7.start && milestonesAllTime.best7.end
+                                      ? `${formatDmyShort(milestonesAllTime.best7.start)} → ${formatDmyShort(
+                                          milestonesAllTime.best7.end,
+                                        )}`
+                                      : '–'
+                                  }
+                                  right={
+                                    selectedCrewId
+                                      ? milestonesAllTimeCrew?.best7.start && milestonesAllTimeCrew?.best7.end
+                                        ? `${formatDmyShort(milestonesAllTimeCrew.best7.start)} → ${formatDmyShort(
+                                            milestonesAllTimeCrew.best7.end,
+                                          )}`
+                                        : '–'
+                                      : undefined
+                                  }
+                                  pct={selectedCrewId ? '' : undefined}
+                                  pctCls="text-slate-400"
+                                />
+                              </>
+                            );
+                          })()}
                         </div>
 
                         {/* Record Month */}
                         <div className="bg-white border rounded p-2">
                           <div className="text-xs text-slate-600">Record Month</div>
 
-                          <div className="font-semibold">
-                            {milestonesAllTime.bestMonth.total.toLocaleString()}
-                          </div>
-                          <div className="text-xs text-slate-600">
-                            {fmtMonthMmYy(milestonesAllTime.bestMonth.ym)}
-                          </div>
-
-                          {selectedCrewId && milestonesCrewAllTime && (
-                            <div className="mt-1 text-xs text-slate-700">
-                              <span className="font-medium">{crewName}:</span>{' '}
-                              {milestonesCrewAllTime.bestMonth.total.toLocaleString()}
-                              <span className="text-slate-600">
-                                {' '}
-                                ({fmtMonthMmYy(milestonesCrewAllTime.bestMonth.ym)})
-                              </span>
-                              {(() => {
-                                const d = pctDiff(
-                                  milestonesAllTime.bestMonth.total,
-                                  milestonesCrewAllTime.bestMonth.total,
-                                );
-                                if (d === null) return null;
-                                const cls = d >= 0 ? 'text-green-700' : 'text-red-700';
-                                const sign = d >= 0 ? '+' : '';
-                                return (
-                                  <span className={`ml-2 font-semibold ${cls}`}>
-                                    ({sign}
-                                    {d.toFixed(1)}%)
-                                  </span>
-                                );
-                              })()}
-                            </div>
-                          )}
+                          {(() => {
+                            const uTotal = milestonesAllTime.bestMonth.total || 0;
+                            const cTotal = milestonesAllTimeCrew?.bestMonth.total ?? 0;
+                            const d = pctDiff(uTotal, cTotal);
+                            const uYm = milestonesAllTime.bestMonth.ym || '';
+                            const cYm = milestonesAllTimeCrew?.bestMonth.ym || '';
+                            return (
+                              <>
+                                <CompareRow
+                                  left={uTotal.toLocaleString()}
+                                  right={selectedCrewId ? cTotal.toLocaleString() : undefined}
+                                  pct={selectedCrewId ? d.text : undefined}
+                                  pctCls={selectedCrewId ? d.cls : undefined}
+                                />
+                                <CompareRow
+                                  sub
+                                  left={uYm ? formatMyShort(uYm) : '–'}
+                                  right={selectedCrewId ? (cYm ? formatMyShort(cYm) : '–') : undefined}
+                                  pct={selectedCrewId ? '' : undefined}
+                                  pctCls="text-slate-400"
+                                />
+                              </>
+                            );
+                          })()}
                         </div>
 
                         {/* Most Productive Shift */}
                         <div className="bg-white border rounded p-2">
                           <div className="text-xs text-slate-600">Most Productive Shift</div>
 
-                          <div className="font-semibold">{milestonesAllTime.shiftCompare.bestShiftLabel}</div>
+                          {(() => {
+                            const uBest = milestonesAllTime.shiftCompare.bestAvg;
+                            const cBest = milestonesAllTimeCrew?.shiftCompare.bestAvg ?? NaN;
+                            const d = pctDiff(uBest, cBest);
 
-                          <div className="text-xs text-slate-600">
-                            DS avg:{' '}
-                            {Number.isFinite(milestonesAllTime.shiftCompare.dsAvg)
-                              ? milestonesAllTime.shiftCompare.dsAvg.toLocaleString(undefined, {
-                                  maximumFractionDigits: 2,
-                                })
-                              : '–'}
-                          </div>
-                          <div className="text-xs text-slate-600">
-                            NS avg:{' '}
-                            {Number.isFinite(milestonesAllTime.shiftCompare.nsAvg)
-                              ? milestonesAllTime.shiftCompare.nsAvg.toLocaleString(undefined, {
-                                  maximumFractionDigits: 2,
-                                })
-                              : '–'}
-                          </div>
+                            const uBestLabel = milestonesAllTime.shiftCompare.bestShiftLabel || '–';
+                            const cBestLabel = milestonesAllTimeCrew?.shiftCompare.bestShiftLabel || '–';
 
-                          {selectedCrewId && milestonesCrewAllTime && (
-                            <div className="mt-2 text-xs text-slate-700">
-                              <div>
-                                <span className="font-medium">{crewName}:</span>{' '}
-                                {milestonesCrewAllTime.shiftCompare.bestShiftLabel}
-                                {(() => {
-                                  const d = pctDiff(
-                                    milestonesAllTime.shiftCompare.bestShiftAvgValue,
-                                    milestonesCrewAllTime.shiftCompare.bestShiftAvgValue,
-                                  );
-                                  if (d === null) return null;
-                                  const cls = d >= 0 ? 'text-green-700' : 'text-red-700';
-                                  const sign = d >= 0 ? '+' : '';
-                                  return (
-                                    <span className={`ml-2 font-semibold ${cls}`}>
-                                      ({sign}
-                                      {d.toFixed(1)}%)
-                                    </span>
-                                  );
-                                })()}
-                              </div>
+                            return (
+                              <>
+                                <CompareRow
+                                  left={
+                                    Number.isFinite(uBest)
+                                      ? `${uBestLabel} (${uBest.toLocaleString(undefined, {
+                                          maximumFractionDigits: 2,
+                                        })})`
+                                      : uBestLabel
+                                  }
+                                  right={
+                                    selectedCrewId
+                                      ? Number.isFinite(cBest)
+                                        ? `${cBestLabel} (${cBest.toLocaleString(undefined, {
+                                            maximumFractionDigits: 2,
+                                          })})`
+                                        : cBestLabel
+                                      : undefined
+                                  }
+                                  pct={selectedCrewId ? d.text : undefined}
+                                  pctCls={selectedCrewId ? d.cls : undefined}
+                                />
 
-                              <div className="text-slate-600">
-                                DS avg:{' '}
-                                {Number.isFinite(milestonesCrewAllTime.shiftCompare.dsAvg)
-                                  ? milestonesCrewAllTime.shiftCompare.dsAvg.toLocaleString(undefined, {
-                                      maximumFractionDigits: 2,
-                                    })
-                                  : '–'}
-                              </div>
-                              <div className="text-slate-600">
-                                NS avg:{' '}
-                                {Number.isFinite(milestonesCrewAllTime.shiftCompare.nsAvg)
-                                  ? milestonesCrewAllTime.shiftCompare.nsAvg.toLocaleString(undefined, {
-                                      maximumFractionDigits: 2,
-                                    })
-                                  : '–'}
-                              </div>
-                            </div>
-                          )}
+                                {/* DS avg row */}
+                                <CompareRow
+                                  sub
+                                  left={
+                                    <>
+                                      DS avg:{' '}
+                                      {Number.isFinite(milestonesAllTime.shiftCompare.dsAvg)
+                                        ? milestonesAllTime.shiftCompare.dsAvg.toLocaleString(undefined, {
+                                            maximumFractionDigits: 2,
+                                          })
+                                        : '–'}
+                                    </>
+                                  }
+                                  right={
+                                    selectedCrewId ? (
+                                      <>
+                                        DS avg:{' '}
+                                        {Number.isFinite(milestonesAllTimeCrew?.shiftCompare.dsAvg ?? NaN)
+                                          ? (milestonesAllTimeCrew!.shiftCompare.dsAvg as number).toLocaleString(
+                                              undefined,
+                                              { maximumFractionDigits: 2 },
+                                            )
+                                          : '–'}
+                                      </>
+                                    ) : undefined
+                                  }
+                                  pct={
+                                    selectedCrewId
+                                      ? pctDiff(
+                                          milestonesAllTime.shiftCompare.dsAvg,
+                                          milestonesAllTimeCrew?.shiftCompare.dsAvg ?? NaN,
+                                        ).text
+                                      : undefined
+                                  }
+                                  pctCls={
+                                    selectedCrewId
+                                      ? pctDiff(
+                                          milestonesAllTime.shiftCompare.dsAvg,
+                                          milestonesAllTimeCrew?.shiftCompare.dsAvg ?? NaN,
+                                        ).cls
+                                      : undefined
+                                  }
+                                />
+
+                                {/* NS avg row */}
+                                <CompareRow
+                                  sub
+                                  left={
+                                    <>
+                                      NS avg:{' '}
+                                      {Number.isFinite(milestonesAllTime.shiftCompare.nsAvg)
+                                        ? milestonesAllTime.shiftCompare.nsAvg.toLocaleString(undefined, {
+                                            maximumFractionDigits: 2,
+                                          })
+                                        : '–'}
+                                    </>
+                                  }
+                                  right={
+                                    selectedCrewId ? (
+                                      <>
+                                        NS avg:{' '}
+                                        {Number.isFinite(milestonesAllTimeCrew?.shiftCompare.nsAvg ?? NaN)
+                                          ? (milestonesAllTimeCrew!.shiftCompare.nsAvg as number).toLocaleString(
+                                              undefined,
+                                              { maximumFractionDigits: 2 },
+                                            )
+                                          : '–'}
+                                      </>
+                                    ) : undefined
+                                  }
+                                  pct={
+                                    selectedCrewId
+                                      ? pctDiff(
+                                          milestonesAllTime.shiftCompare.nsAvg,
+                                          milestonesAllTimeCrew?.shiftCompare.nsAvg ?? NaN,
+                                        ).text
+                                      : undefined
+                                  }
+                                  pctCls={
+                                    selectedCrewId
+                                      ? pctDiff(
+                                          milestonesAllTime.shiftCompare.nsAvg,
+                                          milestonesAllTimeCrew?.shiftCompare.nsAvg ?? NaN,
+                                        ).cls
+                                      : undefined
+                                  }
+                                />
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
