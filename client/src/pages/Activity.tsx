@@ -7,7 +7,6 @@ import useToast from '../hooks/useToast';
 import { loadEquipment, loadLocations } from '../lib/datalists';
 
 type Field = { field: string; required: number; unit: string; input: string };
-
 type EquipRow = { id?: number; type: string; equipment_id: string };
 
 // Authoritative equipment → activity mapping
@@ -81,7 +80,8 @@ export default function Activity() {
       await loadEquipment(uid);
 
       // 3) re-read updated cache
-      const updatedEq = (await (await getDB()).getAll('equipment')) as any[];
+      const db2 = await getDB();
+      const updatedEq = (await db2.getAll('equipment')) as any[];
       setEquipmentRows(
         (updatedEq || [])
           .map((r) => ({ equipment_id: r.equipment_id, type: r.type, id: r.id }))
@@ -151,6 +151,7 @@ export default function Activity() {
       return;
     }
     const db = await getDB();
+
     // normalize manual entries for equipment/location
     const baseValues: any = { ...values };
     for (const key of Object.keys(baseValues)) {
@@ -212,6 +213,7 @@ export default function Activity() {
           if (b.type) vals['Bolt Type'] = b.type;
           if (b.count) vals['No. of Bolts'] = Number(b.count);
 
+          // Only include Agi/Spray on the first record to avoid double-counting
           if (idx > 0) {
             if ('Agi Volume' in vals) delete vals['Agi Volume'];
             if ('Spray Volume' in vals) delete vals['Spray Volume'];
@@ -238,21 +240,29 @@ export default function Activity() {
 
   const subKeys = Object.keys((data as any)[activity] || {});
 
-  // Filter equipment by selected Activity using equipment TYPE
-  const filteredEquipment = equipmentRows
-    .filter((r) => (EQUIPMENT_ACTIVITY_MAP[r.type] || []).includes(activity))
-    .map((r) => r.equipment_id);
+  // ✅ Correct: filter equipment IDs by CURRENT selected Activity, using type->activities map
+  const filteredEquipment = useMemo(() => {
+    return (equipmentRows || [])
+      .filter((r) => (EQUIPMENT_ACTIVITY_MAP[r.type] || []).includes(activity))
+      .map((r) => r.equipment_id)
+      .sort((a, b) => a.localeCompare(b));
+  }, [equipmentRows, activity]);
 
   return (
     <div className="min-h-screen flex flex-col">
       <Toast />
       <Header />
       <div className="p-4 max-w-2xl mx-auto w-full flex-1">
+        {/* ✅ ONE CARD: main form + bolts inside for Dev GS/Rehab */}
         <div className="card space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium">Activity</label>
-              <select className="input" value={activity} onChange={(e) => setActivity(e.target.value)}>
+              <select
+                className="input"
+                value={activity}
+                onChange={(e) => setActivity(e.target.value)}
+              >
                 {activityKeys.map((k) => (
                   <option key={k}>{k}</option>
                 ))}
@@ -282,82 +292,77 @@ export default function Activity() {
                     {f.unit ? <span className="text-xs text-slate-500">({f.unit})</span> : null}
                   </label>
 
-                  {rule.kind === 'select' &&
-                    rule.source === 'equipment' &&
-                    (equipmentRows.length > 0 ? (
-                      <>
-                        <select
-                          className={common}
-                          value={values[f.field] || ''}
-                          onChange={(e) => setValues((v) => ({ ...v, [f.field]: e.target.value }))}
-                        >
-                          <option value="">-</option>
-
-                          {filteredEquipment.map((o) => (
-                            <option key={o} value={o}>
-                              {o}
-                            </option>
-                          ))}
-
-                          <option value="__manual__">Other (manual)</option>
-                        </select>
-
-                        {values[f.field] === '__manual__' && (
-                          <input
-                            className={`${common} mt-2`}
-                            placeholder="Enter equipment"
-                            value={values.__manual_equipment || ''}
-                            onChange={(e) =>
-                              setValues((v) => ({ ...v, __manual_equipment: e.target.value }))
-                            }
-                          />
-                        )}
-                      </>
-                    ) : (
-                      <input
+                  {/* ✅ Equipment select (filtered) + manual option always works */}
+                  {rule.kind === 'select' && rule.source === 'equipment' && (
+                    <>
+                      <select
                         className={common}
-                        placeholder="Enter equipment"
                         value={values[f.field] || ''}
-                        onChange={(e) => setValues((v) => ({ ...v, [f.field]: e.target.value }))}
-                      />
-                    ))}
+                        onChange={(e) =>
+                          setValues((v) => ({
+                            ...v,
+                            [f.field]: e.target.value,
+                            ...(e.target.value !== '__manual__' ? { __manual_equipment: '' } : {}),
+                          }))
+                        }
+                      >
+                        <option value="">-</option>
+                        {filteredEquipment.map((o) => (
+                          <option key={o} value={o}>
+                            {o}
+                          </option>
+                        ))}
+                        <option value="__manual__">Other (manual)</option>
+                      </select>
 
-                  {rule.kind === 'select' &&
-                    rule.source === 'location' &&
-                    (locationList.length > 0 ? (
-                      <>
-                        <select
-                          className={common}
-                          value={values[f.field] || ''}
-                          onChange={(e) => setValues((v) => ({ ...v, [f.field]: e.target.value }))}
-                        >
-                          <option value="">-</option>
-                          {locationList.map((o) => (
-                            <option key={o} value={o}>
-                              {o}
-                            </option>
-                          ))}
-                          <option value="__manual__">Other (manual)</option>
-                        </select>
-                        {values[f.field] === '__manual__' && (
-                          <input
-                            className={`${common} mt-2`}
-                            placeholder="Enter location"
-                            value={values.__manual_location || ''}
-                            onChange={(e) =>
-                              setValues((v) => ({ ...v, __manual_location: e.target.value }))
-                            }
-                          />
-                        )}
-                      </>
-                    ) : (
-                      <input
+                      {values[f.field] === '__manual__' && (
+                        <input
+                          className={`${common} mt-2`}
+                          placeholder="Enter equipment"
+                          value={values.__manual_equipment || ''}
+                          onChange={(e) =>
+                            setValues((v) => ({ ...v, __manual_equipment: e.target.value }))
+                          }
+                        />
+                      )}
+                    </>
+                  )}
+
+                  {/* ✅ Location select + manual option */}
+                  {rule.kind === 'select' && rule.source === 'location' && (
+                    <>
+                      <select
                         className={common}
-                        placeholder="Enter location"
                         value={values[f.field] || ''}
-                        onChange={(e) => setValues((v) => ({ ...v, [f.field]: e.target.value }))}
-                      />
-                    ))}
+                        onChange={(e) =>
+                          setValues((v) => ({
+                            ...v,
+                            [f.field]: e.target.value,
+                            ...(e.target.value !== '__manual__' ? { __manual_location: '' } : {}),
+                          }))
+                        }
+                      >
+                        <option value="">-</option>
+                        {locationList.map((o) => (
+                          <option key={o} value={o}>
+                            {o}
+                          </option>
+                        ))}
+                        <option value="__manual__">Other (manual)</option>
+                      </select>
+
+                      {values[f.field] === '__manual__' && (
+                        <input
+                          className={`${common} mt-2`}
+                          placeholder="Enter location"
+                          value={values.__manual_location || ''}
+                          onChange={(e) =>
+                            setValues((v) => ({ ...v, __manual_location: e.target.value }))
+                          }
+                        />
+                      )}
+                    </>
+                  )}
 
                   {rule.kind === 'select' && (rule as any).options && (
                     <select
@@ -397,102 +402,104 @@ export default function Activity() {
               );
             })}
           </div>
-        </div>
 
-        {activity === 'Development' && (sub === 'Rehab' || sub === 'Ground Support') && (
-          <div className="mt-4">
-            <h3 className="text-sm font-semibold mb-2">Bolts</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="space-y-2">
-                  <div className="text-xs font-semibold">Bolt {i + 1}</div>
+          {/* ✅ Bolts inside the card (white background) */}
+          {activity === 'Development' && (sub === 'Rehab' || sub === 'Ground Support') && (
+            <div className="pt-4 border-t">
+              <h3 className="text-sm font-semibold mb-3">Bolts</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="space-y-2">
+                    <div className="text-xs font-semibold">Bolt {i + 1}</div>
 
-                  <div>
-                    <label className="block text-xs font-medium mb-1">Bolt Length (m)</label>
-                    <select
-                      className="input"
-                      value={boltInputs[i].length}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setBoltInputs((prev) =>
-                          prev.map((b, j) =>
-                            j === i
-                              ? {
-                                  ...b,
-                                  length: val,
-                                  lengthOther: val === 'Other' ? b.lengthOther : '',
-                                }
-                              : b,
-                          ),
-                        );
-                      }}
-                    >
-                      <option value="">-</option>
-                      <option value="1.8m">1.8</option>
-                      <option value="2.4m">2.4</option>
-                      <option value="3.0m">3.0</option>
-                      <option value="6.0m">6.0</option>
-                      <option value="Other">Other</option>
-                    </select>
-                    {boltInputs[i].length === 'Other' && (
-                      <input
-                        className="input mt-1"
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        placeholder="Enter length (m)"
-                        value={boltInputs[i].lengthOther}
+                    <div>
+                      <label className="block text-xs font-medium mb-1">Bolt Length (m)</label>
+                      <select
+                        className="input"
+                        value={boltInputs[i].length}
                         onChange={(e) => {
                           const val = e.target.value;
                           setBoltInputs((prev) =>
-                            prev.map((b, j) => (j === i ? { ...b, lengthOther: val } : b)),
+                            prev.map((b, j) =>
+                              j === i
+                                ? {
+                                    ...b,
+                                    length: val,
+                                    lengthOther: val === 'Other' ? b.lengthOther : '',
+                                  }
+                                : b,
+                            ),
+                          );
+                        }}
+                      >
+                        <option value="">-</option>
+                        <option value="1.8m">1.8</option>
+                        <option value="2.4m">2.4</option>
+                        <option value="3.0m">3.0</option>
+                        <option value="6.0m">6.0</option>
+                        <option value="Other">Other</option>
+                      </select>
+
+                      {boltInputs[i].length === 'Other' && (
+                        <input
+                          className="input mt-1"
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          placeholder="Enter length (m)"
+                          value={boltInputs[i].lengthOther}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setBoltInputs((prev) =>
+                              prev.map((b, j) => (j === i ? { ...b, lengthOther: val } : b)),
+                            );
+                          }}
+                        />
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium mb-1">Bolt Type</label>
+                      <select
+                        className="input"
+                        value={boltInputs[i].type}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setBoltInputs((prev) =>
+                            prev.map((b, j) => (j === i ? { ...b, type: val } : b)),
+                          );
+                        }}
+                      >
+                        <option value="">-</option>
+                        <option value="Friction">Friction</option>
+                        <option value="Mechanical">Mechanical</option>
+                        <option value="Resin">Resin</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium mb-1">No. of Bolts</label>
+                      <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="1"
+                        inputMode="numeric"
+                        value={boltInputs[i].count}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setBoltInputs((prev) =>
+                            prev.map((b, j) => (j === i ? { ...b, count: val } : b)),
                           );
                         }}
                       />
-                    )}
+                    </div>
                   </div>
-
-                  <div>
-                    <label className="block text-xs font-medium mb-1">Bolt Type</label>
-                    <select
-                      className="input"
-                      value={boltInputs[i].type}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setBoltInputs((prev) =>
-                          prev.map((b, j) => (j === i ? { ...b, type: val } : b)),
-                        );
-                      }}
-                    >
-                      <option value="">-</option>
-                      <option value="Friction">Friction</option>
-                      <option value="Mechanical">Mechanical</option>
-                      <option value="Resin">Resin</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium mb-1">No. of Bolts</label>
-                    <input
-                      className="input"
-                      type="number"
-                      min="0"
-                      step="1"
-                      inputMode="numeric"
-                      value={boltInputs[i].count}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setBoltInputs((prev) =>
-                          prev.map((b, j) => (j === i ? { ...b, count: val } : b)),
-                        );
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <div className="sticky bottom-0 left-0 right-0 bg-white border-t">
