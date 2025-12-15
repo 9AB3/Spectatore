@@ -6,9 +6,11 @@ import { useNavigate } from 'react-router-dom';
 import useToast from '../hooks/useToast';
 import { loadEquipment, loadLocations } from '../lib/datalists';
 
-/**
- * Authoritative equipment → activity mapping
- */
+type Field = { field: string; required: number; unit: string; input: string };
+
+type EquipRow = { id?: number; type: string; equipment_id: string };
+
+// Authoritative equipment → activity mapping
 const EQUIPMENT_ACTIVITY_MAP: Record<string, string[]> = {
   Truck: ['Hauling'],
   Loader: ['Loading'],
@@ -18,8 +20,6 @@ const EQUIPMENT_ACTIVITY_MAP: Record<string, string[]> = {
   Agi: ['Development'],
   'Charge Rig': ['Charging'],
 };
-
-type Field = { field: string; required: number; unit: string; input: string };
 
 function parseRule(input: string) {
   const [kind, rest] = input.split('|', 2);
@@ -43,10 +43,6 @@ function parseRule(input: string) {
   return { kind: 'text' };
 }
 
-function equipmentAllowedForActivity(type: string, activity: string) {
-  return EQUIPMENT_ACTIVITY_MAP[type]?.includes(activity) ?? false;
-}
-
 export default function Activity() {
   const nav = useNavigate();
   const { setMsg, Toast } = useToast();
@@ -55,7 +51,7 @@ export default function Activity() {
   const [sub, setSub] = useState<string>('');
   const [fields, setFields] = useState<Field[]>([]);
   const [values, setValues] = useState<Record<string, any>>({});
-  const [equipmentList, setEquipmentList] = useState<string[]>([]);
+  const [equipmentRows, setEquipmentRows] = useState<EquipRow[]>([]);
   const [locationList, setLocationList] = useState<string[]>([]);
 
   const [boltInputs, setBoltInputs] = useState<
@@ -66,29 +62,46 @@ export default function Activity() {
     { length: '', lengthOther: '', type: '', count: '' },
   ]);
 
-  // Load equipment/location lists
+  // Load equipment/location lists (online -> cache; offline -> cache)
   useEffect(() => {
     (async () => {
       const db = await getDB();
       const session = await db.get('session', 'auth');
       const uid = session?.user_id || 0;
 
-      const eq = await loadEquipment(uid);
-      const loc = await loadLocations(uid);
+      // 1) show cached immediately (includes type + equipment_id)
+      const cachedEq = (await db.getAll('equipment')) as any[];
+      setEquipmentRows(
+        (cachedEq || [])
+          .map((r) => ({ equipment_id: r.equipment_id, type: r.type, id: r.id }))
+          .filter((r) => r.equipment_id && r.type),
+      );
 
-      setEquipmentList(eq);
+      // 2) refresh from network (also updates the IDB store)
+      await loadEquipment(uid);
+
+      // 3) re-read updated cache
+      const updatedEq = (await (await getDB()).getAll('equipment')) as any[];
+      setEquipmentRows(
+        (updatedEq || [])
+          .map((r) => ({ equipment_id: r.equipment_id, type: r.type, id: r.id }))
+          .filter((r) => r.equipment_id && r.type),
+      );
+
+      const loc = await loadLocations(uid);
       setLocationList(loc);
     })();
   }, []);
 
-  // Auto-pick first sub-activity
+  // When activity changes: auto-pick the first sub-activity
   useEffect(() => {
     const group: any = (data as any)[activity] || {};
     const subKeys = Object.keys(group);
-    setSub(subKeys.length ? subKeys[0] : '');
+    const first = subKeys.length ? subKeys[0] : '';
+    setSub(first);
   }, [activity]);
 
-  // Regenerate fields
+  // Whenever activity or sub changes: regenerate the form fields
   useEffect(() => {
     const group: any = (data as any)[activity] || {};
     const list: Field[] = group ? group[sub] || group[''] || [] : [];
@@ -99,7 +112,8 @@ export default function Activity() {
         : list;
 
     setFields(filtered);
-    setValues({});
+    setValues({}); // reset form inputs for the new schema
+
     setBoltInputs([
       { length: '', lengthOther: '', type: '', count: '' },
       { length: '', lengthOther: '', type: '', count: '' },
@@ -129,61 +143,125 @@ export default function Activity() {
 
   const canFinish =
     Object.keys(errors).length === 0 &&
-    fields.every((f) => !f.required || values[f.field] !== undefined);
+    fields.every((f) => !f.required || (values[f.field] !== undefined && values[f.field] !== ''));
 
   async function finishTask() {
     if (!canFinish) {
       setMsg('Please complete required fields');
       return;
     }
-
     const db = await getDB();
+    // normalize manual entries for equipment/location
+    const baseValues: any = { ...values };
+    for (const key of Object.keys(baseValues)) {
+      if (baseValues[key] === '__manual__') {
+        if (key === 'Equipment' && baseValues['__manual_equipment'])
+          baseValues[key] = baseValues['__manual_equipment'];
+        if (key === 'Location' && baseValues['__manual_location'])
+          baseValues[key] = baseValues['__manual_location'];
+      }
+    }
+
     const shift =
       (await db.get('shift', 'current')) ||
       JSON.parse(localStorage.getItem('spectatore-shift') || '{}');
     const session = await db.get('session', 'auth');
 
-    await db.add('activities', {
-      payload: { activity, sub, values },
-      shiftDate: shift?.date,
-      dn: shift?.dn,
-      user_id: session?.user_id,
-      ts: Date.now(),
-    });
+    const isDevRehabOrGS =
+      activity === 'Development' && (sub === 'Rehab' || sub === 'Ground Support');
+
+    if (!isDevRehabOrGS) {
+      await db.add('activities', {
+        payload: { activity, sub, values: baseValues },
+        shiftDate: shift?.date,
+        dn: shift?.dn,
+        user_id: session?.user_id,
+        ts: Date.now(),
+      });
+    } else {
+      const records: any[] = [];
+
+      const cleanBase = () => {
+        const v: any = { ...baseValues };
+        delete v.__manual_equipment;
+        delete v.__manual_location;
+        return v;
+      };
+
+      const nonEmptyGroups = (boltInputs || []).filter((b) => {
+        const hasLength =
+          (b.length && b.length !== 'Other') || (b.length === 'Other' && b.lengthOther);
+        const hasType = !!b.type;
+        const hasCount = !!b.count && Number(b.count) > 0;
+        return hasLength || hasType || hasCount;
+      });
+
+      if (nonEmptyGroups.length === 0) {
+        records.push(cleanBase());
+      } else {
+        nonEmptyGroups.forEach((b, idx) => {
+          const vals: any = cleanBase();
+          const lengthValue =
+            b.length === 'Other'
+              ? b.lengthOther
+                ? `${b.lengthOther}m`
+                : ''
+              : b.length;
+
+          if (lengthValue) vals['Bolt Length'] = lengthValue;
+          if (b.type) vals['Bolt Type'] = b.type;
+          if (b.count) vals['No. of Bolts'] = Number(b.count);
+
+          if (idx > 0) {
+            if ('Agi Volume' in vals) delete vals['Agi Volume'];
+            if ('Spray Volume' in vals) delete vals['Spray Volume'];
+          }
+
+          records.push(vals);
+        });
+      }
+
+      for (const valuesToSave of records) {
+        await db.add('activities', {
+          payload: { activity, sub, values: valuesToSave },
+          shiftDate: shift?.date,
+          dn: shift?.dn,
+          user_id: session?.user_id,
+          ts: Date.now(),
+        });
+      }
+    }
 
     setMsg('task saved successfully');
     setTimeout(() => nav('/Shift'), 500);
   }
 
-  const filteredEquipment = equipmentList.filter((e) =>
-    equipmentAllowedForActivity(e, activity),
-  );
+  const subKeys = Object.keys((data as any)[activity] || {});
+
+  // Filter equipment by selected Activity using equipment TYPE
+  const filteredEquipment = equipmentRows
+    .filter((r) => (EQUIPMENT_ACTIVITY_MAP[r.type] || []).includes(activity))
+    .map((r) => r.equipment_id);
 
   return (
     <div className="min-h-screen flex flex-col">
       <Toast />
       <Header />
-
       <div className="p-4 max-w-2xl mx-auto w-full flex-1">
         <div className="card space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium">Activity</label>
-              <select
-                className="input"
-                value={activity}
-                onChange={(e) => setActivity(e.target.value)}
-              >
+              <select className="input" value={activity} onChange={(e) => setActivity(e.target.value)}>
                 {activityKeys.map((k) => (
                   <option key={k}>{k}</option>
                 ))}
               </select>
             </div>
-
             <div>
               <label className="block text-sm font-medium">Sub-Activity</label>
               <select className="input" value={sub} onChange={(e) => setSub(e.target.value)}>
-                {Object.keys((data as any)[activity] || {}).map((k) => (
+                {subKeys.map((k) => (
                   <option key={k}>{k}</option>
                 ))}
               </select>
@@ -194,38 +272,101 @@ export default function Activity() {
             {fields.map((f, idx) => {
               const rule = parseRule(f.input);
               const err = errors[f.field];
+              const common = 'input';
+
               return (
                 <div key={idx}>
                   <label className="block text-sm font-medium">
                     {f.field}
                     {f.required ? ' *' : ''}{' '}
-                    {f.unit && <span className="text-xs text-slate-500">({f.unit})</span>}
+                    {f.unit ? <span className="text-xs text-slate-500">({f.unit})</span> : null}
                   </label>
 
-                  {rule.kind === 'select' && rule.source === 'equipment' && (
-                    <select
-                      className="input"
-                      value={values[f.field] || ''}
-                      onChange={(e) => setValues((v) => ({ ...v, [f.field]: e.target.value }))}
-                    >
-                      <option value="">-</option>
-                      {filteredEquipment.map((o) => (
-                        <option key={o} value={o}>
-                          {o}
-                        </option>
-                      ))}
-                      <option value="__manual__">Other (manual)</option>
-                    </select>
-                  )}
+                  {rule.kind === 'select' &&
+                    rule.source === 'equipment' &&
+                    (equipmentRows.length > 0 ? (
+                      <>
+                        <select
+                          className={common}
+                          value={values[f.field] || ''}
+                          onChange={(e) => setValues((v) => ({ ...v, [f.field]: e.target.value }))}
+                        >
+                          <option value="">-</option>
 
-                  {rule.kind === 'select' && rule.source === 'location' && (
+                          {filteredEquipment.map((o) => (
+                            <option key={o} value={o}>
+                              {o}
+                            </option>
+                          ))}
+
+                          <option value="__manual__">Other (manual)</option>
+                        </select>
+
+                        {values[f.field] === '__manual__' && (
+                          <input
+                            className={`${common} mt-2`}
+                            placeholder="Enter equipment"
+                            value={values.__manual_equipment || ''}
+                            onChange={(e) =>
+                              setValues((v) => ({ ...v, __manual_equipment: e.target.value }))
+                            }
+                          />
+                        )}
+                      </>
+                    ) : (
+                      <input
+                        className={common}
+                        placeholder="Enter equipment"
+                        value={values[f.field] || ''}
+                        onChange={(e) => setValues((v) => ({ ...v, [f.field]: e.target.value }))}
+                      />
+                    ))}
+
+                  {rule.kind === 'select' &&
+                    rule.source === 'location' &&
+                    (locationList.length > 0 ? (
+                      <>
+                        <select
+                          className={common}
+                          value={values[f.field] || ''}
+                          onChange={(e) => setValues((v) => ({ ...v, [f.field]: e.target.value }))}
+                        >
+                          <option value="">-</option>
+                          {locationList.map((o) => (
+                            <option key={o} value={o}>
+                              {o}
+                            </option>
+                          ))}
+                          <option value="__manual__">Other (manual)</option>
+                        </select>
+                        {values[f.field] === '__manual__' && (
+                          <input
+                            className={`${common} mt-2`}
+                            placeholder="Enter location"
+                            value={values.__manual_location || ''}
+                            onChange={(e) =>
+                              setValues((v) => ({ ...v, __manual_location: e.target.value }))
+                            }
+                          />
+                        )}
+                      </>
+                    ) : (
+                      <input
+                        className={common}
+                        placeholder="Enter location"
+                        value={values[f.field] || ''}
+                        onChange={(e) => setValues((v) => ({ ...v, [f.field]: e.target.value }))}
+                      />
+                    ))}
+
+                  {rule.kind === 'select' && (rule as any).options && (
                     <select
-                      className="input"
+                      className={common}
                       value={values[f.field] || ''}
                       onChange={(e) => setValues((v) => ({ ...v, [f.field]: e.target.value }))}
                     >
                       <option value="">-</option>
-                      {locationList.map((o) => (
+                      {(rule as any).options.map((o: string) => (
                         <option key={o} value={o}>
                           {o}
                         </option>
@@ -235,15 +376,17 @@ export default function Activity() {
 
                   {rule.kind === 'number' && (
                     <input
-                      className="input"
+                      className={common}
+                      inputMode="decimal"
+                      placeholder={f.unit ? `Unit: ${f.unit}` : ''}
                       value={values[f.field] || ''}
                       onChange={(e) => setValues((v) => ({ ...v, [f.field]: e.target.value }))}
                     />
                   )}
 
-                  {rule.kind === 'text' && (
+                  {rule.kind !== 'select' && rule.kind !== 'number' && (
                     <input
-                      className="input"
+                      className={common}
                       value={values[f.field] || ''}
                       onChange={(e) => setValues((v) => ({ ...v, [f.field]: e.target.value }))}
                     />
@@ -255,13 +398,111 @@ export default function Activity() {
             })}
           </div>
         </div>
+
+        {activity === 'Development' && (sub === 'Rehab' || sub === 'Ground Support') && (
+          <div className="mt-4">
+            <h3 className="text-sm font-semibold mb-2">Bolts</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="space-y-2">
+                  <div className="text-xs font-semibold">Bolt {i + 1}</div>
+
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Bolt Length (m)</label>
+                    <select
+                      className="input"
+                      value={boltInputs[i].length}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setBoltInputs((prev) =>
+                          prev.map((b, j) =>
+                            j === i
+                              ? {
+                                  ...b,
+                                  length: val,
+                                  lengthOther: val === 'Other' ? b.lengthOther : '',
+                                }
+                              : b,
+                          ),
+                        );
+                      }}
+                    >
+                      <option value="">-</option>
+                      <option value="1.8m">1.8</option>
+                      <option value="2.4m">2.4</option>
+                      <option value="3.0m">3.0</option>
+                      <option value="6.0m">6.0</option>
+                      <option value="Other">Other</option>
+                    </select>
+                    {boltInputs[i].length === 'Other' && (
+                      <input
+                        className="input mt-1"
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        placeholder="Enter length (m)"
+                        value={boltInputs[i].lengthOther}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setBoltInputs((prev) =>
+                            prev.map((b, j) => (j === i ? { ...b, lengthOther: val } : b)),
+                          );
+                        }}
+                      />
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Bolt Type</label>
+                    <select
+                      className="input"
+                      value={boltInputs[i].type}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setBoltInputs((prev) =>
+                          prev.map((b, j) => (j === i ? { ...b, type: val } : b)),
+                        );
+                      }}
+                    >
+                      <option value="">-</option>
+                      <option value="Friction">Friction</option>
+                      <option value="Mechanical">Mechanical</option>
+                      <option value="Resin">Resin</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium mb-1">No. of Bolts</label>
+                    <input
+                      className="input"
+                      type="number"
+                      min="0"
+                      step="1"
+                      inputMode="numeric"
+                      value={boltInputs[i].count}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setBoltInputs((prev) =>
+                          prev.map((b, j) => (j === i ? { ...b, count: val } : b)),
+                        );
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      <div className="sticky bottom-0 bg-white border-t">
-        <div className="max-w-2xl mx-auto p-4">
-          <button className="btn btn-primary w-full" onClick={finishTask} disabled={!canFinish}>
+      <div className="sticky bottom-0 left-0 right-0 bg-white border-t">
+        <div className="max-w-2xl mx-auto p-4 flex gap-2">
+          <button className="btn btn-primary flex-1" onClick={finishTask} disabled={!canFinish}>
             FINISH TASK
           </button>
+          <a className="btn flex-1 text-center" href="/Shift">
+            BACK
+          </a>
         </div>
       </div>
     </div>

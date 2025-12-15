@@ -1,9 +1,11 @@
 import Header from '../components/Header';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { getDB } from '../lib/idb';
 import useToast from '../hooks/useToast';
 import { loadEquipment, loadLocations } from '../lib/datalists';
+
+type EquipRow = { id?: number; type: string; equipment_id: string };
 
 /**
  * Authoritative equipment → activity mapping
@@ -25,7 +27,7 @@ function isEquipIdValid(s: string) {
   return /^[A-Za-z]{2}\d{2}$/.test(s);
 }
 
-function activityForEquipment(type: string): string {
+function activityForType(type: string): string {
   const acts = EQUIPMENT_ACTIVITY_MAP[type];
   return acts && acts.length ? acts.join(', ') : '—';
 }
@@ -35,7 +37,7 @@ export default function EquipmentLocations() {
   const [type, setType] = useState(EQUIP_TYPES[0]);
   const [equipId, setEquipId] = useState('');
   const [location, setLocation] = useState('');
-  const [equipList, setEquipList] = useState<string[]>([]);
+  const [equipRows, setEquipRows] = useState<EquipRow[]>([]);
   const [locList, setLocList] = useState<string[]>([]);
   const [online, setOnline] = useState(navigator.onLine);
 
@@ -49,15 +51,48 @@ export default function EquipmentLocations() {
     };
   }, []);
 
+  async function refreshLists(uid: number) {
+    // show cached immediately
+    const db = await getDB();
+    const cachedEq = (await db.getAll('equipment')) as any[];
+    setEquipRows(
+      (cachedEq || [])
+        .map((r) => ({ id: r.id, type: r.type, equipment_id: r.equipment_id }))
+        .filter((r) => r.equipment_id && r.type),
+    );
+
+    // refresh from network (also updates cache)
+    await loadEquipment(uid);
+    await loadLocations(uid);
+
+    // re-read cache
+    const db2 = await getDB();
+    const updatedEq = (await db2.getAll('equipment')) as any[];
+    setEquipRows(
+      (updatedEq || [])
+        .map((r) => ({ id: r.id, type: r.type, equipment_id: r.equipment_id }))
+        .filter((r) => r.equipment_id && r.type),
+    );
+
+    setLocList(await loadLocations(uid));
+  }
+
   useEffect(() => {
     (async () => {
       const db = await getDB();
       const session = await db.get('session', 'auth');
       const uid = session?.user_id || 0;
-      setEquipList(await loadEquipment(uid));
-      setLocList(await loadLocations(uid));
+      await refreshLists(uid);
     })();
   }, []);
+
+  const equipListSorted = useMemo(() => {
+    return [...equipRows].sort((a, b) => {
+      const t = (a.type || '').localeCompare(b.type || '');
+      if (t !== 0) return t;
+      return (a.equipment_id || '').localeCompare(b.equipment_id || '');
+    });
+  }, [equipRows]);
 
   async function submit() {
     if (!online) {
@@ -92,9 +127,7 @@ export default function EquipmentLocations() {
       setEquipId('');
       setLocation('');
 
-      // Refresh lists
-      setEquipList(await loadEquipment(user_id));
-      setLocList(await loadLocations(user_id));
+      await refreshLists(user_id || 0);
     } catch {
       setMsg('Submission failed');
     }
@@ -121,7 +154,7 @@ export default function EquipmentLocations() {
         body: JSON.stringify({ user_id, equipment_id: equipmentId }),
       });
 
-      setEquipList(await loadEquipment(user_id));
+      await refreshLists(user_id);
     } catch {
       setMsg('Failed to delete equipment');
     }
@@ -176,7 +209,7 @@ export default function EquipmentLocations() {
             />
           </div>
           <div className="text-xs text-slate-500 mt-1">
-            Activity: <strong>{activityForEquipment(type)}</strong>
+            Activity: <strong>{activityForType(type)}</strong>
           </div>
         </div>
 
@@ -210,26 +243,26 @@ export default function EquipmentLocations() {
         <h3 className="font-semibold mb-2">Your equipment and locations</h3>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
-            <div className="font-medium mb-1">Equipment IDs</div>
+            <div className="font-medium mb-1">Equipment</div>
             <ul className="space-y-1">
-              {equipList.map((e) => (
-                <li key={e} className="flex items-center justify-between">
+              {equipListSorted.map((e) => (
+                <li key={e.equipment_id} className="flex items-center justify-between">
                   <span>
-                    {e}{' '}
+                    {e.equipment_id}{' '}
                     <span className="text-xs text-slate-500">
-                      ({activityForEquipment(type)})
+                      ({e.type} → {activityForType(e.type)})
                     </span>
                   </span>
                   <button
                     type="button"
                     className="text-xs text-red-500 hover:text-red-700"
-                    onClick={() => deleteEquipment(e)}
+                    onClick={() => deleteEquipment(e.equipment_id)}
                   >
                     ✕
                   </button>
                 </li>
               ))}
-              {equipList.length === 0 && (
+              {equipListSorted.length === 0 && (
                 <div className="text-slate-500">No equipment yet</div>
               )}
             </ul>
@@ -250,9 +283,7 @@ export default function EquipmentLocations() {
                   </button>
                 </li>
               ))}
-              {locList.length === 0 && (
-                <div className="text-slate-500">No locations yet</div>
-              )}
+              {locList.length === 0 && <div className="text-slate-500">No locations yet</div>}
             </ul>
           </div>
         </div>
