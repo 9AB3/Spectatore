@@ -39,10 +39,12 @@ export default function Register() {
         );
         setMsg('Registered and signed in');
         nav('/shift');
-      } else {
-        setMsg('Registered. Check your email for the confirmation code, then sign in.');
-        nav('/Home');
-      }
+     } else {
+  setMsg('Registered. Check your email for the confirmation code.');
+  nav(`/ConfirmEmail?email=${encodeURIComponent(email)}`);
+}
+
+
     } catch (e: any) {
       setMsg(e?.message || 'Failed to register');
     }
