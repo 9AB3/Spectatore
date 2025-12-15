@@ -163,6 +163,26 @@ export default function Activity() {
       }
     }
 
+    // ✅ FIX: prevent "SP to Truck/SP to SP" collisions between Dev vs Production loading
+    // This avoids Dev rehandle buckets being attributed to Production (stope) in downstream rollups.
+    if (activity === 'Loading') {
+      const subLc = String(sub || '').toLowerCase();
+      const prefix = subLc.includes('dev')
+        ? 'Dev '
+        : subLc.includes('prod') || subLc.includes('stope')
+          ? 'Stope '
+          : '';
+      if (prefix) {
+        const keysToSplit = ['SP to Truck', 'SP to SP'];
+        for (const k of keysToSplit) {
+          if (k in baseValues) {
+            baseValues[`${prefix}${k}`] = baseValues[k];
+            delete baseValues[k];
+          }
+        }
+      }
+    }
+
     const shift =
       (await db.get('shift', 'current')) ||
       JSON.parse(localStorage.getItem('spectatore-shift') || '{}');
@@ -172,6 +192,10 @@ export default function Activity() {
       activity === 'Development' && (sub === 'Rehab' || sub === 'Ground Support');
 
     if (!isDevRehabOrGS) {
+      // ✅ keep the stored payload clean (don’t persist helper/manual fields)
+      delete baseValues.__manual_equipment;
+      delete baseValues.__manual_location;
+
       await db.add('activities', {
         payload: { activity, sub, values: baseValues },
         shiftDate: shift?.date,
@@ -258,11 +282,7 @@ export default function Activity() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium">Activity</label>
-              <select
-                className="input"
-                value={activity}
-                onChange={(e) => setActivity(e.target.value)}
-              >
+              <select className="input" value={activity} onChange={(e) => setActivity(e.target.value)}>
                 {activityKeys.map((k) => (
                   <option key={k}>{k}</option>
                 ))}
@@ -293,7 +313,7 @@ export default function Activity() {
                   </label>
 
                   {/* ✅ Equipment select (filtered) + manual option always works */}
-                  {rule.kind === 'select' && rule.source === 'equipment' && (
+                  {rule.kind === 'select' && (rule as any).source === 'equipment' && (
                     <>
                       <select
                         className={common}
@@ -320,16 +340,14 @@ export default function Activity() {
                           className={`${common} mt-2`}
                           placeholder="Enter equipment"
                           value={values.__manual_equipment || ''}
-                          onChange={(e) =>
-                            setValues((v) => ({ ...v, __manual_equipment: e.target.value }))
-                          }
+                          onChange={(e) => setValues((v) => ({ ...v, __manual_equipment: e.target.value }))}
                         />
                       )}
                     </>
                   )}
 
                   {/* ✅ Location select + manual option */}
-                  {rule.kind === 'select' && rule.source === 'location' && (
+                  {rule.kind === 'select' && (rule as any).source === 'location' && (
                     <>
                       <select
                         className={common}
@@ -356,9 +374,7 @@ export default function Activity() {
                           className={`${common} mt-2`}
                           placeholder="Enter location"
                           value={values.__manual_location || ''}
-                          onChange={(e) =>
-                            setValues((v) => ({ ...v, __manual_location: e.target.value }))
-                          }
+                          onChange={(e) => setValues((v) => ({ ...v, __manual_location: e.target.value }))}
                         />
                       )}
                     </>
@@ -421,13 +437,7 @@ export default function Activity() {
                           const val = e.target.value;
                           setBoltInputs((prev) =>
                             prev.map((b, j) =>
-                              j === i
-                                ? {
-                                    ...b,
-                                    length: val,
-                                    lengthOther: val === 'Other' ? b.lengthOther : '',
-                                  }
-                                : b,
+                              j === i ? { ...b, length: val, lengthOther: val === 'Other' ? b.lengthOther : '' } : b,
                             ),
                           );
                         }}
@@ -450,9 +460,7 @@ export default function Activity() {
                           value={boltInputs[i].lengthOther}
                           onChange={(e) => {
                             const val = e.target.value;
-                            setBoltInputs((prev) =>
-                              prev.map((b, j) => (j === i ? { ...b, lengthOther: val } : b)),
-                            );
+                            setBoltInputs((prev) => prev.map((b, j) => (j === i ? { ...b, lengthOther: val } : b)));
                           }}
                         />
                       )}
@@ -465,9 +473,7 @@ export default function Activity() {
                         value={boltInputs[i].type}
                         onChange={(e) => {
                           const val = e.target.value;
-                          setBoltInputs((prev) =>
-                            prev.map((b, j) => (j === i ? { ...b, type: val } : b)),
-                          );
+                          setBoltInputs((prev) => prev.map((b, j) => (j === i ? { ...b, type: val } : b)));
                         }}
                       >
                         <option value="">-</option>
@@ -488,9 +494,7 @@ export default function Activity() {
                         value={boltInputs[i].count}
                         onChange={(e) => {
                           const val = e.target.value;
-                          setBoltInputs((prev) =>
-                            prev.map((b, j) => (j === i ? { ...b, count: val } : b)),
-                          );
+                          setBoltInputs((prev) => prev.map((b, j) => (j === i ? { ...b, count: val } : b)));
                         }}
                       />
                     </div>
