@@ -43,8 +43,16 @@ const allowedByActivity: Record<string, string[]> = {
   ],
   'production drilling': ['Metres drilled', 'Cleanouts drilled', 'Redrills'],
   hauling: ['Total Trucks', 'Total Distance', 'Total Weight', 'Total TKMS'],
-  loading: ['Number of buckets'],
-  charging: ['No holes charged', 'Chargem', 'Charge kg', 'Cut length'],
+
+  // ✅ FIXED: Loading buckets
+  loading: [
+    'Primary Dev Buckets',
+    'Rehandle Dev Buckets',
+    'Primary Stope Buckets',
+    'Rehandle Stope Buckets',
+  ],
+
+  charging: ['No holes charged', 'Chargem', 'Charge kg', 'Cut Length'],
   hoisting: ['Ore Tonnes', 'Waste Tonnes'],
 };
 
@@ -70,7 +78,7 @@ function canonAct(name: string) {
   return activityAliases[k] || k;
 }
 
-// Display-name normalization (keep hauling labels exact)
+// Display-name normalization
 const keyDisplayMap: Record<string, string> = {
   // Hauling
   trucks: 'Total Trucks',
@@ -82,7 +90,7 @@ const keyDisplayMap: Record<string, string> = {
   tkms: 'Total TKMS',
   'total tkms': 'Total TKMS',
 
-  // Development (GS + Dev drilling)
+  // Development
   'gs drillm': 'GS Drillm',
   'no of bolts': 'No. of bolts',
   'no. of bolts': 'No. of bolts',
@@ -91,33 +99,38 @@ const keyDisplayMap: Record<string, string> = {
   'no of holes': 'No of Holes',
   'no of reamers': 'No of reamers',
   'dev drillm': 'Dev Drillm',
+  'cut length': 'Cut Length',
 
   // Production drilling
   'metres drilled': 'Metres drilled',
   'cleanouts drilled': 'Cleanouts drilled',
   redrills: 'Redrills',
 
-  // Loading
-  'number of buckets': 'Number of buckets',
+  // ✅ FIXED: Loading buckets
+  'primary dev buckets': 'Primary Dev Buckets',
+  'rehandle dev buckets': 'Rehandle Dev Buckets',
+  'primary stope buckets': 'Primary Stope Buckets',
+  'rehandle stope buckets': 'Rehandle Stope Buckets',
 
   // Charging
   'no holes charged': 'No holes charged',
   chargem: 'Chargem',
   'charge kg': 'Charge kg',
-  'cut length': 'Cut Length',
 
   // Hoisting
   'ore tonnes': 'Ore Tonnes',
   'waste tonnes': 'Waste Tonnes',
 };
+
 function displayNameFor(raw: string) {
-  const d = keyDisplayMap[lc(raw)];
-  return d || raw;
+  return keyDisplayMap[lc(raw)] || raw;
 }
+
 function isAllowedMetric(activityCanonical: string, metricDisplayName: string) {
   const list = allowedByActivity[lc(activityCanonical)];
   return !!(list && list.some((m) => lc(m) === lc(metricDisplayName)));
 }
+
 
 // ----- calendar dropdown component -----
 type CalendarDropdownProps = {
