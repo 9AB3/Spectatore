@@ -130,6 +130,10 @@ router.post('/login', (req, res) => {
         recordFailed(normEmail);
         return res.status(401).json({ error: 'invalid credentials' });
       }
+            if (!user.email_confirmed) {
+        return res.status(403).json({ error: 'EMAIL_NOT_CONFIRMED' });
+      }
+
       const token = tokenFor(user);
       res.json({ token, is_admin: !!user.is_admin, user_id: user.id });
     });
