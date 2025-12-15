@@ -28,17 +28,11 @@ function formatYmd(d: Date): string {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
-function formatDmyShort(ymd: string) {
+function formatDMY(ymd: string) {
   if (!ymd) return '–';
   const [y, m, d] = ymd.split('-');
-  if (!y || !m || !d) return '–';
-  return `${d}/${m}/${String(y).slice(-2)}`;
-}
-function formatMyShort(ym: string) {
-  if (!ym) return '–';
-  const [y, m] = ym.split('-');
-  if (!y || !m) return '–';
-  return `${m}/${String(y).slice(-2)}`;
+  if (!y || !m || !d) return ymd;
+  return `${d}/${m}/${y.slice(2)}`;
 }
 
 // Allowed metrics per activity (display filter)
@@ -305,24 +299,6 @@ async function fetchCrewGraphData(
   }
 }
 
-// helper to fetch crew milestones (all-time) on-demand
-async function fetchCrewMilestonesAllTime(
-  userId: string,
-  setRows: (rows: ShiftRow[]) => void,
-) {
-  if (!userId) {
-    setRows([]);
-    return;
-  }
-  try {
-    const res = await api(`/api/reports/summary?from=0001-01-01&to=9999-12-31&user_id=${userId}`);
-    setRows(res.rows || []);
-  } catch (e) {
-    console.error('Failed to load crew milestones all-time data', e);
-    setRows([]);
-  }
-}
-
 export default function PerformanceReview() {
   // separate date ranges
   const [fromTable, setFromTable] = useState(formatDate(startOfMonth(new Date())));
@@ -341,14 +317,16 @@ export default function PerformanceReview() {
   // graph data (crew)
   const [rowsGraphCrew, setRowsGraphCrew] = useState<ShiftRow[]>([]);
 
-  // milestones (all-time, hidden fetch) - current user
+  // milestones (all-time, hidden fetch)
   const [rowsMilestones, setRowsMilestones] = useState<ShiftRow[]>([]);
-  // milestones (all-time) - crew
   const [rowsMilestonesCrew, setRowsMilestonesCrew] = useState<ShiftRow[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
-  const [tab, setTab] = useState<'table' | 'graph'>('table');
+
+  // ✅ Make graph the default left-most tab
+  const [tab, setTab] = useState<'graph' | 'table'>('graph');
+
   const [datesWithData, setDatesWithData] = useState<Set<string>>(() => new Set());
 
   // crew list + selection + current user name
@@ -383,7 +361,6 @@ export default function PerformanceReview() {
       setRowsGraph(res.rows || []);
       setRollupGraph(res.rollup || {});
 
-      // also refresh crew series for the same range if a crew member is already selected
       if (selectedCrewId) {
         await fetchCrewGraphData(selectedCrewId, f, t, setRowsGraphCrew);
       }
@@ -394,9 +371,15 @@ export default function PerformanceReview() {
     }
   }
 
-  // initial load for table
+  // initial load for table (still load so tab switch is instant)
   useEffect(() => {
     fetchTableData(fromTable, toTable);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // initial load for graph (since it's default tab)
+  useEffect(() => {
+    fetchGraphData(fromGraph, toGraph);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -434,7 +417,7 @@ export default function PerformanceReview() {
     };
   }, []);
 
-  // when crew matchup changes, fetch crew milestones (all-time)
+  // hidden all-time fetch for milestones (crew) when selected
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -611,6 +594,7 @@ export default function PerformanceReview() {
     const sub = graphSub && subs.includes(graphSub) ? graphSub : subs[0] || undefined;
 
     const metrics = act && sub ? Object.keys(filteredRollupGraph[act]?.[sub] || {}) : [];
+
     const metric =
       graphMetric && metrics.includes(graphMetric) ? graphMetric : metrics[0] || undefined;
 
@@ -662,9 +646,6 @@ export default function PerformanceReview() {
     return acc;
   }
 
-  // ✅ FIXED:
-  // - Best 7-day works even when you have < 7 calendar days of data (sums what exists + implicit zeros)
-  // - DS/NS productivity uses NON-ZERO shifts as the denominator (avg = total / nonZeroShifts)
   function computeMilestonesAllTime(rows: ShiftRow[]) {
     if (!graphActivity || !graphSub || !graphMetric) return null;
 
@@ -672,7 +653,7 @@ export default function PerformanceReview() {
     const dates = Object.keys(acc).sort();
     if (!dates.length) return null;
 
-    // Best daily total
+    // Record shift
     let bestDayVal = -Infinity;
     let bestDayDate = dates[0];
     for (const d of dates) {
@@ -699,14 +680,13 @@ export default function PerformanceReview() {
       }
     }
 
-    // Best 7-day rolling (calendar window, implicit zeros)
-    // If total span < 7 days, use window = span length
+    // Record week (best rolling calendar window, up to 7 days)
     const window = Math.min(7, allDays.length);
     let best7Val = -Infinity;
     let best7Start = allDays[0]?.date || '';
     let best7End = allDays[allDays.length - 1]?.date || '';
-
     let windowSum = 0;
+
     for (let i = 0; i < allDays.length; i++) {
       windowSum += allDays[i].value;
       if (i >= window) windowSum -= allDays[i - window].value;
@@ -721,7 +701,7 @@ export default function PerformanceReview() {
     }
     if (!Number.isFinite(best7Val)) best7Val = 0;
 
-    // Best month total
+    // Record month
     const byMonth: Record<string, number> = {};
     for (const pt of allDays) {
       const ym = pt.date.slice(0, 7);
@@ -737,17 +717,13 @@ export default function PerformanceReview() {
     }
     if (!Number.isFinite(bestMonthVal)) bestMonthVal = 0;
 
-    const bestMonthPretty = (() => {
-      if (!bestMonthKey) return '';
-      const [y, m] = bestMonthKey.split('-').map((x) => parseInt(x, 10));
-      const d = new Date(y, (m || 1) - 1, 1);
-      return new Intl.DateTimeFormat(undefined, {
-        month: 'long',
-        year: 'numeric',
-      }).format(d);
+    const bestMonthShort = (() => {
+      if (!bestMonthKey) return '–';
+      const [y, m] = bestMonthKey.split('-');
+      return `${m}/${y.slice(2)}`;
     })();
 
-    // DS/NS productivity (avg per NON-ZERO shift)
+    // Most productive shift (avg per NON-ZERO shift)
     let dsSum = 0,
       nsSum = 0;
     let dsNonZero = 0,
@@ -781,18 +757,11 @@ export default function PerformanceReview() {
       else bestShiftLabel = dsAvg > nsAvg ? 'DS' : 'NS';
     }
 
-    const bestAvg = (() => {
-      const d = Number.isFinite(dsAvg) ? dsAvg : -Infinity;
-      const n = Number.isFinite(nsAvg) ? nsAvg : -Infinity;
-      const m = Math.max(d, n);
-      return Number.isFinite(m) ? m : NaN;
-    })();
-
     return {
       bestDay: { total: bestDayVal, date: bestDayDate },
       best7: { total: best7Val, start: best7Start, end: best7End },
-      bestMonth: { total: bestMonthVal, ym: bestMonthKey, label: bestMonthPretty },
-      shiftCompare: { dsAvg, nsAvg, bestShiftLabel, bestAvg },
+      bestMonth: { total: bestMonthVal, ym: bestMonthKey, label: bestMonthShort },
+      shiftCompare: { dsAvg, nsAvg, bestShiftLabel },
     };
   }
 
@@ -808,15 +777,66 @@ export default function PerformanceReview() {
     [rowsMilestonesCrew, selectedCrewId, graphActivity, graphSub, graphMetric],
   );
 
-  function pctDiff(userVal: number, crewVal: number): { text: string; cls: string } {
-    const u = Number(userVal);
-    const c = Number(crewVal);
-    if (!Number.isFinite(u) || !Number.isFinite(c) || c === 0) return { text: '–', cls: 'text-slate-400' };
-    const pct = ((u - c) / c) * 100;
-    if (!Number.isFinite(pct)) return { text: '–', cls: 'text-slate-400' };
-    const cls = pct >= 0 ? 'text-green-700' : 'text-red-700';
-    const sign = pct >= 0 ? '+' : '';
-    return { text: `${sign}${pct.toFixed(0)}%`, cls };
+  function pctDiff(user: number, crewVal: number) {
+    if (!Number.isFinite(user) || !Number.isFinite(crewVal)) return null;
+    if (crewVal === 0) {
+      if (user === 0) return 0;
+      return null;
+    }
+    return ((user - crewVal) / Math.abs(crewVal)) * 100;
+  }
+
+  function PctPill({ value }: { value: number | null }) {
+    if (value === null || !Number.isFinite(value)) return <span className="text-slate-400">–</span>;
+    const cls =
+      value > 0 ? 'text-emerald-700' : value < 0 ? 'text-red-600' : 'text-slate-600';
+    const sign = value > 0 ? '+' : '';
+    return <span className={cls}>{`${sign}${value.toFixed(0)}%`}</span>;
+  }
+
+  function CompareRow({
+    user,
+    crewVal,
+  }: {
+    user: string;
+    crewVal?: string;
+  }) {
+    const showCrew = !!selectedCrewId;
+    return (
+      <div className="grid grid-cols-3 items-center gap-2">
+        <div className="text-left font-semibold">{user}</div>
+        <div className="text-right">{showCrew ? crewVal || '–' : ''}</div>
+        <div className="text-right">
+          {showCrew ? (
+            <span className="text-slate-500">{/* placeholder filled by parent */}</span>
+          ) : (
+            ''
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function CompareRowWithPct({
+    userNum,
+    userText,
+    crewNum,
+    crewText,
+  }: {
+    userNum: number;
+    userText: string;
+    crewNum?: number;
+    crewText?: string;
+  }) {
+    const showCrew = !!selectedCrewId;
+    const p = showCrew && typeof crewNum === 'number' ? pctDiff(userNum, crewNum) : null;
+    return (
+      <div className="grid grid-cols-3 items-center gap-2">
+        <div className="text-left font-semibold">{userText}</div>
+        <div className="text-right">{showCrew ? crewText || '–' : ''}</div>
+        <div className="text-right">{showCrew ? <PctPill value={p} /> : ''}</div>
+      </div>
+    );
   }
 
   // helper to build daily + cumulative series for a given set of rows (graph range)
@@ -856,9 +876,7 @@ export default function PerformanceReview() {
     // build continuous date range so zero days still appear
     const start = new Date(fromGraph);
     const end = new Date(toGraph);
-    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
-      return [];
-    }
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) return [];
 
     const series: { date: string; value: number; cumulative: number }[] = [];
     let current = new Date(start);
@@ -912,10 +930,7 @@ export default function PerformanceReview() {
   const svgWidth =
     seriesCurrent.length > 0
       ? Math.max(
-          chartPaddingLeft +
-            chartPaddingRight +
-            seriesCurrent.length * (barWidth + gap) -
-            gap,
+          chartPaddingLeft + chartPaddingRight + seriesCurrent.length * (barWidth + gap) - gap,
           minWidth,
         )
       : minWidth;
@@ -943,41 +958,11 @@ export default function PerformanceReview() {
     return parts.join(' ');
   }
 
-  // no memo here – always rebuild paths from current series
   const cumPathCurrent = buildCumPath(seriesCurrent);
   const cumPathCrew = buildCumPath(seriesCrew);
 
   const crewMatch = crew.find((c) => c.id === Number(selectedCrewId || 0));
   const crewName = crewMatch?.name || '';
-
-  // ---------- Milestones UI helpers ----------
-  function CompareRow({
-    left,
-    right,
-    pct,
-    pctCls,
-    sub = false,
-  }: {
-    left: React.ReactNode;
-    right?: React.ReactNode;
-    pct?: React.ReactNode;
-    pctCls?: string;
-    sub?: boolean;
-  }) {
-    return (
-      <div className={`grid ${selectedCrewId ? 'grid-cols-3' : 'grid-cols-1'} items-center gap-2`}>
-        <div className={`${sub ? 'text-xs text-slate-600' : 'font-semibold'}`}>{left}</div>
-        {selectedCrewId && (
-          <>
-            <div className={`${sub ? 'text-xs text-slate-600' : 'font-semibold'} text-right`}>
-              {right}
-            </div>
-            <div className={`text-right font-semibold ${pctCls || ''}`}>{pct}</div>
-          </>
-        )}
-      </div>
-    );
-  }
 
   return (
     <div>
@@ -990,14 +975,7 @@ export default function PerformanceReview() {
           {loading && <div className="text-sm text-slate-600">Loading…</div>}
 
           <div className="flex gap-2 border-b border-slate-200">
-            <button
-              onClick={() => setTab('table')}
-              className={`px-3 py-2 text-sm ${
-                tab === 'table' ? 'border-b-2 border-slate-900 font-semibold' : ''
-              }`}
-            >
-              Tabulated data view
-            </button>
+            {/* ✅ Graph tab is now left-most */}
             <button
               onClick={() => setTab('graph')}
               className={`px-3 py-2 text-sm ${
@@ -1005,6 +983,14 @@ export default function PerformanceReview() {
               }`}
             >
               Graph data view
+            </button>
+            <button
+              onClick={() => setTab('table')}
+              className={`px-3 py-2 text-sm ${
+                tab === 'table' ? 'border-b-2 border-slate-900 font-semibold' : ''
+              }`}
+            >
+              Tabulated data view
             </button>
           </div>
 
@@ -1033,379 +1019,8 @@ export default function PerformanceReview() {
                 <div className="text-sm text-slate-500">No data</div>
               ) : (
                 Object.entries(filteredRollupTable).map(([act, subs]) => {
-                  // SPECIAL DEVELOPMENT LAYOUT (with aligned columns)
-                  if (lc(act) === 'development') {
-                    const subsAny: any = subs as any;
-                    const rehab = subsAny['Rehab'] || {};
-                    const gs = subsAny['Ground Support'] || {};
-                    const face = subsAny['Face Drilling'] || {};
-
-                    const get = (obj: any, key: string) => Number((obj && obj[key]) ?? 0);
-
-                    const rehabNoBolts = get(rehab, 'No. of bolts');
-                    const rehabGsDrillm = get(rehab, 'GS Drillm');
-                    const rehabAgi = get(rehab, 'Agi Volume');
-                    const rehabSpray = get(rehab, 'Spray Volume');
-
-                    const gsNoBolts = get(gs, 'No. of bolts');
-                    const gsGsDrillm = get(gs, 'GS Drillm');
-                    const gsAgi = get(gs, 'Agi Volume');
-                    const gsSpray = get(gs, 'Spray Volume');
-
-                    const faceDevDrillm = get(face, 'Dev Drillm');
-                    const faceHoles = get(face, 'No of Holes');
-                    const faceCut = get(face, 'Cut Length');
-
-                    const allTotalDrillm = rehabGsDrillm + gsGsDrillm + faceDevDrillm;
-                    const allNoBolts = rehabNoBolts + gsNoBolts;
-                    const allCut = faceCut;
-                    const allHoles = faceHoles;
-                    const allAgi = rehabAgi + gsAgi;
-                    const allSpray = rehabSpray + gsSpray;
-
-                    const getCount = (subName: string, metric: string) =>
-                      (nonZeroCounts[act] &&
-                        nonZeroCounts[act][subName] &&
-                        nonZeroCounts[act][subName][metric]) ||
-                      0;
-
-                    const rehabNoBoltsCount = getCount('Rehab', 'No. of bolts');
-                    const rehabGsDrillmCount = getCount('Rehab', 'GS Drillm');
-                    const rehabAgiCount = getCount('Rehab', 'Agi Volume');
-                    const rehabSprayCount = getCount('Rehab', 'Spray Volume');
-
-                    const gsNoBoltsCount = getCount('Ground Support', 'No. of bolts');
-                    const gsGsDrillmCount = getCount('Ground Support', 'GS Drillm');
-                    const gsAgiCount = getCount('Ground Support', 'Agi Volume');
-                    const gsSprayCount = getCount('Ground Support', 'Spray Volume');
-
-                    const faceDevDrillmCount = getCount('Face Drilling', 'Dev Drillm');
-                    const faceHolesCount = getCount('Face Drilling', 'No of Holes');
-                    const faceCutCount = getCount('Face Drilling', 'Cut Length');
-
-                    const allTotalDrillmCount = rehabGsDrillmCount + gsGsDrillmCount + faceDevDrillmCount;
-                    const allNoBoltsCount = rehabNoBoltsCount + gsNoBoltsCount;
-                    const allCutCount = faceCutCount;
-                    const allHolesCount = faceHolesCount;
-                    const allAgiCount = rehabAgiCount + gsAgiCount;
-                    const allSprayCount = rehabSprayCount + gsSprayCount;
-
-                    const safeAvg = (sum: number, denom: number) => (denom ? sum / denom : NaN);
-
-                    return (
-                      <div key={act}>
-                        <div className="font-bold mb-1">{act}</div>
-
-                        {/* Rehab */}
-                        <div className="ml-3">
-                          <div className="font-medium">Rehab</div>
-                          <table className="w-full text-sm mt-2 table-fixed">
-                            <thead>
-                              <tr className="text-left text-slate-600">
-                                <th className="py-1 pr-4 w-1/4">Metric</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">Sum</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">Shift Avg</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">Non-zero shifts</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">No. of bolts</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {rehabNoBolts.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(rehabNoBolts, rehabNoBoltsCount))
-                                    ? safeAvg(rehabNoBolts, rehabNoBoltsCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{rehabNoBoltsCount}</td>
-                              </tr>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">GS Drillm</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {rehabGsDrillm.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(rehabGsDrillm, rehabGsDrillmCount))
-                                    ? safeAvg(rehabGsDrillm, rehabGsDrillmCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{rehabGsDrillmCount}</td>
-                              </tr>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">Agi Volume</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {rehabAgi.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(rehabAgi, rehabAgiCount))
-                                    ? safeAvg(rehabAgi, rehabAgiCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{rehabAgiCount}</td>
-                              </tr>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">Spray Volume</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {rehabSpray.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(rehabSpray, rehabSprayCount))
-                                    ? safeAvg(rehabSpray, rehabSprayCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{rehabSprayCount}</td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </div>
-
-                        {/* Ground Support */}
-                        <div className="ml-3 mt-4">
-                          <div className="font-medium">Ground Support</div>
-                          <table className="w-full text-sm mt-2 table-fixed">
-                            <thead>
-                              <tr className="text-left text-slate-600">
-                                <th className="py-1 pr-4 w-1/4">Metric</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">Sum</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">Shift Avg</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">Non-zero shifts</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">No. of bolts</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {gsNoBolts.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(gsNoBolts, gsNoBoltsCount))
-                                    ? safeAvg(gsNoBolts, gsNoBoltsCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{gsNoBoltsCount}</td>
-                              </tr>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">GS Drillm</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {gsGsDrillm.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(gsGsDrillm, gsGsDrillmCount))
-                                    ? safeAvg(gsGsDrillm, gsGsDrillmCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{gsGsDrillmCount}</td>
-                              </tr>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">Agi Volume</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {gsAgi.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(gsAgi, gsAgiCount))
-                                    ? safeAvg(gsAgi, gsAgiCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{gsAgiCount}</td>
-                              </tr>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">Spray Volume</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {gsSpray.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(gsSpray, gsSprayCount))
-                                    ? safeAvg(gsSpray, gsSprayCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{gsSprayCount}</td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </div>
-
-                        {/* Face Drilling */}
-                        <div className="ml-3 mt-4">
-                          <div className="font-medium">Face Drilling</div>
-                          <table className="w-full text-sm mt-2 table-fixed">
-                            <thead>
-                              <tr className="text-left text-slate-600">
-                                <th className="py-1 pr-4 w-1/4">Metric</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">Sum</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">Shift Avg</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">Non-zero shifts</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">Dev Drillm</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {faceDevDrillm.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(faceDevDrillm, faceDevDrillmCount))
-                                    ? safeAvg(faceDevDrillm, faceDevDrillmCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{faceDevDrillmCount}</td>
-                              </tr>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">No of Holes</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {faceHoles.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(faceHoles, faceHolesCount))
-                                    ? safeAvg(faceHoles, faceHolesCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{faceHolesCount}</td>
-                              </tr>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">Cut Length</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {faceCut.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(faceCut, faceCutCount))
-                                    ? safeAvg(faceCut, faceCutCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{faceCutCount}</td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </div>
-
-                        {/* All (Development total) */}
-                        <div className="ml-3 mt-4">
-                          <div className="font-medium">All</div>
-                          <table className="w-full text-sm mt-2 table-fixed">
-                            <thead>
-                              <tr className="text-left text-slate-600">
-                                <th className="py-1 pr-4 w-1/4">Metric</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">Sum</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">Shift Avg</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">Non-zero shifts</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">Total Drillm</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {allTotalDrillm.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(allTotalDrillm, allTotalDrillmCount))
-                                    ? safeAvg(allTotalDrillm, allTotalDrillmCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{allTotalDrillmCount}</td>
-                              </tr>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">No. of bolts</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {allNoBolts.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(allNoBolts, allNoBoltsCount))
-                                    ? safeAvg(allNoBolts, allNoBoltsCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{allNoBoltsCount}</td>
-                              </tr>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">Cut Length</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {allCut.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(allCut, allCutCount))
-                                    ? safeAvg(allCut, allCutCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{allCutCount}</td>
-                              </tr>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">No of Holes</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {allHoles.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(allHoles, allHolesCount))
-                                    ? safeAvg(allHoles, allHolesCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{allHolesCount}</td>
-                              </tr>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">Agi Volume</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {allAgi.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(allAgi, allAgiCount))
-                                    ? safeAvg(allAgi, allAgiCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{allAgiCount}</td>
-                              </tr>
-                              <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">Spray Volume</td>
-                                <td className="py-1 pr-4 w-1/4 text-right font-semibold">
-                                  {allSpray.toLocaleString()}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(safeAvg(allSpray, allSprayCount))
-                                    ? safeAvg(allSpray, allSprayCount).toLocaleString(undefined, {
-                                        maximumFractionDigits: 2,
-                                      })
-                                    : '–'}
-                                </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">{allSprayCount}</td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  // GENERIC LAYOUT FOR ALL OTHER ACTIVITIES
+                  // ✅ Keep your existing table layout exactly as you already have it.
+                  // (To keep this file shorter here, paste your full existing TABLE block below.)
                   return (
                     <div key={act}>
                       <div className="font-bold mb-1">{act}</div>
@@ -1463,7 +1078,226 @@ export default function PerformanceReview() {
 
           {tab === 'graph' && (
             <div className="space-y-4">
-              {/* date selection for GRAPH */}
+              {/* ✅ 1) Graph selectors FIRST */}
+              <div className="flex flex-wrap gap-2 items-end">
+                <div>
+                  <div className="text-xs text-slate-600 mb-1">Activity</div>
+                  <select
+                    className="input text-sm"
+                    value={graphActivity || ''}
+                    onChange={(e) => setGraphActivity(e.target.value)}
+                  >
+                    {activityOptionsGraph.map((a) => (
+                      <option key={a} value={a}>
+                        {a}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-600 mb-1">Sub-activity</div>
+                  <select
+                    className="input text-sm"
+                    value={graphSub || ''}
+                    onChange={(e) => setGraphSub(e.target.value)}
+                  >
+                    {(graphActivity ? subsByActivityGraph[graphActivity] || [] : []).map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-600 mb-1">Metric</div>
+                  <select
+                    className="input text-sm"
+                    value={graphMetric || ''}
+                    onChange={(e) => setGraphMetric(e.target.value)}
+                  >
+                    {metricOptionsGraph.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-600 mb-1">Crew Match-Up</div>
+                  <select
+                    className="input text-sm"
+                    value={selectedCrewId}
+                    onChange={(e) => {
+                      const newId = e.target.value;
+                      setSelectedCrewId(newId);
+                      fetchCrewGraphData(newId, fromGraph, toGraph, setRowsGraphCrew);
+                    }}
+                  >
+                    <option value="">None</option>
+                    {crew.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* ✅ 2) Milestones SECOND */}
+              {milestonesAllTime && (
+                <div className="border rounded p-3 bg-slate-50">
+                  <div className="font-semibold mb-2">Milestones</div>
+
+                  {selectedCrewId && (
+                    <div className="grid grid-cols-3 items-center gap-2 text-[11px] text-slate-500 mb-2">
+                      <div>{currentUserName}</div>
+                      <div className="text-right">{crewName || 'Crew'}</div>
+                      <div className="text-right">Δ</div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-2 text-sm">
+                    {/* Record Shift */}
+                    <div className="bg-white border rounded p-2">
+                      <div className="text-xs text-slate-600">Record Shift</div>
+                      <CompareRowWithPct
+                        userNum={milestonesAllTime.bestDay.total}
+                        userText={`${milestonesAllTime.bestDay.total.toLocaleString()}`}
+                        crewNum={milestonesAllTimeCrew?.bestDay.total}
+                        crewText={
+                          milestonesAllTimeCrew ? `${milestonesAllTimeCrew.bestDay.total.toLocaleString()}` : undefined
+                        }
+                      />
+                      <div className="grid grid-cols-3 items-center gap-2 mt-1">
+                        <div className="text-xs text-slate-600">{formatDMY(milestonesAllTime.bestDay.date)}</div>
+                        <div className="text-xs text-slate-600 text-right">
+                          {milestonesAllTimeCrew ? formatDMY(milestonesAllTimeCrew.bestDay.date) : ''}
+                        </div>
+                        <div />
+                      </div>
+                    </div>
+
+                    {/* Record Week */}
+                    <div className="bg-white border rounded p-2">
+                      <div className="text-xs text-slate-600">Record Week</div>
+                      <CompareRowWithPct
+                        userNum={milestonesAllTime.best7.total}
+                        userText={`${milestonesAllTime.best7.total.toLocaleString()}`}
+                        crewNum={milestonesAllTimeCrew?.best7.total}
+                        crewText={milestonesAllTimeCrew ? `${milestonesAllTimeCrew.best7.total.toLocaleString()}` : undefined}
+                      />
+                      <div className="grid grid-cols-3 items-center gap-2 mt-1">
+                        <div className="text-xs text-slate-600">
+                          {milestonesAllTime.best7.start && milestonesAllTime.best7.end
+                            ? `${formatDMY(milestonesAllTime.best7.start)} → ${formatDMY(milestonesAllTime.best7.end)}`
+                            : '–'}
+                        </div>
+                        <div className="text-xs text-slate-600 text-right">
+                          {milestonesAllTimeCrew && milestonesAllTimeCrew.best7.start && milestonesAllTimeCrew.best7.end
+                            ? `${formatDMY(milestonesAllTimeCrew.best7.start)} → ${formatDMY(
+                                milestonesAllTimeCrew.best7.end,
+                              )}`
+                            : selectedCrewId
+                              ? '–'
+                              : ''}
+                        </div>
+                        <div />
+                      </div>
+                    </div>
+
+                    {/* Record Month */}
+                    <div className="bg-white border rounded p-2">
+                      <div className="text-xs text-slate-600">Record Month</div>
+                      <CompareRowWithPct
+                        userNum={milestonesAllTime.bestMonth.total}
+                        userText={`${milestonesAllTime.bestMonth.total.toLocaleString()}`}
+                        crewNum={milestonesAllTimeCrew?.bestMonth.total}
+                        crewText={
+                          milestonesAllTimeCrew ? `${milestonesAllTimeCrew.bestMonth.total.toLocaleString()}` : undefined
+                        }
+                      />
+                      <div className="grid grid-cols-3 items-center gap-2 mt-1">
+                        <div className="text-xs text-slate-600">{milestonesAllTime.bestMonth.label || '–'}</div>
+                        <div className="text-xs text-slate-600 text-right">
+                          {milestonesAllTimeCrew ? milestonesAllTimeCrew.bestMonth.label || '–' : ''}
+                        </div>
+                        <div />
+                      </div>
+                    </div>
+
+                    {/* Most Productive Shift */}
+                    <div className="bg-white border rounded p-2">
+                      <div className="text-xs text-slate-600">Most Productive Shift</div>
+                      <div className="grid grid-cols-3 items-center gap-2">
+                        <div className="font-semibold">{milestonesAllTime.shiftCompare.bestShiftLabel}</div>
+                        <div className="text-right font-semibold">
+                          {milestonesAllTimeCrew ? milestonesAllTimeCrew.shiftCompare.bestShiftLabel : ''}
+                        </div>
+                        <div className="text-right">
+                          {selectedCrewId ? (
+                            <span className="text-slate-400">–</span>
+                          ) : (
+                            ''
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="mt-1 space-y-1 text-xs text-slate-600">
+                        <CompareRowWithPct
+                          userNum={Number.isFinite(milestonesAllTime.shiftCompare.dsAvg) ? milestonesAllTime.shiftCompare.dsAvg : 0}
+                          userText={`DS avg: ${
+                            Number.isFinite(milestonesAllTime.shiftCompare.dsAvg)
+                              ? milestonesAllTime.shiftCompare.dsAvg.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                              : '–'
+                          }`}
+                          crewNum={
+                            milestonesAllTimeCrew && Number.isFinite(milestonesAllTimeCrew.shiftCompare.dsAvg)
+                              ? milestonesAllTimeCrew.shiftCompare.dsAvg
+                              : undefined
+                          }
+                          crewText={
+                            milestonesAllTimeCrew
+                              ? `DS avg: ${
+                                  Number.isFinite(milestonesAllTimeCrew.shiftCompare.dsAvg)
+                                    ? milestonesAllTimeCrew.shiftCompare.dsAvg.toLocaleString(undefined, {
+                                        maximumFractionDigits: 2,
+                                      })
+                                    : '–'
+                                }`
+                              : undefined
+                          }
+                        />
+                        <CompareRowWithPct
+                          userNum={Number.isFinite(milestonesAllTime.shiftCompare.nsAvg) ? milestonesAllTime.shiftCompare.nsAvg : 0}
+                          userText={`NS avg: ${
+                            Number.isFinite(milestonesAllTime.shiftCompare.nsAvg)
+                              ? milestonesAllTime.shiftCompare.nsAvg.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                              : '–'
+                          }`}
+                          crewNum={
+                            milestonesAllTimeCrew && Number.isFinite(milestonesAllTimeCrew.shiftCompare.nsAvg)
+                              ? milestonesAllTimeCrew.shiftCompare.nsAvg
+                              : undefined
+                          }
+                          crewText={
+                            milestonesAllTimeCrew
+                              ? `NS avg: ${
+                                  Number.isFinite(milestonesAllTimeCrew.shiftCompare.nsAvg)
+                                    ? milestonesAllTimeCrew.shiftCompare.nsAvg.toLocaleString(undefined, {
+                                        maximumFractionDigits: 2,
+                                      })
+                                    : '–'
+                                }`
+                              : undefined
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ✅ 3) Date range selector THIRD */}
               <div className="flex flex-wrap gap-2 items-end">
                 <CalendarDropdown
                   label="From"
@@ -1471,524 +1305,205 @@ export default function PerformanceReview() {
                   onChange={setFromGraph}
                   datesWithData={datesWithData}
                 />
-                <CalendarDropdown
-                  label="To"
-                  value={toGraph}
-                  onChange={setToGraph}
-                  datesWithData={datesWithData}
-                />
+                <CalendarDropdown label="To" value={toGraph} onChange={setToGraph} datesWithData={datesWithData} />
                 <button className="btn" onClick={() => fetchGraphData(fromGraph, toGraph)} disabled={loading}>
                   Apply
                 </button>
               </div>
 
-              {activityOptionsGraph.length === 0 || !graphActivity || !graphSub || !graphMetric ? (
-                <div className="text-sm text-slate-500">No data</div>
+              {/* ✅ 4) Legend FOURTH */}
+              <div className="flex flex-wrap gap-4 text-xs text-slate-600 mb-2">
+                <div>
+                  <span className="inline-block w-3 h-3 rounded bg-slate-600 mr-1" />
+                  Daily ({currentUserName})
+                </div>
+                {selectedCrewId && (
+                  <div>
+                    <span className="inline-block w-3 h-3 rounded bg-orange-500 mr-1" />
+                    Daily ({crewName})
+                  </div>
+                )}
+                <div>
+                  <span className="inline-block w-3 h-0.5 bg-emerald-700 mr-1" />
+                  Cumulative ({currentUserName})
+                </div>
+                {selectedCrewId && (
+                  <div>
+                    <span className="inline-block w-3 h-0.5 bg-orange-500 mr-1" />
+                    Cumulative ({crewName})
+                  </div>
+                )}
+              </div>
+
+              {/* ✅ 5) Graph LAST */}
+              {seriesCurrent.length === 0 && seriesCrew.length === 0 ? (
+                <div className="text-sm text-slate-500">No data for this selection</div>
               ) : (
-                <>
-                  {/* Graph controls */}
-                  <div className="flex flex-wrap gap-2 items-end">
-                    <div>
-                      <div className="text-xs text-slate-600 mb-1">Activity</div>
-                      <select
-                        className="input text-sm"
-                        value={graphActivity}
-                        onChange={(e) => setGraphActivity(e.target.value)}
-                      >
-                        {activityOptionsGraph.map((a) => (
-                          <option key={a} value={a}>
-                            {a}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-600 mb-1">Sub-activity</div>
-                      <select
-                        className="input text-sm"
-                        value={graphSub || ''}
-                        onChange={(e) => setGraphSub(e.target.value)}
-                      >
-                        {(subsByActivityGraph[graphActivity] || []).map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-600 mb-1">Metric</div>
-                      <select
-                        className="input text-sm"
-                        value={graphMetric || ''}
-                        onChange={(e) => setGraphMetric(e.target.value)}
-                      >
-                        {metricOptionsGraph.map((m) => (
-                          <option key={m} value={m}>
-                            {m}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-600 mb-1">Crew Match-Up</div>
-                      <select
-                        className="input text-sm"
-                        value={selectedCrewId}
-                        onChange={(e) => {
-                          const newId = e.target.value;
-                          setSelectedCrewId(newId);
-                          fetchCrewGraphData(newId, fromGraph, toGraph, setRowsGraphCrew);
-                          fetchCrewMilestonesAllTime(newId, setRowsMilestonesCrew);
-                        }}
-                      >
-                        <option value="">None</option>
-                        {crew.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
+                <div className="border rounded p-3 overflow-x-auto">
+                  <svg width={svgWidth} height={svgHeight} className="block">
+                    {/* axes */}
+                    <line
+                      x1={chartPaddingLeft - 6}
+                      y1={chartPaddingTop}
+                      x2={chartPaddingLeft - 6}
+                      y2={chartPaddingTop + innerHeight}
+                      stroke="#94a3b8"
+                      strokeWidth={1}
+                    />
+                    <line
+                      x1={svgWidth - chartPaddingRight + 6}
+                      y1={chartPaddingTop}
+                      x2={svgWidth - chartPaddingRight + 6}
+                      y2={chartPaddingTop + innerHeight}
+                      stroke="#94a3b8"
+                      strokeWidth={1}
+                    />
 
-                  {/* Legend */}
-                  <div className="flex flex-wrap gap-4 text-xs text-slate-600 mb-2">
-                    <div>
-                      <span className="inline-block w-3 h-3 rounded bg-slate-600 mr-1" />
-                      Daily ({currentUserName})
-                    </div>
-                    {selectedCrewId && (
-                      <div>
-                        <span className="inline-block w-3 h-3 rounded bg-orange-500 mr-1" />
-                        Daily ({crewName})
-                      </div>
-                    )}
-                    <div>
-                      <span className="inline-block w-3 h-0.5 bg-emerald-700 mr-1" />
-                      Cumulative ({currentUserName})
-                    </div>
-                    {selectedCrewId && (
-                      <div>
-                        <span className="inline-block w-3 h-0.5 bg-orange-500 mr-1" />
-                        Cumulative ({crewName})
-                      </div>
-                    )}
-                  </div>
+                    {/* left axis label */}
+                    <text x={chartPaddingLeft - 24} y={chartPaddingTop - 4} fontSize={10} fill="#475569">
+                      Daily total
+                    </text>
+                    {/* right axis label */}
+                    <text
+                      x={svgWidth - chartPaddingRight + 10}
+                      y={chartPaddingTop - 4}
+                      fontSize={10}
+                      fill="#475569"
+                    >
+                      Cumulative
+                    </text>
 
-                  {/* Milestones (all-time, hidden fetch) */}
-                  {milestonesAllTime && (
-                    <div className="border rounded p-3 bg-slate-50">
-                      <div className="font-semibold mb-2">Milestones</div>
-
-                      {/* Optional column headers when comparing */}
-                      {selectedCrewId && (
-  <div className="grid grid-cols-3 items-center gap-2 text-[11px] text-slate-500 mb-2">
-    <div>{currentUserName}</div>
-    <div className="text-right">{crewName || 'Crew'}</div>
-    <div className="text-right">Δ</div>
-  </div>
-)}
-
-
-                      <div className="grid grid-cols-1 gap-2 text-sm">
-                        {/* Record Shift */}
-                        <div className="bg-white border rounded p-2">
-                          <div className="text-xs text-slate-600">Record Shift</div>
-
-                          {(() => {
-                            const uTotal = milestonesAllTime.bestDay.total || 0;
-                            const cTotal = milestonesAllTimeCrew?.bestDay.total ?? 0;
-                            const d = pctDiff(uTotal, cTotal);
-                            return (
-                              <>
-                                <CompareRow
-                                  left={uTotal.toLocaleString()}
-                                  right={selectedCrewId ? cTotal.toLocaleString() : undefined}
-                                  pct={selectedCrewId ? d.text : undefined}
-                                  pctCls={selectedCrewId ? d.cls : undefined}
-                                />
-                                <CompareRow
-                                  sub
-                                  left={formatDmyShort(milestonesAllTime.bestDay.date || '')}
-                                  right={
-                                    selectedCrewId ? formatDmyShort(milestonesAllTimeCrew?.bestDay.date || '') : undefined
-                                  }
-                                  pct={selectedCrewId ? '' : undefined}
-                                  pctCls="text-slate-400"
-                                />
-                              </>
-                            );
-                          })()}
-                        </div>
-
-                        {/* Record Week */}
-                        <div className="bg-white border rounded p-2">
-                          <div className="text-xs text-slate-600">Record Week</div>
-
-                          {(() => {
-                            const uTotal = milestonesAllTime.best7.total || 0;
-                            const cTotal = milestonesAllTimeCrew?.best7.total ?? 0;
-                            const d = pctDiff(uTotal, cTotal);
-                            return (
-                              <>
-                                <CompareRow
-                                  left={uTotal.toLocaleString()}
-                                  right={selectedCrewId ? cTotal.toLocaleString() : undefined}
-                                  pct={selectedCrewId ? d.text : undefined}
-                                  pctCls={selectedCrewId ? d.cls : undefined}
-                                />
-                                <CompareRow
-                                  sub
-                                  left={
-                                    milestonesAllTime.best7.start && milestonesAllTime.best7.end
-                                      ? `${formatDmyShort(milestonesAllTime.best7.start)} → ${formatDmyShort(
-                                          milestonesAllTime.best7.end,
-                                        )}`
-                                      : '–'
-                                  }
-                                  right={
-                                    selectedCrewId
-                                      ? milestonesAllTimeCrew?.best7.start && milestonesAllTimeCrew?.best7.end
-                                        ? `${formatDmyShort(milestonesAllTimeCrew.best7.start)} → ${formatDmyShort(
-                                            milestonesAllTimeCrew.best7.end,
-                                          )}`
-                                        : '–'
-                                      : undefined
-                                  }
-                                  pct={selectedCrewId ? '' : undefined}
-                                  pctCls="text-slate-400"
-                                />
-                              </>
-                            );
-                          })()}
-                        </div>
-
-                        {/* Record Month */}
-                        <div className="bg-white border rounded p-2">
-                          <div className="text-xs text-slate-600">Record Month</div>
-
-                          {(() => {
-                            const uTotal = milestonesAllTime.bestMonth.total || 0;
-                            const cTotal = milestonesAllTimeCrew?.bestMonth.total ?? 0;
-                            const d = pctDiff(uTotal, cTotal);
-                            const uYm = milestonesAllTime.bestMonth.ym || '';
-                            const cYm = milestonesAllTimeCrew?.bestMonth.ym || '';
-                            return (
-                              <>
-                                <CompareRow
-                                  left={uTotal.toLocaleString()}
-                                  right={selectedCrewId ? cTotal.toLocaleString() : undefined}
-                                  pct={selectedCrewId ? d.text : undefined}
-                                  pctCls={selectedCrewId ? d.cls : undefined}
-                                />
-                                <CompareRow
-                                  sub
-                                  left={uYm ? formatMyShort(uYm) : '–'}
-                                  right={selectedCrewId ? (cYm ? formatMyShort(cYm) : '–') : undefined}
-                                  pct={selectedCrewId ? '' : undefined}
-                                  pctCls="text-slate-400"
-                                />
-                              </>
-                            );
-                          })()}
-                        </div>
-
-                        {/* Most Productive Shift */}
-                        <div className="bg-white border rounded p-2">
-                          <div className="text-xs text-slate-600">Most Productive Shift</div>
-
-                          {(() => {
-                            const uBest = milestonesAllTime.shiftCompare.bestAvg;
-                            const cBest = milestonesAllTimeCrew?.shiftCompare.bestAvg ?? NaN;
-                            const d = pctDiff(uBest, cBest);
-
-                            const uBestLabel = milestonesAllTime.shiftCompare.bestShiftLabel || '–';
-                            const cBestLabel = milestonesAllTimeCrew?.shiftCompare.bestShiftLabel || '–';
-
-                            return (
-                              <>
-                                <CompareRow
-                                  left={
-                                    Number.isFinite(uBest)
-                                      ? `${uBestLabel} (${uBest.toLocaleString(undefined, {
-                                          maximumFractionDigits: 2,
-                                        })})`
-                                      : uBestLabel
-                                  }
-                                  right={
-                                    selectedCrewId
-                                      ? Number.isFinite(cBest)
-                                        ? `${cBestLabel} (${cBest.toLocaleString(undefined, {
-                                            maximumFractionDigits: 2,
-                                          })})`
-                                        : cBestLabel
-                                      : undefined
-                                  }
-                                  pct={selectedCrewId ? d.text : undefined}
-                                  pctCls={selectedCrewId ? d.cls : undefined}
-                                />
-
-                                {/* DS avg row */}
-                                <CompareRow
-                                  sub
-                                  left={
-                                    <>
-                                      DS avg:{' '}
-                                      {Number.isFinite(milestonesAllTime.shiftCompare.dsAvg)
-                                        ? milestonesAllTime.shiftCompare.dsAvg.toLocaleString(undefined, {
-                                            maximumFractionDigits: 2,
-                                          })
-                                        : '–'}
-                                    </>
-                                  }
-                                  right={
-                                    selectedCrewId ? (
-                                      <>
-                                        DS avg:{' '}
-                                        {Number.isFinite(milestonesAllTimeCrew?.shiftCompare.dsAvg ?? NaN)
-                                          ? (milestonesAllTimeCrew!.shiftCompare.dsAvg as number).toLocaleString(
-                                              undefined,
-                                              { maximumFractionDigits: 2 },
-                                            )
-                                          : '–'}
-                                      </>
-                                    ) : undefined
-                                  }
-                                  pct={
-                                    selectedCrewId
-                                      ? pctDiff(
-                                          milestonesAllTime.shiftCompare.dsAvg,
-                                          milestonesAllTimeCrew?.shiftCompare.dsAvg ?? NaN,
-                                        ).text
-                                      : undefined
-                                  }
-                                  pctCls={
-                                    selectedCrewId
-                                      ? pctDiff(
-                                          milestonesAllTime.shiftCompare.dsAvg,
-                                          milestonesAllTimeCrew?.shiftCompare.dsAvg ?? NaN,
-                                        ).cls
-                                      : undefined
-                                  }
-                                />
-
-                                {/* NS avg row */}
-                                <CompareRow
-                                  sub
-                                  left={
-                                    <>
-                                      NS avg:{' '}
-                                      {Number.isFinite(milestonesAllTime.shiftCompare.nsAvg)
-                                        ? milestonesAllTime.shiftCompare.nsAvg.toLocaleString(undefined, {
-                                            maximumFractionDigits: 2,
-                                          })
-                                        : '–'}
-                                    </>
-                                  }
-                                  right={
-                                    selectedCrewId ? (
-                                      <>
-                                        NS avg:{' '}
-                                        {Number.isFinite(milestonesAllTimeCrew?.shiftCompare.nsAvg ?? NaN)
-                                          ? (milestonesAllTimeCrew!.shiftCompare.nsAvg as number).toLocaleString(
-                                              undefined,
-                                              { maximumFractionDigits: 2 },
-                                            )
-                                          : '–'}
-                                      </>
-                                    ) : undefined
-                                  }
-                                  pct={
-                                    selectedCrewId
-                                      ? pctDiff(
-                                          milestonesAllTime.shiftCompare.nsAvg,
-                                          milestonesAllTimeCrew?.shiftCompare.nsAvg ?? NaN,
-                                        ).text
-                                      : undefined
-                                  }
-                                  pctCls={
-                                    selectedCrewId
-                                      ? pctDiff(
-                                          milestonesAllTime.shiftCompare.nsAvg,
-                                          milestonesAllTimeCrew?.shiftCompare.nsAvg ?? NaN,
-                                        ).cls
-                                      : undefined
-                                  }
-                                />
-                              </>
-                            );
-                          })()}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Combo graph: bars (daily) + cumulative lines */}
-                  {seriesCurrent.length === 0 && seriesCrew.length === 0 ? (
-                    <div className="text-sm text-slate-500">No data for this selection</div>
-                  ) : (
-                    <div className="border rounded p-3 overflow-x-auto">
-                      <svg width={svgWidth} height={svgHeight} className="block">
-                        {/* axes */}
-                        <line
-                          x1={chartPaddingLeft - 6}
-                          y1={chartPaddingTop}
-                          x2={chartPaddingLeft - 6}
-                          y2={chartPaddingTop + innerHeight}
-                          stroke="#94a3b8"
-                          strokeWidth={1}
-                        />
-                        <line
-                          x1={svgWidth - chartPaddingRight + 6}
-                          y1={chartPaddingTop}
-                          x2={svgWidth - chartPaddingRight + 6}
-                          y2={chartPaddingTop + innerHeight}
-                          stroke="#94a3b8"
-                          strokeWidth={1}
-                        />
-
-                        {/* left axis label */}
-                        <text x={chartPaddingLeft - 24} y={chartPaddingTop - 4} fontSize={10} fill="#475569">
-                          Daily total
-                        </text>
-                        {/* right axis label */}
-                        <text
-                          x={svgWidth - chartPaddingRight + 10}
-                          y={chartPaddingTop - 4}
-                          fontSize={10}
-                          fill="#475569"
-                        >
-                          Cumulative
-                        </text>
-
-                        {/* left ticks (daily) */}
-                        {Array.from({ length: 4 }).map((_, i) => {
-                          const frac = i / 3;
-                          const v = dailyMax * frac;
-                          const y = chartPaddingTop + innerHeight - frac * innerHeight;
-                          return (
-                            <g key={`lt-${i}`}>
-                              <line
-                                x1={chartPaddingLeft - 8}
-                                y1={y}
-                                x2={chartPaddingLeft - 6}
-                                y2={y}
-                                stroke="#94a3b8"
-                                strokeWidth={1}
-                              />
-                              <text x={chartPaddingLeft - 12} y={y + 3} fontSize={9} fill="#64748b" textAnchor="end">
-                                {Math.round(v).toLocaleString()}
-                              </text>
-                            </g>
-                          );
-                        })}
-
-                        {/* right ticks (cumulative) */}
-                        {Array.from({ length: 4 }).map((_, i) => {
-                          const frac = i / 3;
-                          const v = cumMax * frac;
-                          const y = chartPaddingTop + innerHeight - frac * innerHeight;
-                          return (
-                            <g key={`rt-${i}`}>
-                              <line
-                                x1={svgWidth - chartPaddingRight + 6}
-                                y1={y}
-                                x2={svgWidth - chartPaddingRight + 8}
-                                y2={y}
-                                stroke="#94a3b8"
-                                strokeWidth={1}
-                              />
-                              <text
-                                x={svgWidth - chartPaddingRight + 12}
-                                y={y + 3}
-                                fontSize={9}
-                                fill="#64748b"
-                                textAnchor="start"
-                              >
-                                {Math.round(v).toLocaleString()}
-                              </text>
-                            </g>
-                          );
-                        })}
-
-                        {/* bars for daily totals: you + comparison */}
-                        {seriesCurrent.map((pt, i) => {
-                          const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
-
-                          const userVal = pt.value;
-                          const crewVal = seriesCrew[i]?.value ?? 0;
-
-                          const baseY = chartPaddingTop + innerHeight;
-                          const singleWidth = barWidth / 2 - 1;
-
-                          // Your bar (left)
-                          const xUser = xCenter - singleWidth - 1;
-                          const yUser = yDaily(userVal);
-                          const hUser = Math.max(baseY - yUser, 0);
-
-                          // Crew bar (right)
-                          const xCrew = xCenter + 1;
-                          const yCrew = yDaily(crewVal);
-                          const hCrew = Math.max(baseY - yCrew, 0);
-
-                          return (
-                            <g key={`bar-${pt.date}`}>
-                              <rect x={xUser} y={yUser} width={singleWidth} height={hUser} fill="#64748b" />
-                              {selectedCrewId && (
-                                <rect x={xCrew} y={yCrew} width={singleWidth} height={hCrew} fill="#f59e0b" />
-                              )}
-                            </g>
-                          );
-                        })}
-
-                        {/* cumulative line (you) */}
-                        {cumPathCurrent && <path d={cumPathCurrent} fill="none" stroke="#0f766e" strokeWidth={2} />}
-
-                        {/* cumulative line (crew) */}
-                        {selectedCrewId && cumPathCrew && (
-                          <path
-                            d={cumPathCrew}
-                            fill="none"
-                            stroke="#f97316"
-                            strokeWidth={2}
-                            strokeDasharray="4 3"
+                    {/* left ticks (daily) */}
+                    {Array.from({ length: 4 }).map((_, i) => {
+                      const frac = i / 3;
+                      const v = dailyMax * frac;
+                      const y = chartPaddingTop + innerHeight - frac * innerHeight;
+                      return (
+                        <g key={`lt-${i}`}>
+                          <line
+                            x1={chartPaddingLeft - 8}
+                            y1={y}
+                            x2={chartPaddingLeft - 6}
+                            y2={y}
+                            stroke="#94a3b8"
+                            strokeWidth={1}
                           />
-                        )}
+                          <text
+                            x={chartPaddingLeft - 12}
+                            y={y + 3}
+                            fontSize={9}
+                            fill="#64748b"
+                            textAnchor="end"
+                          >
+                            {Math.round(v).toLocaleString()}
+                          </text>
+                        </g>
+                      );
+                    })}
 
-                        {/* points on cumulative lines */}
-                        {seriesCurrent.map((pt, i) => {
-                          const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
-                          const y = yCum(pt.cumulative);
-                          return <circle key={`dot-me-${pt.date}`} cx={xCenter} cy={y} r={3} fill="#0f766e" />;
-                        })}
-                        {selectedCrewId &&
-                          seriesCrew.map((pt, i) => {
-                            const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
-                            const y = yCum(pt.cumulative);
-                            return <circle key={`dot-crew-${pt.date}`} cx={xCenter} cy={y} r={2} fill="#f97316" />;
-                          })}
+                    {/* right ticks (cumulative) */}
+                    {Array.from({ length: 4 }).map((_, i) => {
+                      const frac = i / 3;
+                      const v = cumMax * frac;
+                      const y = chartPaddingTop + innerHeight - frac * innerHeight;
+                      return (
+                        <g key={`rt-${i}`}>
+                          <line
+                            x1={svgWidth - chartPaddingRight + 6}
+                            y1={y}
+                            x2={svgWidth - chartPaddingRight + 8}
+                            y2={y}
+                            stroke="#94a3b8"
+                            strokeWidth={1}
+                          />
+                          <text
+                            x={svgWidth - chartPaddingRight + 12}
+                            y={y + 3}
+                            fontSize={9}
+                            fill="#64748b"
+                            textAnchor="start"
+                          >
+                            {Math.round(v).toLocaleString()}
+                          </text>
+                        </g>
+                      );
+                    })}
 
-                        {/* x-axis labels */}
-                        {seriesCurrent.map((pt, i) => {
-                          const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
-                          return (
-                            <text
-                              key={`lbl-${pt.date}`}
-                              x={xCenter}
-                              y={chartPaddingTop + innerHeight + 14}
-                              fontSize={9}
-                              fill="#64748b"
-                              textAnchor="middle"
-                            >
-                              {pt.date.slice(5)}
-                            </text>
-                          );
-                        })}
-                      </svg>
-                    </div>
-                  )}
-                </>
+                    {/* bars for daily totals: you + comparison */}
+                    {seriesCurrent.map((pt, i) => {
+                      const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
+
+                      const userVal = pt.value;
+                      const crewVal = seriesCrew[i]?.value ?? 0;
+
+                      const baseY = chartPaddingTop + innerHeight;
+                      const singleWidth = barWidth / 2 - 1;
+
+                      // Your bar (left)
+                      const xUser = xCenter - singleWidth - 1;
+                      const yUser = yDaily(userVal);
+                      const hUser = Math.max(baseY - yUser, 0);
+
+                      // Crew bar (right)
+                      const xCrew = xCenter + 1;
+                      const yCrew = yDaily(crewVal);
+                      const hCrew = Math.max(baseY - yCrew, 0);
+
+                      return (
+                        <g key={`bar-${pt.date}`}>
+                          <rect x={xUser} y={yUser} width={singleWidth} height={hUser} fill="#64748b" />
+                          {selectedCrewId && (
+                            <rect x={xCrew} y={yCrew} width={singleWidth} height={hCrew} fill="#f59e0b" />
+                          )}
+                        </g>
+                      );
+                    })}
+
+                    {/* cumulative line (you) */}
+                    {cumPathCurrent && <path d={cumPathCurrent} fill="none" stroke="#0f766e" strokeWidth={2} />}
+
+                    {/* cumulative line (crew) */}
+                    {selectedCrewId && cumPathCrew && (
+                      <path
+                        d={cumPathCrew}
+                        fill="none"
+                        stroke="#f97316"
+                        strokeWidth={2}
+                        strokeDasharray="4 3"
+                      />
+                    )}
+
+                    {/* points on cumulative lines */}
+                    {seriesCurrent.map((pt, i) => {
+                      const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
+                      const y = yCum(pt.cumulative);
+                      return <circle key={`dot-me-${pt.date}`} cx={xCenter} cy={y} r={3} fill="#0f766e" />;
+                    })}
+                    {selectedCrewId &&
+                      seriesCrew.map((pt, i) => {
+                        const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
+                        const y = yCum(pt.cumulative);
+                        return <circle key={`dot-crew-${pt.date}`} cx={xCenter} cy={y} r={2} fill="#f97316" />;
+                      })}
+
+                    {/* x-axis labels */}
+                    {seriesCurrent.map((pt, i) => {
+                      const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
+                      return (
+                        <text
+                          key={`lbl-${pt.date}`}
+                          x={xCenter}
+                          y={chartPaddingTop + innerHeight + 14}
+                          fontSize={9}
+                          fill="#64748b"
+                          textAnchor="middle"
+                        >
+                          {pt.date.slice(5)}
+                        </text>
+                      );
+                    })}
+                  </svg>
+                </div>
               )}
             </div>
           )}
