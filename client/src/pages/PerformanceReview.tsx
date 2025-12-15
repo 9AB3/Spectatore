@@ -29,6 +29,32 @@ function formatYmd(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+// ----- milestone date formatting helpers -----
+function fmtDdMmYy(ymd: string) {
+  if (!ymd) return '–';
+  const d = parseYmd(ymd);
+  if (isNaN(d.getTime())) return '–';
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${dd}/${mm}/${yy}`;
+}
+function fmtMonthMmYy(ym: string) {
+  // ym = "YYYY-MM"
+  if (!ym || ym.length < 7) return '–';
+  const [y, m] = ym.split('-').map((x) => parseInt(x, 10));
+  if (!y || !m) return '–';
+  const mm = String(m).padStart(2, '0');
+  const yy = String(y).slice(-2);
+  return `${mm}/${yy}`;
+}
+function pctDiff(userVal: number, crewVal: number) {
+  // % difference vs crew (crew baseline)
+  if (!Number.isFinite(userVal) || !Number.isFinite(crewVal)) return null;
+  if (crewVal === 0) return null;
+  return ((userVal - crewVal) / crewVal) * 100;
+}
+
 // Allowed metrics per activity (display filter)
 const allowedByActivity: Record<string, string[]> = {
   development: [
@@ -139,12 +165,7 @@ type CalendarDropdownProps = {
   datesWithData: Set<string>;
 };
 
-function CalendarDropdown({
-  label,
-  value,
-  onChange,
-  datesWithData,
-}: CalendarDropdownProps) {
+function CalendarDropdown({ label, value, onChange, datesWithData }: CalendarDropdownProps) {
   const [open, setOpen] = useState(false);
 
   const baseDate = value ? parseYmd(value) : new Date();
@@ -214,24 +235,15 @@ function CalendarDropdown({
       {open && (
         <div className="absolute z-20 mt-1 bg-white border border-slate-300 rounded shadow-lg p-2 w-64">
           <div className="flex items-center justify-between mb-2">
-            <button
-              type="button"
-              className="px-2 text-sm text-slate-600"
-              onClick={prevMonth}
-            >
+            <button type="button" className="px-2 text-sm text-slate-600" onClick={prevMonth}>
               ‹
             </button>
             <div className="text-sm font-medium">
-              {new Intl.DateTimeFormat(undefined, {
-                month: 'short',
-                year: 'numeric',
-              }).format(new Date(year, month, 1))}
+              {new Intl.DateTimeFormat(undefined, { month: 'short', year: 'numeric' }).format(
+                new Date(year, month, 1),
+              )}
             </div>
-            <button
-              type="button"
-              className="px-2 text-sm text-slate-600"
-              onClick={nextMonth}
-            >
+            <button type="button" className="px-2 text-sm text-slate-600" onClick={nextMonth}>
               ›
             </button>
           </div>
@@ -265,8 +277,7 @@ function CalendarDropdown({
                   'w-8 h-8 inline-flex items-center justify-center rounded-full text-xs cursor-pointer';
                 let extra = ' text-slate-700 hover:bg-slate-100';
 
-                if (hasData)
-                  extra = ' bg-green-200 text-green-900 hover:bg-green-300';
+                if (hasData) extra = ' bg-green-200 text-green-900 hover:bg-green-300';
                 if (isSelected) extra += ' ring-2 ring-slate-500';
 
                 return (
@@ -300,9 +311,7 @@ async function fetchCrewGraphData(
     return;
   }
   try {
-    const res = await api(
-      `/api/reports/summary?from=${from}&to=${to}&user_id=${userId}`,
-    );
+    const res = await api(`/api/reports/summary?from=${from}&to=${to}&user_id=${userId}`);
     setRows(res.rows || []);
   } catch (e) {
     console.error('Failed to load crew graph data', e);
@@ -312,13 +321,9 @@ async function fetchCrewGraphData(
 
 export default function PerformanceReview() {
   // separate date ranges
-  const [fromTable, setFromTable] = useState(
-    formatDate(startOfMonth(new Date())),
-  );
+  const [fromTable, setFromTable] = useState(formatDate(startOfMonth(new Date())));
   const [toTable, setToTable] = useState(formatDate(new Date()));
-  const [fromGraph, setFromGraph] = useState(
-    formatDate(startOfMonth(new Date())),
-  );
+  const [fromGraph, setFromGraph] = useState(formatDate(startOfMonth(new Date())));
   const [toGraph, setToGraph] = useState(formatDate(new Date()));
 
   // table data
@@ -334,13 +339,12 @@ export default function PerformanceReview() {
 
   // milestones (all-time, hidden fetch)
   const [rowsMilestones, setRowsMilestones] = useState<ShiftRow[]>([]);
+  const [rowsMilestonesCrew, setRowsMilestonesCrew] = useState<ShiftRow[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [tab, setTab] = useState<'table' | 'graph'>('table');
-  const [datesWithData, setDatesWithData] = useState<Set<string>>(
-    () => new Set(),
-  );
+  const [datesWithData, setDatesWithData] = useState<Set<string>>(() => new Set());
 
   // crew list + selection + current user name
   const [crew, setCrew] = useState<CrewMember[]>([]);
@@ -408,14 +412,12 @@ export default function PerformanceReview() {
     };
   }, []);
 
-  // hidden all-time fetch for milestones
+  // hidden all-time fetch for milestones (you)
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await api(
-          `/api/reports/summary?from=0001-01-01&to=9999-12-31`,
-        );
+        const res = await api(`/api/reports/summary?from=0001-01-01&to=9999-12-31`);
         if (!cancelled) setRowsMilestones(res.rows || []);
       } catch (e) {
         console.error('Failed to load all-time milestones data', e);
@@ -426,6 +428,29 @@ export default function PerformanceReview() {
       cancelled = true;
     };
   }, []);
+
+  // hidden all-time fetch for milestones (crew, only when selected)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!selectedCrewId) {
+        setRowsMilestonesCrew([]);
+        return;
+      }
+      try {
+        const res = await api(
+          `/api/reports/summary?from=0001-01-01&to=9999-12-31&user_id=${selectedCrewId}`,
+        );
+        if (!cancelled) setRowsMilestonesCrew(res.rows || []);
+      } catch (e) {
+        console.error('Failed to load crew all-time milestones data', e);
+        if (!cancelled) setRowsMilestonesCrew([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCrewId]);
 
   // load crew list + current user name
   useEffect(() => {
@@ -468,12 +493,7 @@ export default function PerformanceReview() {
   // non-zero counts for table averages
   const nonZeroCounts = useMemo(() => {
     const counts: Record<string, Record<string, Record<string, number>>> = {};
-    const ALLOWED_HAUL = new Set([
-      'Total Trucks',
-      'Total Distance',
-      'Total Weight',
-      'Total TKMS',
-    ]);
+    const ALLOWED_HAUL = new Set(['Total Trucks', 'Total Distance', 'Total Weight', 'Total TKMS']);
 
     for (const r of rowsTable) {
       const t = r.totals_json || {};
@@ -483,8 +503,7 @@ export default function PerformanceReview() {
           for (const rawK of Object.keys(t[rawAct][sub] || {})) {
             if (lc(canAct) === 'hauling') {
               const rk = lc(rawK);
-              if (rk === 'trucks' || rk === 'weight' || rk === 'distance')
-                continue;
+              if (rk === 'trucks' || rk === 'weight' || rk === 'distance') continue;
               if (!ALLOWED_HAUL.has(rawK)) continue;
             }
             const disp = displayNameFor(rawK);
@@ -493,8 +512,7 @@ export default function PerformanceReview() {
             if (v > 0) {
               counts[canAct] ||= {};
               counts[canAct][sub] ||= {};
-              counts[canAct][sub][disp] =
-                (counts[canAct][sub][disp] || 0) + 1;
+              counts[canAct][sub][disp] = (counts[canAct][sub][disp] || 0) + 1;
             }
           }
         }
@@ -514,8 +532,7 @@ export default function PerformanceReview() {
         for (const rawK of Object.keys(rollupTable[rawAct][sub] || {})) {
           if (lc(canAct) === 'hauling') {
             const rk = lc(rawK);
-            if (rk === 'trucks' || rk === 'weight' || rk === 'distance')
-              continue;
+            if (rk === 'trucks' || rk === 'weight' || rk === 'distance') continue;
           }
           const disp = displayNameFor(rawK);
           if (!isAllowedMetric(canAct, disp)) continue;
@@ -530,10 +547,7 @@ export default function PerformanceReview() {
     return out;
   }, [rollupTable]);
 
-  const activityOptionsTable = useMemo(
-    () => Object.keys(filteredRollupTable),
-    [filteredRollupTable],
-  );
+  const activityOptionsTable = useMemo(() => Object.keys(filteredRollupTable), [filteredRollupTable]);
 
   // filtered rollup for graph (current user) – just for activity/sub/metric options
   const filteredRollupGraph: Rollup = useMemo(() => {
@@ -546,8 +560,7 @@ export default function PerformanceReview() {
         for (const rawK of Object.keys(rollupGraph[rawAct][sub] || {})) {
           if (lc(canAct) === 'hauling') {
             const rk = lc(rawK);
-            if (rk === 'trucks' || rk === 'weight' || rk === 'distance')
-              continue;
+            if (rk === 'trucks' || rk === 'weight' || rk === 'distance') continue;
           }
           const disp = displayNameFor(rawK);
           if (!isAllowedMetric(canAct, disp)) continue;
@@ -562,10 +575,7 @@ export default function PerformanceReview() {
     return out;
   }, [rollupGraph]);
 
-  const activityOptionsGraph = useMemo(
-    () => Object.keys(filteredRollupGraph),
-    [filteredRollupGraph],
-  );
+  const activityOptionsGraph = useMemo(() => Object.keys(filteredRollupGraph), [filteredRollupGraph]);
 
   const subsByActivityGraph = useMemo(() => {
     const out: Record<string, string[]> = {};
@@ -590,21 +600,13 @@ export default function PerformanceReview() {
     }
 
     const act =
-      graphActivity && subsByActivityGraph[graphActivity]
-        ? graphActivity
-        : activityOptionsGraph[0];
+      graphActivity && subsByActivityGraph[graphActivity] ? graphActivity : activityOptionsGraph[0];
 
     const subs = act ? subsByActivityGraph[act] || [] : [];
-    const sub =
-      graphSub && subs.includes(graphSub) ? graphSub : subs[0] || undefined;
+    const sub = graphSub && subs.includes(graphSub) ? graphSub : subs[0] || undefined;
 
-    const metrics =
-      act && sub ? Object.keys(filteredRollupGraph[act]?.[sub] || {}) : [];
-
-    const metric =
-      graphMetric && metrics.includes(graphMetric)
-        ? graphMetric
-        : metrics[0] || undefined;
+    const metrics = act && sub ? Object.keys(filteredRollupGraph[act]?.[sub] || {}) : [];
+    const metric = graphMetric && metrics.includes(graphMetric) ? graphMetric : metrics[0] || undefined;
 
     setGraphActivity(act);
     setGraphSub(sub);
@@ -628,8 +630,7 @@ export default function PerformanceReview() {
         for (const rawK of Object.keys(t[rawAct][sub] || {})) {
           if (lc(canAct) === 'hauling') {
             const rk = lc(rawK);
-            if (rk === 'trucks' || rk === 'weight' || rk === 'distance')
-              continue;
+            if (rk === 'trucks' || rk === 'weight' || rk === 'distance') continue;
           }
           const disp = displayNameFor(rawK);
           if (disp !== graphMetric) continue;
@@ -655,28 +656,10 @@ export default function PerformanceReview() {
     return acc;
   }
 
-  function buildContinuousDailySeriesFromAcc(acc: Record<string, number>) {
-    const dates = Object.keys(acc).sort();
-    if (!dates.length) return [] as { date: string; value: number }[];
-
-    const start = parseYmd(dates[0]);
-    const end = parseYmd(dates[dates.length - 1]);
-    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end)
-      return [];
-
-    const series: { date: string; value: number }[] = [];
-    let cur = new Date(start);
-    while (cur <= end) {
-      const ymd = formatYmd(cur);
-      series.push({ date: ymd, value: acc[ymd] || 0 });
-      cur.setDate(cur.getDate() + 1);
-    }
-    return series;
-  }
-
-  // ✅ FIXED:
-  // - Best 7-day works even when you have < 7 calendar days of data (sums what exists + implicit zeros)
-  // - DS/NS productivity uses NON-ZERO shifts as the denominator (avg = total / nonZeroShifts)
+  // ✅ Milestones:
+  // - Record Week works even when span < 7 days (uses smaller window)
+  // - DS/NS averages are per NON-ZERO shift
+  // - Adds bestShiftAvgValue so we can compute % diff for "Most Productive Shift"
   function computeMilestonesAllTime(rows: ShiftRow[]) {
     if (!graphActivity || !graphSub || !graphMetric) return null;
 
@@ -684,7 +667,7 @@ export default function PerformanceReview() {
     const dates = Object.keys(acc).sort();
     if (!dates.length) return null;
 
-    // Best daily total
+    // Record shift
     let bestDayVal = -Infinity;
     let bestDayDate = dates[0];
     for (const d of dates) {
@@ -699,8 +682,7 @@ export default function PerformanceReview() {
     // Build continuous calendar series (min->max), fill missing days with 0
     const start = parseYmd(dates[0]);
     const end = parseYmd(dates[dates.length - 1]);
-    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end)
-      return null;
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) return null;
 
     const allDays: { date: string; value: number }[] = [];
     {
@@ -712,14 +694,13 @@ export default function PerformanceReview() {
       }
     }
 
-    // Best 7-day rolling (calendar window, implicit zeros)
-    // If total span < 7 days, use window = span length
+    // Record week (rolling window, implicit zeros). If span < 7, use span length.
     const window = Math.min(7, allDays.length);
     let best7Val = -Infinity;
     let best7Start = allDays[0]?.date || '';
     let best7End = allDays[allDays.length - 1]?.date || '';
-
     let windowSum = 0;
+
     for (let i = 0; i < allDays.length; i++) {
       windowSum += allDays[i].value;
       if (i >= window) windowSum -= allDays[i - window].value;
@@ -734,7 +715,7 @@ export default function PerformanceReview() {
     }
     if (!Number.isFinite(best7Val)) best7Val = 0;
 
-    // Best month total
+    // Record month
     const byMonth: Record<string, number> = {};
     for (const pt of allDays) {
       const ym = pt.date.slice(0, 7);
@@ -754,10 +735,7 @@ export default function PerformanceReview() {
       if (!bestMonthKey) return '';
       const [y, m] = bestMonthKey.split('-').map((x) => parseInt(x, 10));
       const d = new Date(y, (m || 1) - 1, 1);
-      return new Intl.DateTimeFormat(undefined, {
-        month: 'long',
-        year: 'numeric',
-      }).format(d);
+      return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(d);
     })();
 
     // DS/NS productivity (avg per NON-ZERO shift)
@@ -790,22 +768,37 @@ export default function PerformanceReview() {
     const dsAvg = dsNonZero ? dsSum / dsNonZero : NaN;
     const nsAvg = nsNonZero ? nsSum / nsNonZero : NaN;
 
+    const dsOk = Number.isFinite(dsAvg);
+    const nsOk = Number.isFinite(nsAvg);
+
     let bestShiftLabel = '–';
-    if (Number.isFinite(dsAvg) || Number.isFinite(nsAvg)) {
-      if (!Number.isFinite(nsAvg)) bestShiftLabel = 'DS';
-      else if (!Number.isFinite(dsAvg)) bestShiftLabel = 'NS';
-      else if (dsAvg === nsAvg) bestShiftLabel = 'DS = NS';
-      else bestShiftLabel = dsAvg > nsAvg ? 'DS' : 'NS';
+    let bestShiftAvgValue = NaN;
+
+    if (dsOk || nsOk) {
+      if (dsOk && !nsOk) {
+        bestShiftLabel = 'DS';
+        bestShiftAvgValue = dsAvg;
+      } else if (!dsOk && nsOk) {
+        bestShiftLabel = 'NS';
+        bestShiftAvgValue = nsAvg;
+      } else if (dsOk && nsOk) {
+        if (dsAvg === nsAvg) {
+          bestShiftLabel = 'DS = NS';
+          bestShiftAvgValue = dsAvg;
+        } else if (dsAvg > nsAvg) {
+          bestShiftLabel = 'DS';
+          bestShiftAvgValue = dsAvg;
+        } else {
+          bestShiftLabel = 'NS';
+          bestShiftAvgValue = nsAvg;
+        }
+      }
     }
 
     return {
       bestDay: { total: bestDayVal, date: bestDayDate },
       best7: { total: best7Val, start: best7Start, end: best7End },
-      bestMonth: {
-        total: bestMonthVal,
-        ym: bestMonthKey,
-        label: bestMonthPretty,
-      },
+      bestMonth: { total: bestMonthVal, ym: bestMonthKey, label: bestMonthPretty },
       shiftCompare: {
         dsAvg,
         nsAvg,
@@ -814,6 +807,7 @@ export default function PerformanceReview() {
         dsNonZero,
         nsNonZero,
         bestShiftLabel,
+        bestShiftAvgValue,
       },
     };
   }
@@ -822,6 +816,12 @@ export default function PerformanceReview() {
     () => computeMilestonesAllTime(rowsMilestones),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rowsMilestones, graphActivity, graphSub, graphMetric],
+  );
+
+  const milestonesCrewAllTime = useMemo(
+    () => (selectedCrewId ? computeMilestonesAllTime(rowsMilestonesCrew) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rowsMilestonesCrew, selectedCrewId, graphActivity, graphSub, graphMetric],
   );
 
   // helper to build daily + cumulative series for a given set of rows (graph range)
@@ -844,8 +844,7 @@ export default function PerformanceReview() {
           for (const rawK of Object.keys(t[rawAct][sub] || {})) {
             if (lc(canAct) === 'hauling') {
               const rk = lc(rawK);
-              if (rk === 'trucks' || rk === 'weight' || rk === 'distance')
-                continue;
+              if (rk === 'trucks' || rk === 'weight' || rk === 'distance') continue;
             }
             const disp = displayNameFor(rawK);
             if (disp !== graphMetric) continue;
@@ -888,15 +887,7 @@ export default function PerformanceReview() {
 
   const seriesCrew = useMemo(
     () => (selectedCrewId ? computeSeries(rowsGraphCrew) : []),
-    [
-      rowsGraphCrew,
-      selectedCrewId,
-      graphActivity,
-      graphSub,
-      graphMetric,
-      fromGraph,
-      toGraph,
-    ],
+    [rowsGraphCrew, selectedCrewId, graphActivity, graphSub, graphMetric, fromGraph, toGraph],
   );
 
   const dailyMax = useMemo(() => {
@@ -926,10 +917,7 @@ export default function PerformanceReview() {
   const svgWidth =
     seriesCurrent.length > 0
       ? Math.max(
-          chartPaddingLeft +
-            chartPaddingRight +
-            seriesCurrent.length * (barWidth + gap) -
-            gap,
+          chartPaddingLeft + chartPaddingRight + seriesCurrent.length * (barWidth + gap) - gap,
           minWidth,
         )
       : minWidth;
@@ -946,9 +934,7 @@ export default function PerformanceReview() {
     return b - (v / max) * innerHeight;
   }
 
-  function buildCumPath(
-    series: { date: string; value: number; cumulative: number }[],
-  ) {
+  function buildCumPath(series: { date: string; value: number; cumulative: number }[]) {
     if (!series.length) return '';
     const parts: string[] = [];
     series.forEach((pt, i) => {
@@ -980,9 +966,7 @@ export default function PerformanceReview() {
             <button
               onClick={() => setTab('table')}
               className={`px-3 py-2 text-sm ${
-                tab === 'table'
-                  ? 'border-b-2 border-slate-900 font-semibold'
-                  : ''
+                tab === 'table' ? 'border-b-2 border-slate-900 font-semibold' : ''
               }`}
             >
               Tabulated data view
@@ -990,9 +974,7 @@ export default function PerformanceReview() {
             <button
               onClick={() => setTab('graph')}
               className={`px-3 py-2 text-sm ${
-                tab === 'graph'
-                  ? 'border-b-2 border-slate-900 font-semibold'
-                  : ''
+                tab === 'graph' ? 'border-b-2 border-slate-900 font-semibold' : ''
               }`}
             >
               Graph data view
@@ -1015,11 +997,7 @@ export default function PerformanceReview() {
                   onChange={setToTable}
                   datesWithData={datesWithData}
                 />
-                <button
-                  className="btn"
-                  onClick={() => fetchTableData(fromTable, toTable)}
-                  disabled={loading}
-                >
+                <button className="btn" onClick={() => fetchTableData(fromTable, toTable)} disabled={loading}>
                   Apply
                 </button>
               </div>
@@ -1035,8 +1013,7 @@ export default function PerformanceReview() {
                     const gs = subsAny['Ground Support'] || {};
                     const face = subsAny['Face Drilling'] || {};
 
-                    const get = (obj: any, key: string) =>
-                      Number((obj && obj[key]) ?? 0);
+                    const get = (obj: any, key: string) => Number((obj && obj[key]) ?? 0);
 
                     const rehabNoBolts = get(rehab, 'No. of bolts');
                     const rehabGsDrillm = get(rehab, 'GS Drillm');
@@ -1052,8 +1029,7 @@ export default function PerformanceReview() {
                     const faceHoles = get(face, 'No of Holes');
                     const faceCut = get(face, 'Cut Length');
 
-                    const allTotalDrillm =
-                      rehabGsDrillm + gsGsDrillm + faceDevDrillm;
+                    const allTotalDrillm = rehabGsDrillm + gsGsDrillm + faceDevDrillm;
                     const allNoBolts = rehabNoBolts + gsNoBolts;
                     const allCut = faceCut;
                     const allHoles = faceHoles;
@@ -1066,63 +1042,29 @@ export default function PerformanceReview() {
                         nonZeroCounts[act][subName][metric]) ||
                       0;
 
-                    const rehabNoBoltsCount = getCount(
-                      'Rehab',
-                      'No. of bolts',
-                    );
-                    const rehabGsDrillmCount = getCount(
-                      'Rehab',
-                      'GS Drillm',
-                    );
+                    const rehabNoBoltsCount = getCount('Rehab', 'No. of bolts');
+                    const rehabGsDrillmCount = getCount('Rehab', 'GS Drillm');
                     const rehabAgiCount = getCount('Rehab', 'Agi Volume');
-                    const rehabSprayCount = getCount(
-                      'Rehab',
-                      'Spray Volume',
-                    );
+                    const rehabSprayCount = getCount('Rehab', 'Spray Volume');
 
-                    const gsNoBoltsCount = getCount(
-                      'Ground Support',
-                      'No. of bolts',
-                    );
-                    const gsGsDrillmCount = getCount(
-                      'Ground Support',
-                      'GS Drillm',
-                    );
-                    const gsAgiCount = getCount(
-                      'Ground Support',
-                      'Agi Volume',
-                    );
-                    const gsSprayCount = getCount(
-                      'Ground Support',
-                      'Spray Volume',
-                    );
+                    const gsNoBoltsCount = getCount('Ground Support', 'No. of bolts');
+                    const gsGsDrillmCount = getCount('Ground Support', 'GS Drillm');
+                    const gsAgiCount = getCount('Ground Support', 'Agi Volume');
+                    const gsSprayCount = getCount('Ground Support', 'Spray Volume');
 
-                    const faceDevDrillmCount = getCount(
-                      'Face Drilling',
-                      'Dev Drillm',
-                    );
-                    const faceHolesCount = getCount(
-                      'Face Drilling',
-                      'No of Holes',
-                    );
-                    const faceCutCount = getCount(
-                      'Face Drilling',
-                      'Cut Length',
-                    );
+                    const faceDevDrillmCount = getCount('Face Drilling', 'Dev Drillm');
+                    const faceHolesCount = getCount('Face Drilling', 'No of Holes');
+                    const faceCutCount = getCount('Face Drilling', 'Cut Length');
 
                     const allTotalDrillmCount =
-                      rehabGsDrillmCount +
-                      gsGsDrillmCount +
-                      faceDevDrillmCount;
-                    const allNoBoltsCount =
-                      rehabNoBoltsCount + gsNoBoltsCount;
+                      rehabGsDrillmCount + gsGsDrillmCount + faceDevDrillmCount;
+                    const allNoBoltsCount = rehabNoBoltsCount + gsNoBoltsCount;
                     const allCutCount = faceCutCount;
                     const allHolesCount = faceHolesCount;
                     const allAgiCount = rehabAgiCount + gsAgiCount;
                     const allSprayCount = rehabSprayCount + gsSprayCount;
 
-                    const safeAvg = (sum: number, denom: number) =>
-                      denom ? sum / denom : NaN;
+                    const safeAvg = (sum: number, denom: number) => (denom ? sum / denom : NaN);
 
                     return (
                       <div key={act}>
@@ -1135,112 +1077,67 @@ export default function PerformanceReview() {
                             <thead>
                               <tr className="text-left text-slate-600">
                                 <th className="py-1 pr-4 w-1/4">Metric</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">
-                                  Sum
-                                </th>
-                                <th className="py-1 pr-4 w-1/4 text-right">
-                                  Shift Avg
-                                </th>
-                                <th className="py-1 pr-4 w-1/4 text-right">
-                                  Non-zero shifts
-                                </th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Sum</th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Shift Avg</th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Non-zero shifts</th>
                               </tr>
                             </thead>
                             <tbody>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  No. of bolts
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">No. of bolts</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {rehabNoBolts.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(
-                                    safeAvg(rehabNoBolts, rehabNoBoltsCount),
-                                  )
-                                    ? safeAvg(
-                                        rehabNoBolts,
-                                        rehabNoBoltsCount,
-                                      ).toLocaleString(undefined, {
+                                  {Number.isFinite(safeAvg(rehabNoBolts, rehabNoBoltsCount))
+                                    ? safeAvg(rehabNoBolts, rehabNoBoltsCount).toLocaleString(undefined, {
                                         maximumFractionDigits: 2,
                                       })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {rehabNoBoltsCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{rehabNoBoltsCount}</td>
                               </tr>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  GS Drillm
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">GS Drillm</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {rehabGsDrillm.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(
-                                    safeAvg(
-                                      rehabGsDrillm,
-                                      rehabGsDrillmCount,
-                                    ),
-                                  )
-                                    ? safeAvg(
-                                        rehabGsDrillm,
-                                        rehabGsDrillmCount,
-                                      ).toLocaleString(undefined, {
+                                  {Number.isFinite(safeAvg(rehabGsDrillm, rehabGsDrillmCount))
+                                    ? safeAvg(rehabGsDrillm, rehabGsDrillmCount).toLocaleString(undefined, {
                                         maximumFractionDigits: 2,
                                       })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {rehabGsDrillmCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{rehabGsDrillmCount}</td>
                               </tr>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  Agi Volume
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">Agi Volume</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {rehabAgi.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(
-                                    safeAvg(rehabAgi, rehabAgiCount),
-                                  )
-                                    ? safeAvg(
-                                        rehabAgi,
-                                        rehabAgiCount,
-                                      ).toLocaleString(undefined, {
+                                  {Number.isFinite(safeAvg(rehabAgi, rehabAgiCount))
+                                    ? safeAvg(rehabAgi, rehabAgiCount).toLocaleString(undefined, {
                                         maximumFractionDigits: 2,
                                       })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {rehabAgiCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{rehabAgiCount}</td>
                               </tr>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  Spray Volume
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">Spray Volume</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {rehabSpray.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(
-                                    safeAvg(rehabSpray, rehabSprayCount),
-                                  )
-                                    ? safeAvg(
-                                        rehabSpray,
-                                        rehabSprayCount,
-                                      ).toLocaleString(undefined, {
+                                  {Number.isFinite(safeAvg(rehabSpray, rehabSprayCount))
+                                    ? safeAvg(rehabSpray, rehabSprayCount).toLocaleString(undefined, {
                                         maximumFractionDigits: 2,
                                       })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {rehabSprayCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{rehabSprayCount}</td>
                               </tr>
                             </tbody>
                           </table>
@@ -1253,99 +1150,67 @@ export default function PerformanceReview() {
                             <thead>
                               <tr className="text-left text-slate-600">
                                 <th className="py-1 pr-4 w-1/4">Metric</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">
-                                  Sum
-                                </th>
-                                <th className="py-1 pr-4 w-1/4 text-right">
-                                  Shift Avg
-                                </th>
-                                <th className="py-1 pr-4 w-1/4 text-right">
-                                  Non-zero shifts
-                                </th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Sum</th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Shift Avg</th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Non-zero shifts</th>
                               </tr>
                             </thead>
                             <tbody>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  No. of bolts
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">No. of bolts</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {gsNoBolts.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(
-                                    safeAvg(gsNoBolts, gsNoBoltsCount),
-                                  )
-                                    ? safeAvg(gsNoBolts, gsNoBoltsCount)
-                                        .toLocaleString(undefined, {
-                                          maximumFractionDigits: 2,
-                                        })
+                                  {Number.isFinite(safeAvg(gsNoBolts, gsNoBoltsCount))
+                                    ? safeAvg(gsNoBolts, gsNoBoltsCount).toLocaleString(undefined, {
+                                        maximumFractionDigits: 2,
+                                      })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {gsNoBoltsCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{gsNoBoltsCount}</td>
                               </tr>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  GS Drillm
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">GS Drillm</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {gsGsDrillm.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(
-                                    safeAvg(gsGsDrillm, gsGsDrillmCount),
-                                  )
-                                    ? safeAvg(gsGsDrillm, gsGsDrillmCount)
-                                        .toLocaleString(undefined, {
-                                          maximumFractionDigits: 2,
-                                        })
+                                  {Number.isFinite(safeAvg(gsGsDrillm, gsGsDrillmCount))
+                                    ? safeAvg(gsGsDrillm, gsGsDrillmCount).toLocaleString(undefined, {
+                                        maximumFractionDigits: 2,
+                                      })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {gsGsDrillmCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{gsGsDrillmCount}</td>
                               </tr>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  Agi Volume
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">Agi Volume</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {gsAgi.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
                                   {Number.isFinite(safeAvg(gsAgi, gsAgiCount))
-                                    ? safeAvg(gsAgi, gsAgiCount).toLocaleString(
-                                        undefined,
-                                        { maximumFractionDigits: 2 },
-                                      )
+                                    ? safeAvg(gsAgi, gsAgiCount).toLocaleString(undefined, {
+                                        maximumFractionDigits: 2,
+                                      })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {gsAgiCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{gsAgiCount}</td>
                               </tr>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  Spray Volume
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">Spray Volume</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {gsSpray.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(
-                                    safeAvg(gsSpray, gsSprayCount),
-                                  )
-                                    ? safeAvg(gsSpray, gsSprayCount).toLocaleString(
-                                        undefined,
-                                        { maximumFractionDigits: 2 },
-                                      )
+                                  {Number.isFinite(safeAvg(gsSpray, gsSprayCount))
+                                    ? safeAvg(gsSpray, gsSprayCount).toLocaleString(undefined, {
+                                        maximumFractionDigits: 2,
+                                      })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {gsSprayCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{gsSprayCount}</td>
                               </tr>
                             </tbody>
                           </table>
@@ -1358,79 +1223,53 @@ export default function PerformanceReview() {
                             <thead>
                               <tr className="text-left text-slate-600">
                                 <th className="py-1 pr-4 w-1/4">Metric</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">
-                                  Sum
-                                </th>
-                                <th className="py-1 pr-4 w-1/4 text-right">
-                                  Shift Avg
-                                </th>
-                                <th className="py-1 pr-4 w-1/4 text-right">
-                                  Non-zero shifts
-                                </th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Sum</th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Shift Avg</th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Non-zero shifts</th>
                               </tr>
                             </thead>
                             <tbody>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  Dev Drillm
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">Dev Drillm</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {faceDevDrillm.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(
-                                    safeAvg(
-                                      faceDevDrillm,
-                                      faceDevDrillmCount,
-                                    ),
-                                  )
-                                    ? safeAvg(faceDevDrillm, faceDevDrillmCount).toLocaleString(
-                                        undefined,
-                                        { maximumFractionDigits: 2 },
-                                      )
+                                  {Number.isFinite(safeAvg(faceDevDrillm, faceDevDrillmCount))
+                                    ? safeAvg(faceDevDrillm, faceDevDrillmCount).toLocaleString(undefined, {
+                                        maximumFractionDigits: 2,
+                                      })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {faceDevDrillmCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{faceDevDrillmCount}</td>
                               </tr>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  No of Holes
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">No of Holes</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {faceHoles.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
                                   {Number.isFinite(safeAvg(faceHoles, faceHolesCount))
-                                    ? safeAvg(faceHoles, faceHolesCount).toLocaleString(
-                                        undefined,
-                                        { maximumFractionDigits: 2 },
-                                      )
+                                    ? safeAvg(faceHoles, faceHolesCount).toLocaleString(undefined, {
+                                        maximumFractionDigits: 2,
+                                      })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {faceHolesCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{faceHolesCount}</td>
                               </tr>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  Cut Length
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">Cut Length</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {faceCut.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
                                   {Number.isFinite(safeAvg(faceCut, faceCutCount))
-                                    ? safeAvg(faceCut, faceCutCount).toLocaleString(
-                                        undefined,
-                                        { maximumFractionDigits: 2 },
-                                      )
+                                    ? safeAvg(faceCut, faceCutCount).toLocaleString(undefined, {
+                                        maximumFractionDigits: 2,
+                                      })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {faceCutCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{faceCutCount}</td>
                               </tr>
                             </tbody>
                           </table>
@@ -1443,138 +1282,95 @@ export default function PerformanceReview() {
                             <thead>
                               <tr className="text-left text-slate-600">
                                 <th className="py-1 pr-4 w-1/4">Metric</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">
-                                  Sum
-                                </th>
-                                <th className="py-1 pr-4 w-1/4 text-right">
-                                  Shift Avg
-                                </th>
-                                <th className="py-1 pr-4 w-1/4 text-right">
-                                  Non-zero shifts
-                                </th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Sum</th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Shift Avg</th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Non-zero shifts</th>
                               </tr>
                             </thead>
                             <tbody>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  Total Drillm
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">Total Drillm</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {allTotalDrillm.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(
-                                    safeAvg(
-                                      allTotalDrillm,
-                                      allTotalDrillmCount,
-                                    ),
-                                  )
-                                    ? safeAvg(allTotalDrillm, allTotalDrillmCount).toLocaleString(
-                                        undefined,
-                                        { maximumFractionDigits: 2 },
-                                      )
+                                  {Number.isFinite(safeAvg(allTotalDrillm, allTotalDrillmCount))
+                                    ? safeAvg(allTotalDrillm, allTotalDrillmCount).toLocaleString(undefined, {
+                                        maximumFractionDigits: 2,
+                                      })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {allTotalDrillmCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{allTotalDrillmCount}</td>
                               </tr>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  No. of bolts
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">No. of bolts</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {allNoBolts.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
                                   {Number.isFinite(safeAvg(allNoBolts, allNoBoltsCount))
-                                    ? safeAvg(allNoBolts, allNoBoltsCount).toLocaleString(
-                                        undefined,
-                                        { maximumFractionDigits: 2 },
-                                      )
+                                    ? safeAvg(allNoBolts, allNoBoltsCount).toLocaleString(undefined, {
+                                        maximumFractionDigits: 2,
+                                      })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {allNoBoltsCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{allNoBoltsCount}</td>
                               </tr>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  Cut Length
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">Cut Length</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {allCut.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
                                   {Number.isFinite(safeAvg(allCut, allCutCount))
-                                    ? safeAvg(allCut, allCutCount).toLocaleString(
-                                        undefined,
-                                        { maximumFractionDigits: 2 },
-                                      )
+                                    ? safeAvg(allCut, allCutCount).toLocaleString(undefined, {
+                                        maximumFractionDigits: 2,
+                                      })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {allCutCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{allCutCount}</td>
                               </tr>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  No of Holes
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">No of Holes</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {allHoles.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
                                   {Number.isFinite(safeAvg(allHoles, allHolesCount))
-                                    ? safeAvg(allHoles, allHolesCount).toLocaleString(
-                                        undefined,
-                                        { maximumFractionDigits: 2 },
-                                      )
+                                    ? safeAvg(allHoles, allHolesCount).toLocaleString(undefined, {
+                                        maximumFractionDigits: 2,
+                                      })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {allHolesCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{allHolesCount}</td>
                               </tr>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  Agi Volume
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">Agi Volume</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {allAgi.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
                                   {Number.isFinite(safeAvg(allAgi, allAgiCount))
-                                    ? safeAvg(allAgi, allAgiCount).toLocaleString(
-                                        undefined,
-                                        { maximumFractionDigits: 2 },
-                                      )
+                                    ? safeAvg(allAgi, allAgiCount).toLocaleString(undefined, {
+                                        maximumFractionDigits: 2,
+                                      })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {allAgiCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{allAgiCount}</td>
                               </tr>
                               <tr>
-                                <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                  Spray Volume
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-slate-700">Spray Volume</td>
                                 <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                   {allSpray.toLocaleString()}
                                 </td>
                                 <td className="py-1 pr-4 w-1/4 text-right">
-                                  {Number.isFinite(
-                                    safeAvg(allSpray, allSprayCount),
-                                  )
-                                    ? safeAvg(allSpray, allSprayCount).toLocaleString(
-                                        undefined,
-                                        { maximumFractionDigits: 2 },
-                                      )
+                                  {Number.isFinite(safeAvg(allSpray, allSprayCount))
+                                    ? safeAvg(allSpray, allSprayCount).toLocaleString(undefined, {
+                                        maximumFractionDigits: 2,
+                                      })
                                     : '–'}
                                 </td>
-                                <td className="py-1 pr-4 w-1/4 text-right">
-                                  {allSprayCount}
-                                </td>
+                                <td className="py-1 pr-4 w-1/4 text-right">{allSprayCount}</td>
                               </tr>
                             </tbody>
                           </table>
@@ -1594,15 +1390,9 @@ export default function PerformanceReview() {
                             <thead>
                               <tr className="text-left text-slate-600">
                                 <th className="py-1 pr-4 w-1/4">Metric</th>
-                                <th className="py-1 pr-4 w-1/4 text-right">
-                                  Sum
-                                </th>
-                                <th className="py-1 pr-4 w-1/4 text-right">
-                                  Shift Avg
-                                </th>
-                                <th className="py-1 pr-4 w-1/4 text-right">
-                                  Non-zero shifts
-                                </th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Sum</th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Shift Avg</th>
+                                <th className="py-1 pr-4 w-1/4 text-right">Non-zero shifts</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -1612,14 +1402,10 @@ export default function PerformanceReview() {
                                     nonZeroCounts[act][sub] &&
                                     nonZeroCounts[act][sub][dispKey]) ||
                                   0;
-                                const avg = denom
-                                  ? (Number(sum) || 0) / denom
-                                  : NaN;
+                                const avg = denom ? (Number(sum) || 0) / denom : NaN;
                                 return (
                                   <tr key={dispKey}>
-                                    <td className="py-1 pr-4 w-1/4 text-slate-700">
-                                      {dispKey}
-                                    </td>
+                                    <td className="py-1 pr-4 w-1/4 text-slate-700">{dispKey}</td>
                                     <td className="py-1 pr-4 w-1/4 text-right font-semibold">
                                       {Number(sum).toLocaleString()}
                                     </td>
@@ -1630,9 +1416,7 @@ export default function PerformanceReview() {
                                           })
                                         : '–'}
                                     </td>
-                                    <td className="py-1 pr-4 w-1/4 text-right">
-                                      {denom}
-                                    </td>
+                                    <td className="py-1 pr-4 w-1/4 text-right">{denom}</td>
                                   </tr>
                                 );
                               })}
@@ -1669,28 +1453,19 @@ export default function PerformanceReview() {
                   onChange={setToGraph}
                   datesWithData={datesWithData}
                 />
-                <button
-                  className="btn"
-                  onClick={() => fetchGraphData(fromGraph, toGraph)}
-                  disabled={loading}
-                >
+                <button className="btn" onClick={() => fetchGraphData(fromGraph, toGraph)} disabled={loading}>
                   Apply
                 </button>
               </div>
 
-              {activityOptionsGraph.length === 0 ||
-              !graphActivity ||
-              !graphSub ||
-              !graphMetric ? (
+              {activityOptionsGraph.length === 0 || !graphActivity || !graphSub || !graphMetric ? (
                 <div className="text-sm text-slate-500">No data</div>
               ) : (
                 <>
                   {/* Graph controls */}
                   <div className="flex flex-wrap gap-2 items-end">
                     <div>
-                      <div className="text-xs text-slate-600 mb-1">
-                        Activity
-                      </div>
+                      <div className="text-xs text-slate-600 mb-1">Activity</div>
                       <select
                         className="input text-sm"
                         value={graphActivity}
@@ -1704,9 +1479,7 @@ export default function PerformanceReview() {
                       </select>
                     </div>
                     <div>
-                      <div className="text-xs text-slate-600 mb-1">
-                        Sub-activity
-                      </div>
+                      <div className="text-xs text-slate-600 mb-1">Sub-activity</div>
                       <select
                         className="input text-sm"
                         value={graphSub || ''}
@@ -1734,21 +1507,14 @@ export default function PerformanceReview() {
                       </select>
                     </div>
                     <div>
-                      <div className="text-xs text-slate-600 mb-1">
-                        Crew Match-Up
-                      </div>
+                      <div className="text-xs text-slate-600 mb-1">Crew Match-Up</div>
                       <select
                         className="input text-sm"
                         value={selectedCrewId}
                         onChange={(e) => {
                           const newId = e.target.value;
                           setSelectedCrewId(newId);
-                          fetchCrewGraphData(
-                            newId,
-                            fromGraph,
-                            toGraph,
-                            setRowsGraphCrew,
-                          );
+                          fetchCrewGraphData(newId, fromGraph, toGraph, setRowsGraphCrew);
                         }}
                       >
                         <option value="">None</option>
@@ -1788,78 +1554,191 @@ export default function PerformanceReview() {
                   {/* Milestones (all-time, hidden fetch) */}
                   {milestonesAllTime && (
                     <div className="border rounded p-3 bg-slate-50">
-                      <div className="font-semibold mb-2">
-                        Milestones (all-time for selected metric)
-                      </div>
+                      <div className="font-semibold mb-2">Milestones</div>
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                        {/* Record Shift */}
                         <div className="bg-white border rounded p-2">
-                          <div className="text-xs text-slate-600">
-                            Best daily total
-                          </div>
+                          <div className="text-xs text-slate-600">Record Shift</div>
+
                           <div className="font-semibold">
                             {milestonesAllTime.bestDay.total.toLocaleString()} on{' '}
-                            {milestonesAllTime.bestDay.date || '–'}
+                            {fmtDdMmYy(milestonesAllTime.bestDay.date)}
                           </div>
+
+                          {selectedCrewId && milestonesCrewAllTime && (
+                            <div className="mt-1 text-xs text-slate-700">
+                              <span className="font-medium">{crewName}:</span>{' '}
+                              {milestonesCrewAllTime.bestDay.total.toLocaleString()} on{' '}
+                              {fmtDdMmYy(milestonesCrewAllTime.bestDay.date)}
+                              {(() => {
+                                const d = pctDiff(
+                                  milestonesAllTime.bestDay.total,
+                                  milestonesCrewAllTime.bestDay.total,
+                                );
+                                if (d === null) return null;
+                                const cls = d >= 0 ? 'text-green-700' : 'text-red-700';
+                                const sign = d >= 0 ? '+' : '';
+                                return (
+                                  <span className={`ml-2 font-semibold ${cls}`}>
+                                    ({sign}
+                                    {d.toFixed(1)}%)
+                                  </span>
+                                );
+                              })()}
+                            </div>
+                          )}
                         </div>
 
+                        {/* Record Week */}
                         <div className="bg-white border rounded p-2">
-                          <div className="text-xs text-slate-600">
-                            Best 7-day total
-                          </div>
+                          <div className="text-xs text-slate-600">Record Week</div>
+
                           <div className="font-semibold">
                             {milestonesAllTime.best7.total.toLocaleString()}
                           </div>
                           <div className="text-xs text-slate-600">
-                            {milestonesAllTime.best7.start &&
-                            milestonesAllTime.best7.end
-                              ? `${milestonesAllTime.best7.start} → ${milestonesAllTime.best7.end}`
+                            {milestonesAllTime.best7.start && milestonesAllTime.best7.end
+                              ? `${fmtDdMmYy(milestonesAllTime.best7.start)} → ${fmtDdMmYy(
+                                  milestonesAllTime.best7.end,
+                                )}`
                               : '–'}
                           </div>
+
+                          {selectedCrewId && milestonesCrewAllTime && (
+                            <div className="mt-1 text-xs text-slate-700">
+                              <span className="font-medium">{crewName}:</span>{' '}
+                              {milestonesCrewAllTime.best7.total.toLocaleString()}
+                              <span className="text-slate-600">
+                                {' '}
+                                (
+                                {milestonesCrewAllTime.best7.start && milestonesCrewAllTime.best7.end
+                                  ? `${fmtDdMmYy(milestonesCrewAllTime.best7.start)} → ${fmtDdMmYy(
+                                      milestonesCrewAllTime.best7.end,
+                                    )}`
+                                  : '–'}
+                                )
+                              </span>
+                              {(() => {
+                                const d = pctDiff(
+                                  milestonesAllTime.best7.total,
+                                  milestonesCrewAllTime.best7.total,
+                                );
+                                if (d === null) return null;
+                                const cls = d >= 0 ? 'text-green-700' : 'text-red-700';
+                                const sign = d >= 0 ? '+' : '';
+                                return (
+                                  <span className={`ml-2 font-semibold ${cls}`}>
+                                    ({sign}
+                                    {d.toFixed(1)}%)
+                                  </span>
+                                );
+                              })()}
+                            </div>
+                          )}
                         </div>
 
+                        {/* Record Month */}
                         <div className="bg-white border rounded p-2">
-                          <div className="text-xs text-slate-600">
-                            Best monthly total
-                          </div>
+                          <div className="text-xs text-slate-600">Record Month</div>
+
                           <div className="font-semibold">
                             {milestonesAllTime.bestMonth.total.toLocaleString()}
                           </div>
                           <div className="text-xs text-slate-600">
-                            {milestonesAllTime.bestMonth.label ||
-                              milestonesAllTime.bestMonth.ym ||
-                              '–'}
+                            {fmtMonthMmYy(milestonesAllTime.bestMonth.ym)}
                           </div>
+
+                          {selectedCrewId && milestonesCrewAllTime && (
+                            <div className="mt-1 text-xs text-slate-700">
+                              <span className="font-medium">{crewName}:</span>{' '}
+                              {milestonesCrewAllTime.bestMonth.total.toLocaleString()}
+                              <span className="text-slate-600">
+                                {' '}
+                                ({fmtMonthMmYy(milestonesCrewAllTime.bestMonth.ym)})
+                              </span>
+                              {(() => {
+                                const d = pctDiff(
+                                  milestonesAllTime.bestMonth.total,
+                                  milestonesCrewAllTime.bestMonth.total,
+                                );
+                                if (d === null) return null;
+                                const cls = d >= 0 ? 'text-green-700' : 'text-red-700';
+                                const sign = d >= 0 ? '+' : '';
+                                return (
+                                  <span className={`ml-2 font-semibold ${cls}`}>
+                                    ({sign}
+                                    {d.toFixed(1)}%)
+                                  </span>
+                                );
+                              })()}
+                            </div>
+                          )}
                         </div>
 
+                        {/* Most Productive Shift */}
                         <div className="bg-white border rounded p-2">
-                          <div className="text-xs text-slate-600">
-                            Most productive shift (DS vs NS avg)
-                          </div>
-                          <div className="font-semibold">
-                            {milestonesAllTime.shiftCompare.bestShiftLabel}
-                          </div>
+                          <div className="text-xs text-slate-600">Most Productive Shift</div>
+
+                          <div className="font-semibold">{milestonesAllTime.shiftCompare.bestShiftLabel}</div>
+
                           <div className="text-xs text-slate-600">
                             DS avg:{' '}
                             {Number.isFinite(milestonesAllTime.shiftCompare.dsAvg)
-                              ? milestonesAllTime.shiftCompare.dsAvg.toLocaleString(
-                                  undefined,
-                                  { maximumFractionDigits: 2 },
-                                )
-                              : '–'}{' '}
-                            (shifts: {milestonesAllTime.shiftCompare.dsN}, non-zero:{' '}
-                            {milestonesAllTime.shiftCompare.dsNonZero})
+                              ? milestonesAllTime.shiftCompare.dsAvg.toLocaleString(undefined, {
+                                  maximumFractionDigits: 2,
+                                })
+                              : '–'}
                           </div>
                           <div className="text-xs text-slate-600">
                             NS avg:{' '}
                             {Number.isFinite(milestonesAllTime.shiftCompare.nsAvg)
-                              ? milestonesAllTime.shiftCompare.nsAvg.toLocaleString(
-                                  undefined,
-                                  { maximumFractionDigits: 2 },
-                                )
-                              : '–'}{' '}
-                            (shifts: {milestonesAllTime.shiftCompare.nsN}, non-zero:{' '}
-                            {milestonesAllTime.shiftCompare.nsNonZero})
+                              ? milestonesAllTime.shiftCompare.nsAvg.toLocaleString(undefined, {
+                                  maximumFractionDigits: 2,
+                                })
+                              : '–'}
                           </div>
+
+                          {selectedCrewId && milestonesCrewAllTime && (
+                            <div className="mt-2 text-xs text-slate-700">
+                              <div>
+                                <span className="font-medium">{crewName}:</span>{' '}
+                                {milestonesCrewAllTime.shiftCompare.bestShiftLabel}
+                                {(() => {
+                                  const d = pctDiff(
+                                    milestonesAllTime.shiftCompare.bestShiftAvgValue,
+                                    milestonesCrewAllTime.shiftCompare.bestShiftAvgValue,
+                                  );
+                                  if (d === null) return null;
+                                  const cls = d >= 0 ? 'text-green-700' : 'text-red-700';
+                                  const sign = d >= 0 ? '+' : '';
+                                  return (
+                                    <span className={`ml-2 font-semibold ${cls}`}>
+                                      ({sign}
+                                      {d.toFixed(1)}%)
+                                    </span>
+                                  );
+                                })()}
+                              </div>
+
+                              <div className="text-slate-600">
+                                DS avg:{' '}
+                                {Number.isFinite(milestonesCrewAllTime.shiftCompare.dsAvg)
+                                  ? milestonesCrewAllTime.shiftCompare.dsAvg.toLocaleString(undefined, {
+                                      maximumFractionDigits: 2,
+                                    })
+                                  : '–'}
+                              </div>
+                              <div className="text-slate-600">
+                                NS avg:{' '}
+                                {Number.isFinite(milestonesCrewAllTime.shiftCompare.nsAvg)
+                                  ? milestonesCrewAllTime.shiftCompare.nsAvg.toLocaleString(undefined, {
+                                      maximumFractionDigits: 2,
+                                    })
+                                  : '–'}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1867,9 +1746,7 @@ export default function PerformanceReview() {
 
                   {/* Combo graph: bars (daily) + cumulative lines */}
                   {seriesCurrent.length === 0 && seriesCrew.length === 0 ? (
-                    <div className="text-sm text-slate-500">
-                      No data for this selection
-                    </div>
+                    <div className="text-sm text-slate-500">No data for this selection</div>
                   ) : (
                     <div className="border rounded p-3 overflow-x-auto">
                       <svg width={svgWidth} height={svgHeight} className="block">
@@ -1892,12 +1769,7 @@ export default function PerformanceReview() {
                         />
 
                         {/* left axis label */}
-                        <text
-                          x={chartPaddingLeft - 24}
-                          y={chartPaddingTop - 4}
-                          fontSize={10}
-                          fill="#475569"
-                        >
+                        <text x={chartPaddingLeft - 24} y={chartPaddingTop - 4} fontSize={10} fill="#475569">
                           Daily total
                         </text>
                         {/* right axis label */}
@@ -1914,10 +1786,7 @@ export default function PerformanceReview() {
                         {Array.from({ length: 4 }).map((_, i) => {
                           const frac = i / 3;
                           const v = dailyMax * frac;
-                          const y =
-                            chartPaddingTop +
-                            innerHeight -
-                            frac * innerHeight;
+                          const y = chartPaddingTop + innerHeight - frac * innerHeight;
                           return (
                             <g key={`lt-${i}`}>
                               <line
@@ -1928,13 +1797,7 @@ export default function PerformanceReview() {
                                 stroke="#94a3b8"
                                 strokeWidth={1}
                               />
-                              <text
-                                x={chartPaddingLeft - 12}
-                                y={y + 3}
-                                fontSize={9}
-                                fill="#64748b"
-                                textAnchor="end"
-                              >
+                              <text x={chartPaddingLeft - 12} y={y + 3} fontSize={9} fill="#64748b" textAnchor="end">
                                 {Math.round(v).toLocaleString()}
                               </text>
                             </g>
@@ -1945,10 +1808,7 @@ export default function PerformanceReview() {
                         {Array.from({ length: 4 }).map((_, i) => {
                           const frac = i / 3;
                           const v = cumMax * frac;
-                          const y =
-                            chartPaddingTop +
-                            innerHeight -
-                            frac * innerHeight;
+                          const y = chartPaddingTop + innerHeight - frac * innerHeight;
                           return (
                             <g key={`rt-${i}`}>
                               <line
@@ -1974,10 +1834,7 @@ export default function PerformanceReview() {
 
                         {/* bars for daily totals: you + comparison */}
                         {seriesCurrent.map((pt, i) => {
-                          const xCenter =
-                            chartPaddingLeft +
-                            i * (barWidth + gap) +
-                            barWidth / 2;
+                          const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
 
                           const userVal = pt.value;
                           const crewVal = seriesCrew[i]?.value ?? 0;
@@ -1997,35 +1854,16 @@ export default function PerformanceReview() {
 
                           return (
                             <g key={`bar-${pt.date}`}>
-                              <rect
-                                x={xUser}
-                                y={yUser}
-                                width={singleWidth}
-                                height={hUser}
-                                fill="#64748b"
-                              />
+                              <rect x={xUser} y={yUser} width={singleWidth} height={hUser} fill="#64748b" />
                               {selectedCrewId && (
-                                <rect
-                                  x={xCrew}
-                                  y={yCrew}
-                                  width={singleWidth}
-                                  height={hCrew}
-                                  fill="#f59e0b"
-                                />
+                                <rect x={xCrew} y={yCrew} width={singleWidth} height={hCrew} fill="#f59e0b" />
                               )}
                             </g>
                           );
                         })}
 
                         {/* cumulative line (you) */}
-                        {cumPathCurrent && (
-                          <path
-                            d={cumPathCurrent}
-                            fill="none"
-                            stroke="#0f766e"
-                            strokeWidth={2}
-                          />
-                        )}
+                        {cumPathCurrent && <path d={cumPathCurrent} fill="none" stroke="#0f766e" strokeWidth={2} />}
 
                         {/* cumulative line (crew) */}
                         {selectedCrewId && cumPathCrew && (
@@ -2040,45 +1878,20 @@ export default function PerformanceReview() {
 
                         {/* points on cumulative lines */}
                         {seriesCurrent.map((pt, i) => {
-                          const xCenter =
-                            chartPaddingLeft +
-                            i * (barWidth + gap) +
-                            barWidth / 2;
+                          const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
                           const y = yCum(pt.cumulative);
-                          return (
-                            <circle
-                              key={`dot-me-${pt.date}`}
-                              cx={xCenter}
-                              cy={y}
-                              r={3}
-                              fill="#0f766e"
-                            />
-                          );
+                          return <circle key={`dot-me-${pt.date}`} cx={xCenter} cy={y} r={3} fill="#0f766e" />;
                         })}
                         {selectedCrewId &&
                           seriesCrew.map((pt, i) => {
-                            const xCenter =
-                              chartPaddingLeft +
-                              i * (barWidth + gap) +
-                              barWidth / 2;
+                            const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
                             const y = yCum(pt.cumulative);
-                            return (
-                              <circle
-                                key={`dot-crew-${pt.date}`}
-                                cx={xCenter}
-                                cy={y}
-                                r={2}
-                                fill="#f97316"
-                              />
-                            );
+                            return <circle key={`dot-crew-${pt.date}`} cx={xCenter} cy={y} r={2} fill="#f97316" />;
                           })}
 
                         {/* x-axis labels */}
                         {seriesCurrent.map((pt, i) => {
-                          const xCenter =
-                            chartPaddingLeft +
-                            i * (barWidth + gap) +
-                            barWidth / 2;
+                          const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
                           return (
                             <text
                               key={`lbl-${pt.date}`}
