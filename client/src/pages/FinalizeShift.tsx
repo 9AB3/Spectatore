@@ -50,13 +50,6 @@ function buildSubgroupTotals(items: any[]) {
     };
     const nz = (n: number) => (Number.isFinite(n) && n > 0 ? n : 0);
 
-    // Decide whether this Loading subgroup should read Dev- or Stope-prefixed rehandle fields
-    const pickLoadingPrefix = (sub: string) => {
-      const s = String(sub || '').toLowerCase();
-      if (s.includes('stope') || s.includes('prod') || s.includes('production')) return 'Stope';
-      return 'Dev';
-    };
-
     // -----------------------------
     // 2) DERIVED METRICS
     // -----------------------------
@@ -96,46 +89,52 @@ function buildSubgroupTotals(items: any[]) {
     // -----------------------------
     // Loading roll-ups
     // -----------------------------
+    if (activity === 'Loading') {
+      const subL = String(subActivity || '').toLowerCase();
+      const isProd =
+        subL.includes('prod') || subL.includes('production') || subL.includes('stope');
 
-    const headingToTruck = get('Heading to Truck');
-    const headingToSP = get('Heading to SP');
+      // DEV subgroup only
+      if (!isProd) {
+        const headingToTruck = get('Heading to Truck');
+        const headingToSP = get('Heading to SP');
 
-    // IMPORTANT FIX:
-    // Activity.tsx renames "SP to Truck" and "SP to SP" to Dev/Stope-prefixed keys.
-    // So we must read the prefixed values first, but keep fallback for older shifts.
-    const prefix = pickLoadingPrefix(subActivity);
+        // Dev rehandle must read Dev-prefixed keys (fallback to old keys for older shifts)
+        const devSpToTruck = get('Dev SP to Truck') || get('SP to Truck');
+        const devSpToSP = get('Dev SP to SP') || get('SP to SP');
 
-    const spToTruck = get(`${prefix} SP to Truck`) || get('SP to Truck');
-    const spToSP = get(`${prefix} SP to SP`) || get('SP to SP');
+        const primaryDev = headingToTruck + headingToSP;
+        const rehandleDev = devSpToTruck + devSpToSP;
 
-    // Development loading
-    const primaryDev = headingToTruck + headingToSP;
-    const rehandleDev = spToTruck + spToSP;
+        if (primaryDev) {
+          sums['Primary Dev Buckets'] = Number(sums['Primary Dev Buckets'] || 0) + primaryDev;
+        }
+        if (rehandleDev) {
+          sums['Rehandle Dev Buckets'] = Number(sums['Rehandle Dev Buckets'] || 0) + rehandleDev;
+        }
+      }
 
-    if (primaryDev) {
-      sums['Primary Dev Buckets'] = Number(sums['Primary Dev Buckets'] || 0) + primaryDev;
-    }
-    if (rehandleDev) {
-      sums['Rehandle Dev Buckets'] = Number(sums['Rehandle Dev Buckets'] || 0) + rehandleDev;
-    }
+      // PRODUCTION / STOPE subgroup only
+      if (isProd) {
+        const stopeToTruck = get('Stope to Truck');
+        const stopeToSP = get('Stope to SP');
 
-    // Production loading
-    const stopeToTruck = get('Stope to Truck');
-    const stopeToSP = get('Stope to SP');
+        // Stope rehandle must read Stope-prefixed keys (fallback to old keys for older shifts)
+        const stopeSpToTruck = get('Stope SP to Truck') || get('SP to Truck');
+        const stopeSpToSP = get('Stope SP to SP') || get('SP to SP');
 
-    const primaryStope = stopeToTruck + stopeToSP;
+        const primaryStope = stopeToTruck + stopeToSP;
+        const rehandleStope = stopeSpToTruck + stopeSpToSP;
 
-    // IMPORTANT FIX:
-    // Stope rehandle should use Stope-prefixed fields (or fallback), not Dev’s.
-    const stopeSpToTruck = get('Stope SP to Truck') || get('SP to Truck');
-    const stopeSpToSP = get('Stope SP to SP') || get('SP to SP');
-    const rehandleStope = stopeSpToTruck + stopeSpToSP;
-
-    if (primaryStope) {
-      sums['Primary stope buckets'] = Number(sums['Primary stope buckets'] || 0) + primaryStope;
-    }
-    if (rehandleStope) {
-      sums['Rehandle stope buckets'] = Number(sums['Rehandle stope buckets'] || 0) + rehandleStope;
+        if (primaryStope) {
+          sums['Primary stope buckets'] =
+            Number(sums['Primary stope buckets'] || 0) + primaryStope;
+        }
+        if (rehandleStope) {
+          sums['Rehandle stope buckets'] =
+            Number(sums['Rehandle stope buckets'] || 0) + rehandleStope;
+        }
+      }
     }
 
     totals[activity][subActivity] = sums;
@@ -204,7 +203,11 @@ export default function FinalizeShift() {
           <p className="text-sm text-slate-600 mb-4">
             Activities ready to sync: <strong>{activities.length}</strong>
           </p>
-          <button className="btn btn-primary" onClick={finalize} disabled={busy || activities.length === 0}>
+          <button
+            className="btn btn-primary"
+            onClick={finalize}
+            disabled={busy || activities.length === 0}
+          >
             {busy ? 'Syncing…' : 'FINALIZE SHIFT'}
           </button>
         </div>
