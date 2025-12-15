@@ -1203,24 +1203,97 @@ export default function PerformanceReview() {
                       </div>
                     </div>
 
-                    {/* Most Productive Shift */}
-                    <div className="bg-white border rounded p-2">
-                      <div className="text-xs text-slate-600">Most Productive Shift</div>
-                      <div className="grid items-center gap-2 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem]">
-                        <div className="font-semibold truncate">
-                          {milestonesAllTime.shiftCompare.bestShiftLabel}
-                        </div>
-                        <div className="text-right font-semibold truncate">
-                          {milestonesAllTimeCrew ? milestonesAllTimeCrew.shiftCompare.bestShiftLabel : ''}
-                        </div>
-                        <div className="text-right">
-                          {selectedCrewId ? <span className="text-slate-400">–</span> : ''}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
+                   {/* Most Productive Shift */}
+<div className="bg-white border rounded p-2">
+  <div className="text-xs text-slate-600 mb-2">Most Productive Shift</div>
+
+  {/* Column headers only when crew comparison is on */}
+  {selectedCrewId && (
+    <div className="grid items-center gap-2 grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)_3.5rem] text-[11px] text-slate-500 mb-1">
+      <div />
+      <div className="truncate">{currentUserName}</div>
+      <div className="text-right truncate">{crewName || 'Crew'}</div>
+      <div className="text-right">Δ</div>
+    </div>
+  )}
+
+  {/* DS avg */}
+  <div className="grid items-center gap-2 grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)_3.5rem]">
+    <div className="text-xs text-slate-600">DS Avg</div>
+    <div className="font-semibold truncate">
+      {Number.isFinite(milestonesAllTime.shiftCompare.dsAvg)
+        ? milestonesAllTime.shiftCompare.dsAvg.toLocaleString(undefined, { maximumFractionDigits: 2 })
+        : '–'}
+    </div>
+    <div className="text-right truncate">
+      {selectedCrewId
+        ? Number.isFinite(milestonesAllTimeCrew?.shiftCompare.dsAvg ?? NaN)
+          ? (milestonesAllTimeCrew!.shiftCompare.dsAvg).toLocaleString(undefined, {
+              maximumFractionDigits: 2,
+            })
+          : '–'
+        : ''}
+    </div>
+    <div className="text-right tabular-nums">
+      {selectedCrewId ? (
+        <PctPill
+          value={
+            Number.isFinite(milestonesAllTime.shiftCompare.dsAvg) &&
+            Number.isFinite(milestonesAllTimeCrew?.shiftCompare.dsAvg ?? NaN)
+              ? pctDiff(milestonesAllTime.shiftCompare.dsAvg, milestonesAllTimeCrew!.shiftCompare.dsAvg)
+              : null
+          }
+        />
+      ) : (
+        ''
+      )}
+    </div>
+  </div>
+
+  {/* NS avg */}
+  <div className="grid items-center gap-2 grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)_3.5rem] mt-1">
+    <div className="text-xs text-slate-600">NS Avg</div>
+    <div className="font-semibold truncate">
+      {Number.isFinite(milestonesAllTime.shiftCompare.nsAvg)
+        ? milestonesAllTime.shiftCompare.nsAvg.toLocaleString(undefined, { maximumFractionDigits: 2 })
+        : '–'}
+    </div>
+    <div className="text-right truncate">
+      {selectedCrewId
+        ? Number.isFinite(milestonesAllTimeCrew?.shiftCompare.nsAvg ?? NaN)
+          ? (milestonesAllTimeCrew!.shiftCompare.nsAvg).toLocaleString(undefined, {
+              maximumFractionDigits: 2,
+            })
+          : '–'
+        : ''}
+    </div>
+    <div className="text-right tabular-nums">
+      {selectedCrewId ? (
+        <PctPill
+          value={
+            Number.isFinite(milestonesAllTime.shiftCompare.nsAvg) &&
+            Number.isFinite(milestonesAllTimeCrew?.shiftCompare.nsAvg ?? NaN)
+              ? pctDiff(milestonesAllTime.shiftCompare.nsAvg, milestonesAllTimeCrew!.shiftCompare.nsAvg)
+              : null
+          }
+        />
+      ) : (
+        ''
+      )}
+    </div>
+  </div>
+
+  {/* Winner label */}
+  <div className="grid items-center gap-2 grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)_3.5rem] mt-2 pt-2 border-t">
+    <div className="text-xs text-slate-600">Winner</div>
+    <div className="font-semibold truncate">{milestonesAllTime.shiftCompare.bestShiftLabel}</div>
+    <div className="text-right font-semibold truncate">
+      {selectedCrewId ? milestonesAllTimeCrew?.shiftCompare.bestShiftLabel || '–' : ''}
+    </div>
+    <div className="text-right">{selectedCrewId ? <span className="text-slate-400">–</span> : ''}</div>
+  </div>
+</div>
+
 
               {/* 3) Graph date range (green depends on selected metric; does NOT affect dropdown availability) */}
               <div className="flex flex-wrap gap-2 items-end">
