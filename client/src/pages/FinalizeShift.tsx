@@ -5,37 +5,58 @@ import { api } from '../lib/api';
 import useToast from '../hooks/useToast';
 import { useNavigate } from 'react-router-dom';
 
+/**
+ * Build per-activity / per-sub-activity totals
+ * This is the AUTHORITATIVE aggregation logic for Performance Review
+ */
 function buildSubgroupTotals(items: any[]) {
   const totals: any = {};
+
   for (const it of items) {
     const p = it.payload || {};
     const activity = p.activity || '(No Activity)';
-    const subActivity = p.sub || '(No Sub Activity)';
+
+    // -----------------------------
+    // NORMALISE SUB-ACTIVITY
+    // -----------------------------
+    let subActivity = p.sub;
+
+    // Loading MUST always resolve to Development or Production
+    if (activity === 'Loading') {
+      subActivity = subActivity || 'Development';
+    }
+
+    // Fallback safety (non-loading only)
+    subActivity = subActivity || '(No Sub Activity)';
+
     totals[activity] ||= {};
     totals[activity][subActivity] ||= {};
     const sums = totals[activity][subActivity];
-    // normalize hauling key variants to consistent display names
-    const add = (key: string, val: number) => {
-      if (!isNaN(val)) sums[key] = Number(sums[key] || 0) + val;
-    };
 
-    // 1) Add up all numeric fields from the raw values
+    // -----------------------------
+    // 1) Sum all numeric raw inputs
+    // -----------------------------
     for (const [k, v] of Object.entries(p.values || {})) {
       const num = parseFloat(String(v).replace(/[^\d.\-]/g, '')) || 0;
-      sums[k] = (sums[k] || 0) + num;
+      if (!isNaN(num)) {
+        sums[k] = Number(sums[k] || 0) + num;
+      }
     }
 
     // Helpers
     const get = (k: string) => {
-      const key = Object.keys(sums).find((x) => x.toLowerCase() === k.toLowerCase());
+      const key = Object.keys(sums).find(
+        (x) => x.toLowerCase() === k.toLowerCase(),
+      );
       return key ? Number(sums[key] || 0) : 0;
     };
     const nz = (n: number) => (Number.isFinite(n) && n > 0 ? n : 0);
 
-       // 2) Derived metrics requested
+    // -----------------------------
+    // 2) DERIVED METRICS
+    // -----------------------------
 
-    // GS Drillm = sum(No. of Bolts × Bolt Length) per activity record
-    // (matches ViewActivities behaviour and handles multi-bolt forms correctly)
+    // GS Drillm = No. of Bolts × Bolt Length
     if (
       activity === 'Development' &&
       (subActivity === 'Ground Support' || subActivity === 'Rehab')
@@ -58,16 +79,11 @@ function buildSubgroupTotals(items: any[]) {
       }
     }
 
-
-    // Dev Drillm = sum(No of Holes × Cut Length) per activity record
-    // Needed for Face Drilling tasks
+    // Dev Drillm = No of Holes × Cut Length
     if (activity === 'Development' && subActivity === 'Face Drilling') {
       const vals = p.values || {};
 
-      const holesRaw =
-        vals['No of Holes'] ??
-        vals['No of holes'] ??
-        0;
+      const holesRaw = vals['No of Holes'] ?? vals['No of holes'] ?? 0;
       const holes = parseFloat(String(holesRaw)) || 0;
 
       const clRaw = String(vals['Cut Length'] ?? '').replace(/m/i, '');
@@ -79,34 +95,50 @@ function buildSubgroupTotals(items: any[]) {
       }
     }
 
+    // -----------------------------
+    // Loading roll-ups
+    // -----------------------------
 
-    // Loading buckets rollups
-    // Development Loading
     const headingToTruck = get('Heading to Truck');
     const headingToSP = get('Heading to SP');
     const spToTruck = get('SP to Truck');
     const spToSP = get('SP to SP');
+
+    // Development loading
     const primaryDev = headingToTruck + headingToSP;
     const rehandleDev = spToTruck + spToSP;
-    if (primaryDev)
-      sums['Primary Dev Buckets'] = Number(sums['Primary Dev Buckets'] || 0) + primaryDev;
-    if (rehandleDev)
-      sums['Rehandle Dev Buckets'] = Number(sums['Rehandle Dev Buckets'] || 0) + rehandleDev;
 
-    // Production Loading
+    if (primaryDev) {
+      sums['Primary Dev Buckets'] =
+        Number(sums['Primary Dev Buckets'] || 0) + primaryDev;
+    }
+    if (rehandleDev) {
+      sums['Rehandle Dev Buckets'] =
+        Number(sums['Rehandle Dev Buckets'] || 0) + rehandleDev;
+    }
+
+    // Production loading
     const stopeToTruck = get('Stope to Truck');
     const stopeToSP = get('Stope to SP');
+
     const primaryStope = stopeToTruck + stopeToSP;
     const rehandleStope = spToTruck + spToSP;
-    if (primaryStope)
-      sums['Primary stope buckets'] = Number(sums['Primary stope buckets'] || 0) + primaryStope;
-    if (rehandleStope)
-      sums['Rehandle stope buckets'] = Number(sums['Rehandle stope buckets'] || 0) + rehandleStope;
+
+    if (primaryStope) {
+      sums['Primary stope buckets'] =
+        Number(sums['Primary stope buckets'] || 0) + primaryStope;
+    }
+    if (rehandleStope) {
+      sums['Rehandle stope buckets'] =
+        Number(sums['Rehandle stope buckets'] || 0) + rehandleStope;
+    }
 
     totals[activity][subActivity] = sums;
   }
+
   return totals;
 }
+
 export default function FinalizeShift() {
   const nav = useNavigate();
   const { setMsg, Toast } = useToast();
@@ -117,32 +149,40 @@ export default function FinalizeShift() {
   useEffect(() => {
     (async () => {
       const db = await getDB();
-      const acts = await db.getAll('activities');
-      setActivities(acts);
-      const sh = await db.get('shift', 'current');
-      setShift(sh);
+      setActivities(await db.getAll('activities'));
+      setShift(await db.get('shift', 'current'));
     })();
   }, []);
 
-  const totals = useMemo(() => buildSubgroupTotals(activities), [activities]);
+  const totals = useMemo(
+    () => buildSubgroupTotals(activities),
+    [activities],
+  );
 
   async function finalize() {
-    if (!shift) return setMsg('No active shift to finalize');
+    if (!shift) {
+      setMsg('No active shift to finalize');
+      return;
+    }
+
     setBusy(true);
     try {
       const payload = {
-        date: shift?.date,
-        dn: shift?.dn,
+        date: shift.date,
+        dn: shift.dn,
         totals,
         activities,
       };
+
       await api('/api/shifts/finalize', {
         method: 'POST',
         body: JSON.stringify(payload),
       });
+
       const db = await getDB();
       await db.clear('activities');
       await db.delete('shift', 'current');
+
       setMsg('Shift synced successfully');
       setTimeout(() => nav('/Main'), 600);
     } catch (e: any) {
@@ -160,7 +200,8 @@ export default function FinalizeShift() {
         <div className="card">
           <h2 className="text-xl font-semibold mb-3">Finalize Shift</h2>
           <p className="text-sm text-slate-600 mb-4">
-            Activities ready to sync: <strong>{activities.length}</strong>
+            Activities ready to sync:{' '}
+            <strong>{activities.length}</strong>
           </p>
           <button
             className="btn btn-primary"
