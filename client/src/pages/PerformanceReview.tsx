@@ -360,10 +360,6 @@ export default function PerformanceReview() {
       const res = await api(`/api/reports/summary?from=${f}&to=${t}`);
       setRowsGraph(res.rows || []);
       setRollupGraph(res.rollup || {});
-
-      if (selectedCrewId) {
-        await fetchCrewGraphData(selectedCrewId, f, t, setRowsGraphCrew);
-      }
     } catch (e: any) {
       setError(e?.message || 'Failed to load');
     } finally {
@@ -377,11 +373,26 @@ export default function PerformanceReview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // initial load for graph (since it's default tab)
+  // ✅ AUTO graph refresh on date range change (no Apply needed)
   useEffect(() => {
-    fetchGraphData(fromGraph, toGraph);
+    const t = setTimeout(() => {
+      fetchGraphData(fromGraph, toGraph);
+    }, 200);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fromGraph, toGraph]);
+
+  // ✅ AUTO crew series refresh on crew OR date range change (no Apply needed)
+  useEffect(() => {
+    if (!selectedCrewId) {
+      setRowsGraphCrew([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      fetchCrewGraphData(selectedCrewId, fromGraph, toGraph, setRowsGraphCrew);
+    }, 200);
+    return () => clearTimeout(t);
+  }, [selectedCrewId, fromGraph, toGraph]);
 
   // dates with data (used for both calendars)
   useEffect(() => {
@@ -594,7 +605,6 @@ export default function PerformanceReview() {
     const sub = graphSub && subs.includes(graphSub) ? graphSub : subs[0] || undefined;
 
     const metrics = act && sub ? Object.keys(filteredRollupGraph[act]?.[sub] || {}) : [];
-
     const metric =
       graphMetric && metrics.includes(graphMetric) ? graphMetric : metrics[0] || undefined;
 
@@ -794,29 +804,6 @@ export default function PerformanceReview() {
     return <span className={cls}>{`${sign}${value.toFixed(0)}%`}</span>;
   }
 
-  function CompareRow({
-    user,
-    crewVal,
-  }: {
-    user: string;
-    crewVal?: string;
-  }) {
-    const showCrew = !!selectedCrewId;
-    return (
-      <div className="grid grid-cols-3 items-center gap-2">
-        <div className="text-left font-semibold">{user}</div>
-        <div className="text-right">{showCrew ? crewVal || '–' : ''}</div>
-        <div className="text-right">
-          {showCrew ? (
-            <span className="text-slate-500">{/* placeholder filled by parent */}</span>
-          ) : (
-            ''
-          )}
-        </div>
-      </div>
-    );
-  }
-
   function CompareRowWithPct({
     userNum,
     userText,
@@ -830,11 +817,17 @@ export default function PerformanceReview() {
   }) {
     const showCrew = !!selectedCrewId;
     const p = showCrew && typeof crewNum === 'number' ? pctDiff(userNum, crewNum) : null;
+
+    // Fixed columns so desktop alignment never drifts
+    // [user] [crew] [%]
+    const rowCls =
+      'grid items-center gap-2 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem]';
+
     return (
-      <div className="grid grid-cols-3 items-center gap-2">
-        <div className="text-left font-semibold">{userText}</div>
-        <div className="text-right">{showCrew ? crewText || '–' : ''}</div>
-        <div className="text-right">{showCrew ? <PctPill value={p} /> : ''}</div>
+      <div className={rowCls}>
+        <div className="text-left font-semibold truncate">{userText}</div>
+        <div className="text-right truncate">{showCrew ? crewText || '–' : ''}</div>
+        <div className="text-right tabular-nums">{showCrew ? <PctPill value={p} /> : ''}</div>
       </div>
     );
   }
@@ -1010,7 +1003,11 @@ export default function PerformanceReview() {
                   onChange={setToTable}
                   datesWithData={datesWithData}
                 />
-                <button className="btn" onClick={() => fetchTableData(fromTable, toTable)} disabled={loading}>
+                <button
+                  className="btn"
+                  onClick={() => fetchTableData(fromTable, toTable)}
+                  disabled={loading}
+                >
                   Apply
                 </button>
               </div>
@@ -1019,8 +1016,6 @@ export default function PerformanceReview() {
                 <div className="text-sm text-slate-500">No data</div>
               ) : (
                 Object.entries(filteredRollupTable).map(([act, subs]) => {
-                  // ✅ Keep your existing table layout exactly as you already have it.
-                  // (To keep this file shorter here, paste your full existing TABLE block below.)
                   return (
                     <div key={act}>
                       <div className="font-bold mb-1">{act}</div>
@@ -1052,7 +1047,9 @@ export default function PerformanceReview() {
                                     </td>
                                     <td className="py-1 pr-4 w-1/4 text-right">
                                       {Number.isFinite(avg)
-                                        ? avg.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                                        ? avg.toLocaleString(undefined, {
+                                            maximumFractionDigits: 2,
+                                          })
                                         : '–'}
                                     </td>
                                     <td className="py-1 pr-4 w-1/4 text-right">{denom}</td>
@@ -1094,6 +1091,7 @@ export default function PerformanceReview() {
                     ))}
                   </select>
                 </div>
+
                 <div>
                   <div className="text-xs text-slate-600 mb-1">Sub-activity</div>
                   <select
@@ -1108,6 +1106,7 @@ export default function PerformanceReview() {
                     ))}
                   </select>
                 </div>
+
                 <div>
                   <div className="text-xs text-slate-600 mb-1">Metric</div>
                   <select
@@ -1122,15 +1121,15 @@ export default function PerformanceReview() {
                     ))}
                   </select>
                 </div>
+
                 <div>
                   <div className="text-xs text-slate-600 mb-1">Crew Match-Up</div>
                   <select
                     className="input text-sm"
                     value={selectedCrewId}
                     onChange={(e) => {
-                      const newId = e.target.value;
-                      setSelectedCrewId(newId);
-                      fetchCrewGraphData(newId, fromGraph, toGraph, setRowsGraphCrew);
+                      // ✅ only set state; fetching handled by useEffect
+                      setSelectedCrewId(e.target.value);
                     }}
                   >
                     <option value="">None</option>
@@ -1149,13 +1148,14 @@ export default function PerformanceReview() {
                   <div className="font-semibold mb-2">Milestones</div>
 
                   {selectedCrewId && (
-                    <div className="grid grid-cols-3 items-center gap-2 text-[11px] text-slate-500 mb-2">
-                      <div>{currentUserName}</div>
-                      <div className="text-right">{crewName || 'Crew'}</div>
+                    <div className="grid items-center gap-2 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem] text-[11px] text-slate-500 mb-2">
+                      <div className="truncate">{currentUserName}</div>
+                      <div className="text-right truncate">{crewName || 'Crew'}</div>
                       <div className="text-right">Δ</div>
                     </div>
                   )}
 
+                  {/* Force vertical stacking always (desktop + mobile) */}
                   <div className="grid grid-cols-1 gap-2 text-sm">
                     {/* Record Shift */}
                     <div className="bg-white border rounded p-2">
@@ -1165,11 +1165,16 @@ export default function PerformanceReview() {
                         userText={`${milestonesAllTime.bestDay.total.toLocaleString()}`}
                         crewNum={milestonesAllTimeCrew?.bestDay.total}
                         crewText={
-                          milestonesAllTimeCrew ? `${milestonesAllTimeCrew.bestDay.total.toLocaleString()}` : undefined
+                          milestonesAllTimeCrew
+                            ? `${milestonesAllTimeCrew.bestDay.total.toLocaleString()}`
+                            : undefined
                         }
                       />
-                      <div className="grid grid-cols-3 items-center gap-2 mt-1">
-                        <div className="text-xs text-slate-600">{formatDMY(milestonesAllTime.bestDay.date)}</div>
+                      {/* ✅ Date below the number (both sides) */}
+                      <div className="grid items-center gap-2 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem] mt-1">
+                        <div className="text-xs text-slate-600">
+                          {formatDMY(milestonesAllTime.bestDay.date)}
+                        </div>
                         <div className="text-xs text-slate-600 text-right">
                           {milestonesAllTimeCrew ? formatDMY(milestonesAllTimeCrew.bestDay.date) : ''}
                         </div>
@@ -1184,16 +1189,24 @@ export default function PerformanceReview() {
                         userNum={milestonesAllTime.best7.total}
                         userText={`${milestonesAllTime.best7.total.toLocaleString()}`}
                         crewNum={milestonesAllTimeCrew?.best7.total}
-                        crewText={milestonesAllTimeCrew ? `${milestonesAllTimeCrew.best7.total.toLocaleString()}` : undefined}
+                        crewText={
+                          milestonesAllTimeCrew
+                            ? `${milestonesAllTimeCrew.best7.total.toLocaleString()}`
+                            : undefined
+                        }
                       />
-                      <div className="grid grid-cols-3 items-center gap-2 mt-1">
+                      <div className="grid items-center gap-2 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem] mt-1">
                         <div className="text-xs text-slate-600">
                           {milestonesAllTime.best7.start && milestonesAllTime.best7.end
-                            ? `${formatDMY(milestonesAllTime.best7.start)} → ${formatDMY(milestonesAllTime.best7.end)}`
+                            ? `${formatDMY(milestonesAllTime.best7.start)} → ${formatDMY(
+                                milestonesAllTime.best7.end,
+                              )}`
                             : '–'}
                         </div>
                         <div className="text-xs text-slate-600 text-right">
-                          {milestonesAllTimeCrew && milestonesAllTimeCrew.best7.start && milestonesAllTimeCrew.best7.end
+                          {milestonesAllTimeCrew &&
+                          milestonesAllTimeCrew.best7.start &&
+                          milestonesAllTimeCrew.best7.end
                             ? `${formatDMY(milestonesAllTimeCrew.best7.start)} → ${formatDMY(
                                 milestonesAllTimeCrew.best7.end,
                               )}`
@@ -1213,11 +1226,15 @@ export default function PerformanceReview() {
                         userText={`${milestonesAllTime.bestMonth.total.toLocaleString()}`}
                         crewNum={milestonesAllTimeCrew?.bestMonth.total}
                         crewText={
-                          milestonesAllTimeCrew ? `${milestonesAllTimeCrew.bestMonth.total.toLocaleString()}` : undefined
+                          milestonesAllTimeCrew
+                            ? `${milestonesAllTimeCrew.bestMonth.total.toLocaleString()}`
+                            : undefined
                         }
                       />
-                      <div className="grid grid-cols-3 items-center gap-2 mt-1">
-                        <div className="text-xs text-slate-600">{milestonesAllTime.bestMonth.label || '–'}</div>
+                      <div className="grid items-center gap-2 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem] mt-1">
+                        <div className="text-xs text-slate-600">
+                          {milestonesAllTime.bestMonth.label || '–'}
+                        </div>
                         <div className="text-xs text-slate-600 text-right">
                           {milestonesAllTimeCrew ? milestonesAllTimeCrew.bestMonth.label || '–' : ''}
                         </div>
@@ -1228,30 +1245,34 @@ export default function PerformanceReview() {
                     {/* Most Productive Shift */}
                     <div className="bg-white border rounded p-2">
                       <div className="text-xs text-slate-600">Most Productive Shift</div>
-                      <div className="grid grid-cols-3 items-center gap-2">
-                        <div className="font-semibold">{milestonesAllTime.shiftCompare.bestShiftLabel}</div>
-                        <div className="text-right font-semibold">
+
+                      <div className="grid items-center gap-2 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem]">
+                        <div className="font-semibold truncate">
+                          {milestonesAllTime.shiftCompare.bestShiftLabel}
+                        </div>
+                        <div className="text-right font-semibold truncate">
                           {milestonesAllTimeCrew ? milestonesAllTimeCrew.shiftCompare.bestShiftLabel : ''}
                         </div>
-                        <div className="text-right">
-                          {selectedCrewId ? (
-                            <span className="text-slate-400">–</span>
-                          ) : (
-                            ''
-                          )}
-                        </div>
+                        <div className="text-right">{selectedCrewId ? <span className="text-slate-400">–</span> : ''}</div>
                       </div>
 
                       <div className="mt-1 space-y-1 text-xs text-slate-600">
                         <CompareRowWithPct
-                          userNum={Number.isFinite(milestonesAllTime.shiftCompare.dsAvg) ? milestonesAllTime.shiftCompare.dsAvg : 0}
+                          userNum={
+                            Number.isFinite(milestonesAllTime.shiftCompare.dsAvg)
+                              ? milestonesAllTime.shiftCompare.dsAvg
+                              : 0
+                          }
                           userText={`DS avg: ${
                             Number.isFinite(milestonesAllTime.shiftCompare.dsAvg)
-                              ? milestonesAllTime.shiftCompare.dsAvg.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                              ? milestonesAllTime.shiftCompare.dsAvg.toLocaleString(undefined, {
+                                  maximumFractionDigits: 2,
+                                })
                               : '–'
                           }`}
                           crewNum={
-                            milestonesAllTimeCrew && Number.isFinite(milestonesAllTimeCrew.shiftCompare.dsAvg)
+                            milestonesAllTimeCrew &&
+                            Number.isFinite(milestonesAllTimeCrew.shiftCompare.dsAvg)
                               ? milestonesAllTimeCrew.shiftCompare.dsAvg
                               : undefined
                           }
@@ -1268,14 +1289,21 @@ export default function PerformanceReview() {
                           }
                         />
                         <CompareRowWithPct
-                          userNum={Number.isFinite(milestonesAllTime.shiftCompare.nsAvg) ? milestonesAllTime.shiftCompare.nsAvg : 0}
+                          userNum={
+                            Number.isFinite(milestonesAllTime.shiftCompare.nsAvg)
+                              ? milestonesAllTime.shiftCompare.nsAvg
+                              : 0
+                          }
                           userText={`NS avg: ${
                             Number.isFinite(milestonesAllTime.shiftCompare.nsAvg)
-                              ? milestonesAllTime.shiftCompare.nsAvg.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                              ? milestonesAllTime.shiftCompare.nsAvg.toLocaleString(undefined, {
+                                  maximumFractionDigits: 2,
+                                })
                               : '–'
                           }`}
                           crewNum={
-                            milestonesAllTimeCrew && Number.isFinite(milestonesAllTimeCrew.shiftCompare.nsAvg)
+                            milestonesAllTimeCrew &&
+                            Number.isFinite(milestonesAllTimeCrew.shiftCompare.nsAvg)
                               ? milestonesAllTimeCrew.shiftCompare.nsAvg
                               : undefined
                           }
@@ -1297,7 +1325,7 @@ export default function PerformanceReview() {
                 </div>
               )}
 
-              {/* ✅ 3) Date range selector THIRD */}
+              {/* ✅ 3) Date range selector THIRD (NO Apply button) */}
               <div className="flex flex-wrap gap-2 items-end">
                 <CalendarDropdown
                   label="From"
@@ -1305,10 +1333,12 @@ export default function PerformanceReview() {
                   onChange={setFromGraph}
                   datesWithData={datesWithData}
                 />
-                <CalendarDropdown label="To" value={toGraph} onChange={setToGraph} datesWithData={datesWithData} />
-                <button className="btn" onClick={() => fetchGraphData(fromGraph, toGraph)} disabled={loading}>
-                  Apply
-                </button>
+                <CalendarDropdown
+                  label="To"
+                  value={toGraph}
+                  onChange={setToGraph}
+                  datesWithData={datesWithData}
+                />
               </div>
 
               {/* ✅ 4) Legend FOURTH */}
@@ -1388,13 +1418,7 @@ export default function PerformanceReview() {
                             stroke="#94a3b8"
                             strokeWidth={1}
                           />
-                          <text
-                            x={chartPaddingLeft - 12}
-                            y={y + 3}
-                            fontSize={9}
-                            fill="#64748b"
-                            textAnchor="end"
-                          >
+                          <text x={chartPaddingLeft - 12} y={y + 3} fontSize={9} fill="#64748b" textAnchor="end">
                             {Math.round(v).toLocaleString()}
                           </text>
                         </g>
@@ -1464,13 +1488,7 @@ export default function PerformanceReview() {
 
                     {/* cumulative line (crew) */}
                     {selectedCrewId && cumPathCrew && (
-                      <path
-                        d={cumPathCrew}
-                        fill="none"
-                        stroke="#f97316"
-                        strokeWidth={2}
-                        strokeDasharray="4 3"
-                      />
+                      <path d={cumPathCrew} fill="none" stroke="#f97316" strokeWidth={2} strokeDasharray="4 3" />
                     )}
 
                     {/* points on cumulative lines */}
