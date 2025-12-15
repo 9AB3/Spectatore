@@ -2,12 +2,26 @@ import sqlite3 from 'sqlite3';
 import path from 'path';
 import fs from 'fs';
 
-const dataDir = path.resolve(process.cwd(), 'data');
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-
-const dbPath = path.join(dataDir, 'spectatore.db');
 sqlite3.verbose();
-export const db = new sqlite3.Database(dbPath);
+
+// Prefer explicit DB_PATH (Render), otherwise pick a sensible default
+const dbPath =
+  process.env.DB_PATH ||
+  (process.env.NODE_ENV === 'production'
+    ? '/var/data/data.db'
+    : path.resolve(process.cwd(), 'data', 'spectatore.db'));
+
+// Only create the local ./data dir for local dev
+if (process.env.NODE_ENV !== 'production' && !process.env.DB_PATH) {
+  const dataDir = path.dirname(dbPath);
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+}
+
+export const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) console.error('❌ Failed to open DB:', dbPath, err);
+  else console.log('✅ SQLite DB opened at:', dbPath);
+});
+
 
 export function initDb() {
   db.serialize(() => {
