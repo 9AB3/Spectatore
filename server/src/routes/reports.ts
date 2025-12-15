@@ -216,6 +216,11 @@ function computeMilestones(rows: any[]) {
   return { byMetric };
 }
 
+router.options('/summary', (_req, res) => {
+  res.sendStatus(204);
+});
+
+
 // GET /api/reports/summary
 // Returns: { rows: [{id,date,dn,totals_json}], rollup: { activity: { sub: { metric: number } } }, milestones }
 router.get('/summary', authMiddleware, (req: any, res: any) => {
