@@ -5,15 +5,34 @@ import { getDB } from '../lib/idb';
 import useToast from '../hooks/useToast';
 import { loadEquipment, loadLocations } from '../lib/datalists';
 
-const EQUIP_TYPES = ['Truck', 'Loader', 'Jumbo', 'Production Drill', 'Spray Rig', 'Agi'];
+/**
+ * Authoritative equipment → activity mapping
+ * (Derived, NOT stored in DB)
+ */
+const EQUIPMENT_ACTIVITY_MAP: Record<string, string[]> = {
+  Truck: ['Hauling'],
+  Loader: ['Loading'],
+  Jumbo: ['Development'],
+  'Production Drill': ['Production Drilling'],
+  'Spray Rig': ['Development'],
+  Agi: ['Development'],
+  'Charge Rig': ['Charging'],
+};
+
+const EQUIP_TYPES = Object.keys(EQUIPMENT_ACTIVITY_MAP);
 
 function isEquipIdValid(s: string) {
   return /^[A-Za-z]{2}\d{2}$/.test(s);
 }
 
+function activityForEquipment(type: string): string {
+  const acts = EQUIPMENT_ACTIVITY_MAP[type];
+  return acts && acts.length ? acts.join(', ') : '—';
+}
+
 export default function EquipmentLocations() {
   const { setMsg, Toast } = useToast();
-  const [type, setType] = useState('Truck');
+  const [type, setType] = useState(EQUIP_TYPES[0]);
   const [equipId, setEquipId] = useState('');
   const [location, setLocation] = useState('');
   const [equipList, setEquipList] = useState<string[]>([]);
@@ -45,9 +64,11 @@ export default function EquipmentLocations() {
       setMsg('Please ensure network connection');
       return;
     }
+
     const db = await getDB();
     const session = await db.get('session', 'auth');
     const user_id = session?.user_id;
+
     try {
       if (equipId) {
         if (!isEquipIdValid(equipId)) {
@@ -59,20 +80,27 @@ export default function EquipmentLocations() {
           body: JSON.stringify({ user_id, type, equipment_id: equipId }),
         });
       }
+
       if (location) {
         await api('/api/locations', {
           method: 'POST',
           body: JSON.stringify({ user_id, name: location }),
         });
       }
+
       setMsg('Fleet / location successfully updated');
       setEquipId('');
       setLocation('');
-    } catch (e: any) {
+
+      // Refresh lists
+      setEquipList(await loadEquipment(user_id));
+      setLocList(await loadLocations(user_id));
+    } catch {
       setMsg('Submission failed');
     }
   }
-    async function deleteEquipment(equipmentId: string) {
+
+  async function deleteEquipment(equipmentId: string) {
     if (!online) {
       setMsg('Please ensure network connection');
       return;
@@ -93,10 +121,8 @@ export default function EquipmentLocations() {
         body: JSON.stringify({ user_id, equipment_id: equipmentId }),
       });
 
-      // Reload list so UI + IndexedDB cache stay in sync
-      const updated = await loadEquipment(user_id);
-      setEquipList(updated);
-    } catch (e: any) {
+      setEquipList(await loadEquipment(user_id));
+    } catch {
       setMsg('Failed to delete equipment');
     }
   }
@@ -122,18 +148,17 @@ export default function EquipmentLocations() {
         body: JSON.stringify({ user_id, name }),
       });
 
-      const updated = await loadLocations(user_id);
-      setLocList(updated);
-    } catch (e: any) {
+      setLocList(await loadLocations(user_id));
+    } catch {
       setMsg('Failed to delete location');
     }
   }
-
 
   return (
     <div>
       <Toast />
       <Header />
+
       <div className="p-6 max-w-xl mx-auto card space-y-4">
         <div>
           <label className="block text-sm font-medium mb-1">Equipment</label>
@@ -150,7 +175,11 @@ export default function EquipmentLocations() {
               onChange={(e) => setEquipId(e.target.value.toUpperCase())}
             />
           </div>
+          <div className="text-xs text-slate-500 mt-1">
+            Activity: <strong>{activityForEquipment(type)}</strong>
+          </div>
         </div>
+
         <div>
           <label className="block text-sm font-medium mb-1">Location</label>
           <input
@@ -163,7 +192,7 @@ export default function EquipmentLocations() {
 
         {!online && (
           <div className="text-red-600 text-sm">
-            Not online on SUBMIT “Please ensure network connection”
+            Not online on SUBMIT — please ensure network connection
           </div>
         )}
 
@@ -176,50 +205,55 @@ export default function EquipmentLocations() {
           </a>
         </div>
       </div>
+
       <div className="p-6 max-w-xl mx-auto card mt-4">
         <h3 className="font-semibold mb-2">Your equipment and locations</h3>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <div className="font-medium mb-1">Equipment IDs</div>
             <ul className="space-y-1">
-  {equipList.map((e) => (
-    <li key={e} className="flex items-center justify-between">
-      <span>{e}</span>
-      <button
-        type="button"
-        className="text-xs text-red-500 hover:text-red-700"
-        onClick={() => deleteEquipment(e)}
-      >
-        ✕
-      </button>
-    </li>
-  ))}
-  {equipList.length === 0 && (
-    <div className="text-slate-500">No equipment yet</div>
-  )}
-</ul>
-
+              {equipList.map((e) => (
+                <li key={e} className="flex items-center justify-between">
+                  <span>
+                    {e}{' '}
+                    <span className="text-xs text-slate-500">
+                      ({activityForEquipment(type)})
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    className="text-xs text-red-500 hover:text-red-700"
+                    onClick={() => deleteEquipment(e)}
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+              {equipList.length === 0 && (
+                <div className="text-slate-500">No equipment yet</div>
+              )}
+            </ul>
           </div>
+
           <div>
             <div className="font-medium mb-1">Locations</div>
-           <ul className="space-y-1">
-  {locList.map((l) => (
-    <li key={l} className="flex items-center justify-between">
-      <span>{l}</span>
-      <button
-        type="button"
-        className="text-xs text-red-500 hover:text-red-700"
-        onClick={() => deleteLocation(l)}
-      >
-        ✕
-      </button>
-    </li>
-  ))}
-  {locList.length === 0 && (
-    <div className="text-slate-500">No locations yet</div>
-  )}
-</ul>
-
+            <ul className="space-y-1">
+              {locList.map((l) => (
+                <li key={l} className="flex items-center justify-between">
+                  <span>{l}</span>
+                  <button
+                    type="button"
+                    className="text-xs text-red-500 hover:text-red-700"
+                    onClick={() => deleteLocation(l)}
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+              {locList.length === 0 && (
+                <div className="text-slate-500">No locations yet</div>
+              )}
+            </ul>
           </div>
         </div>
       </div>
