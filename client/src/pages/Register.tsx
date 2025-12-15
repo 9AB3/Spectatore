@@ -39,10 +39,12 @@ export default function Register() {
         );
         setMsg('Registered and signed in');
         nav('/shift');
-     } else {
+   } else {
+  localStorage.setItem('spectatore-register-email', email);
   setMsg('Registered. Check your email for the confirmation code.');
-  nav(`/ConfirmEmail?email=${encodeURIComponent(email)}`);
+  nav('/ConfirmEmail');
 }
+
 
 
     } catch (e: any) {
