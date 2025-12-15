@@ -1583,14 +1583,15 @@ export default function PerformanceReview() {
 
                       {/* Optional column headers when comparing */}
                       {selectedCrewId && (
-                        <div className="grid grid-cols-3 gap-2 text-[11px] text-slate-500 mb-2">
-                          <div>{currentUserName}</div>
-                          <div className="text-right">{crewName || 'Crew'}</div>
-                          <div className="text-right">Δ</div>
-                        </div>
-                      )}
+  <div className="grid grid-cols-3 items-center gap-2 text-[11px] text-slate-500 mb-2">
+    <div>{currentUserName}</div>
+    <div className="text-right">{crewName || 'Crew'}</div>
+    <div className="text-right">Δ</div>
+  </div>
+)}
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+
+                      <div className="grid grid-cols-1 gap-2 text-sm">
                         {/* Record Shift */}
                         <div className="bg-white border rounded p-2">
                           <div className="text-xs text-slate-600">Record Shift</div>
