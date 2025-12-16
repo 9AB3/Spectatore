@@ -28,6 +28,10 @@ export default function Home() {
   useEffect(() => {
     const savedEmail = localStorage.getItem('spectatore-login-email');
     if (savedEmail) setEmail(savedEmail);
+
+    // Persist "Remember me" state until user unticks it
+    const savedRemember = localStorage.getItem('spectatore-remember-me');
+    if (savedRemember === '1') setRemember(true);
   }, []);
 
   // When connectivity changes, decide whether to auto-continue based on session + remember flag
@@ -47,9 +51,21 @@ export default function Home() {
     })();
   }, [online, nav]);
 
-  const canLogin = online && email && password.length >= 8;
+  const canLogin = online && !!email;
 
   async function login() {
+    if (!online) {
+      setMsg('No connection – Log in requires network');
+      return;
+    }
+    if (!email) {
+      setMsg('Enter your email');
+      return;
+    }
+    if (password.length < 8) {
+      setMsg('Password must be at least 8 characters');
+      return;
+    }
     try {
       const res = await api('/api/auth/login', {
         method: 'POST',
@@ -70,9 +86,13 @@ export default function Home() {
         localStorage.removeItem('spectatore-login-email');
       }
 
+      // Persist remember tick until explicitly unticked
+      localStorage.setItem('spectatore-remember-me', remember ? '1' : '0');
+
       setIsAdmin(isAdminFlag);
       setMsg('Tagged on');
-      setTimeout(() => nav('/Main'), 500);
+      // Keep toast visible for at least 2s before route change
+      setTimeout(() => nav('/Main'), 2000);
     } catch (e: any) {
       try {
         const msg = JSON.parse(e.message).error;
@@ -110,7 +130,11 @@ export default function Home() {
             <input
               type="checkbox"
               checked={remember}
-              onChange={(e) => setRemember(e.target.checked)}
+              onChange={(e) => {
+                const v = e.target.checked;
+                setRemember(v);
+                localStorage.setItem('spectatore-remember-me', v ? '1' : '0');
+              }}
             />
             Remember me
           </label>

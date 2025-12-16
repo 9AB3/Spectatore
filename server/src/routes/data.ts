@@ -29,17 +29,23 @@ router.post('/equipment', (req, res) => {
 
 // Locations
 router.post('/locations', (req, res) => {
-  const { user_id, name } = req.body;
+  const { user_id, name, type } = req.body;
   const trimmed = (name || '').trim();
+  const t = String(type || '').trim();
 
-  if (!user_id || !trimmed) {
-    return res.status(400).json({ error: 'missing user_id or name' });
+  if (!user_id || !trimmed || !t) {
+    return res.status(400).json({ error: 'missing user_id, name or type' });
+  }
+
+  const allowed = new Set(['Heading', 'Stope', 'Stockpile']);
+  if (!allowed.has(t)) {
+    return res.status(400).json({ error: 'invalid location type' });
   }
 
   db.run(
     // ignore duplicate rows instead of failing
-    'INSERT OR IGNORE INTO locations (user_id, name) VALUES (?,?)',
-    [user_id, trimmed],
+    'INSERT OR IGNORE INTO locations (user_id, name, type) VALUES (?,?,?)',
+    [user_id, trimmed, t],
     function (err) {
       if (err) {
         console.error('locations insert failed', err);
@@ -150,6 +156,15 @@ router.post('/connections/:id/decline', (req, res) => {
   });
 });
 
+// Remove an accepted connection (used by "View Crew Members" list)
+router.post('/connections/:id/remove', (req, res) => {
+  // We "decline" it (soft-remove) so it no longer appears in accepted lists
+  db.run('UPDATE connections SET status=? WHERE id=?', ['declined', req.params.id], function (err) {
+    if (err) return res.status(400).json({ error: 'update failed' });
+    res.json({ ok: true });
+  });
+});
+
 export default router;
 
 // List Equipment by user
@@ -169,7 +184,7 @@ router.get('/equipment', (req, res) => {
 router.get('/locations', (req, res) => {
   const user_id = req.query.user_id;
   db.all(
-    'SELECT id, name FROM locations WHERE user_id=? ORDER BY created_at DESC',
+    'SELECT id, name, type FROM locations WHERE user_id=? ORDER BY created_at DESC',
     [user_id],
     (err, rows) => {
       if (err) return res.status(400).json({ error: 'query failed' });

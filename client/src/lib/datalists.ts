@@ -33,7 +33,7 @@ export async function loadLocations(user_id: number) {
     for (const item of all) await store.delete(item.id);
     for (const row of res.items) await store.put(row);
     await tx.done;
-    return res.items.map((r: any) => r.name);
+    return res.items.map((r: any) => ({ id: r.id, name: r.name, type: r.type }));
   } catch {}
-  return cached.map((r: any) => r.name);
+  return cached.map((r: any) => ({ id: r.id, name: r.name, type: r.type }));
 }

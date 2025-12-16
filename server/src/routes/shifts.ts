@@ -39,6 +39,78 @@ router.get('/dates-with-data', authMiddleware, (req, res) => {
   );
 });
 
+// GET /api/shifts/dates-with-finalized
+// Returns distinct dates where the user has finalized shift data
+router.get('/dates-with-finalized', authMiddleware, (req, res) => {
+  const user_id = (req as any).user_id;
+  if (!user_id) return res.status(401).json({ error: 'missing user' });
+
+  db.all(
+    'SELECT DISTINCT date FROM shifts WHERE user_id = ? AND finalized_at IS NOT NULL ORDER BY date ASC',
+    [user_id],
+    (err, rows) => {
+      if (err) {
+        console.error('dates-with-finalized failed', err);
+        return res.status(500).json({ error: 'db failed' });
+      }
+      const dates = rows.map((r: any) => r.date).filter(Boolean);
+      res.json({ dates });
+    },
+  );
+});
+
+// POST /api/shifts/delete-finalized
+// Body: { dates: string[] }
+// Deletes finalized shifts (and their activities) for the given dates (DS+NS) for the current user
+router.post('/delete-finalized', authMiddleware, (req: any, res: any) => {
+  const user_id = (req as any).user_id;
+  if (!user_id) return res.status(401).json({ error: 'missing user' });
+
+  let dates: any = req.body?.dates;
+  if (!Array.isArray(dates)) dates = [];
+  dates = dates
+    .map((d: any) => String(d || '').trim())
+    .filter((d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+
+  if (dates.length === 0) return res.json({ ok: true, deleted: 0 });
+
+  // 1) Fetch shift ids to delete
+  const placeholders = dates.map(() => '?').join(',');
+  db.all(
+    `SELECT id FROM shifts WHERE user_id=? AND finalized_at IS NOT NULL AND date IN (${placeholders})`,
+    [user_id, ...dates],
+    (err, rows) => {
+      if (err) {
+        console.error('delete-finalized select failed', err);
+        return res.status(500).json({ error: 'db failed' });
+      }
+      const ids = (rows || []).map((r: any) => r.id).filter(Boolean);
+      if (ids.length === 0) return res.json({ ok: true, deleted: 0 });
+
+      const idPlaceholders = ids.map(() => '?').join(',');
+      db.serialize(() => {
+        db.run('BEGIN');
+        db.run(`DELETE FROM shift_activities WHERE shift_id IN (${idPlaceholders})`, ids, (e1: any) => {
+          if (e1) {
+            console.error('delete-finalized activities failed', e1);
+            db.run('ROLLBACK');
+            return res.status(500).json({ error: 'db failed' });
+          }
+          db.run(`DELETE FROM shifts WHERE id IN (${idPlaceholders})`, ids, function (e2: any) {
+            if (e2) {
+              console.error('delete-finalized shifts failed', e2);
+              db.run('ROLLBACK');
+              return res.status(500).json({ error: 'db failed' });
+            }
+            db.run('COMMIT');
+            res.json({ ok: true, deleted: ids.length });
+          });
+        });
+      });
+    },
+  );
+});
+
 function ensureShiftTables(cb: (err?: any) => void) {
   db.serialize(() => {
     db.run(
@@ -85,7 +157,10 @@ function validateActivities(
       values?.equipment ||
       values?.['Equipment ID'];
 
-    if (eq) equipmentIds.add(String(eq));
+    if (eq) {
+      const norm = String(eq).trim().toUpperCase();
+      if (norm) equipmentIds.add(norm);
+    }
   }
 
   if (equipmentIds.size === 0) {
@@ -113,16 +188,20 @@ function validateActivities(
       const p = it?.payload || {};
       const activity = p.activity;
       const values = p.values || {};
-      const eq =
+      const eqRaw =
         values?.Equipment ||
         values?.equipment ||
         values?.['Equipment ID'];
+
+      const eq = eqRaw ? String(eqRaw).trim().toUpperCase() : '';
 
       if (!eq) continue; // activity without equipment is allowed
 
       const eqType = typeByEquip[eq];
       if (!eqType) {
-        return cb(`Invalid equipment selected: ${eq}`);
+        // Allow manual/typed equipment values that aren't in the user's Equipment list.
+        // (These are valid for local logging; we just can't enforce the type→activity map.)
+        continue;
       }
 
       const allowed = EQUIPMENT_ACTIVITY_MAP[eqType]?.includes(activity);

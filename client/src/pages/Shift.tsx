@@ -8,6 +8,7 @@ export default function Shift() {
   const nav = useNavigate();
   const { setMsg, Toast } = useToast();
   const [loaded, setLoaded] = useState(false);
+  const [abortOpen, setAbortOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -22,7 +23,12 @@ export default function Shift() {
   }, []);
 
   async function cancelShift() {
-    if (!confirm('Are you sure you want to cancel your shift?')) return;
+    // UI modal confirmation (matches the Start Shift modal pattern)
+    setAbortOpen(true);
+  }
+
+  async function confirmAbort() {
+    setAbortOpen(false);
 
     try {
       const db = await getDB();
@@ -41,7 +47,8 @@ export default function Shift() {
       localStorage.removeItem('spectatore-shift');
 
       setMsg('Shift cancelled');
-      setTimeout(() => nav('/Main'), 500);
+      // Keep toast visible for at least 2s before route change
+      setTimeout(() => nav('/Main'), 2000);
     } catch (e) {
       console.error(e);
       setMsg('Failed to cancel shift');
@@ -68,6 +75,25 @@ export default function Shift() {
           CANCEL SHIFT
         </button>
       </div>
+
+      {abortOpen && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center">
+          <div className="card w-full max-w-sm">
+            <h3 className="text-lg font-semibold mb-3">Abort shift</h3>
+            <div className="space-y-4">
+              <div>Abort shift - shift data will be lost</div>
+              <div className="flex gap-2">
+                <button className="btn flex-1" onClick={confirmAbort}>
+                  Yes
+                </button>
+                <button className="btn flex-1" onClick={() => setAbortOpen(false)}>
+                  No
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

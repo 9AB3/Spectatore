@@ -114,9 +114,28 @@ db.run(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     name TEXT NOT NULL,
+    type TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, name)
   )`,
 );
+
+// Ensure type column exists for older databases
+db.all('PRAGMA table_info(locations)', [], (err, rows: any[]) => {
+  if (err) {
+    console.error('Failed to inspect locations table:', err);
+    return;
+  }
+  try {
+    const cols = Array.isArray(rows) ? rows.map((r: any) => r.name) : [];
+    if (!cols.includes('type')) {
+      db.run('ALTER TABLE locations ADD COLUMN type TEXT', (e) => {
+        if (e) console.error('Failed to add locations.type column:', e);
+      });
+    }
+  } catch (e) {
+    console.error('Error ensuring locations columns:', e);
+  }
+});
 
 }

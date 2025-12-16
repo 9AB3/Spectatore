@@ -6,6 +6,7 @@ import useToast from '../hooks/useToast';
 import { loadEquipment, loadLocations } from '../lib/datalists';
 
 type EquipRow = { id?: number; type: string; equipment_id: string };
+type LocationRow = { id?: number; name: string; type: 'Heading' | 'Stope' | 'Stockpile' };
 
 /**
  * Authoritative equipment → activity mapping
@@ -37,8 +38,9 @@ export default function EquipmentLocations() {
   const [type, setType] = useState(EQUIP_TYPES[0]);
   const [equipId, setEquipId] = useState('');
   const [location, setLocation] = useState('');
+  const [locationType, setLocationType] = useState<LocationRow['type']>('Heading');
   const [equipRows, setEquipRows] = useState<EquipRow[]>([]);
-  const [locList, setLocList] = useState<string[]>([]);
+  const [locList, setLocList] = useState<LocationRow[]>([]);
   const [online, setOnline] = useState(navigator.onLine);
 
   useEffect(() => {
@@ -74,7 +76,7 @@ export default function EquipmentLocations() {
         .filter((r) => r.equipment_id && r.type),
     );
 
-    setLocList(await loadLocations(uid));
+    setLocList((await loadLocations(uid)) as any);
   }
 
   useEffect(() => {
@@ -119,13 +121,14 @@ export default function EquipmentLocations() {
       if (location) {
         await api('/api/locations', {
           method: 'POST',
-          body: JSON.stringify({ user_id, name: location }),
+          body: JSON.stringify({ user_id, name: location, type: locationType }),
         });
       }
 
       setMsg('Fleet / location successfully updated');
       setEquipId('');
       setLocation('');
+      setLocationType('Heading');
 
       await refreshLists(user_id || 0);
     } catch {
@@ -215,12 +218,23 @@ export default function EquipmentLocations() {
 
         <div>
           <label className="block text-sm font-medium mb-1">Location</label>
-          <input
-            className="input"
-            placeholder="Enter alphanumeric location"
-            value={location}
-            onChange={(e) => setLocation(e.target.value)}
-          />
+          <div className="grid grid-cols-3 gap-2">
+            <select
+              className="input"
+              value={locationType}
+              onChange={(e) => setLocationType(e.target.value as any)}
+            >
+              <option value="Heading">Heading</option>
+              <option value="Stope">Stope</option>
+              <option value="Stockpile">Stockpile</option>
+            </select>
+            <input
+              className="input col-span-2"
+              placeholder="Enter alphanumeric location"
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+            />
+          </div>
         </div>
 
         {!online && (
@@ -272,12 +286,14 @@ export default function EquipmentLocations() {
             <div className="font-medium mb-1">Locations</div>
             <ul className="space-y-1">
               {locList.map((l) => (
-                <li key={l} className="flex items-center justify-between">
-                  <span>{l}</span>
+                <li key={l.id || l.name} className="flex items-center justify-between">
+                  <span>
+                    {l.name} <span className="text-xs text-slate-500">({l.type})</span>
+                  </span>
                   <button
                     type="button"
                     className="text-xs text-red-500 hover:text-red-700"
-                    onClick={() => deleteLocation(l)}
+                    onClick={() => deleteLocation(l.name)}
                   >
                     ✕
                   </button>

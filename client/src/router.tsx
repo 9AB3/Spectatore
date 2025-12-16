@@ -12,6 +12,7 @@ import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import EquipmentLocations from './pages/EquipmentLocations';
 import PerformanceReview from './pages/PerformanceReview';
+import ClearShifts from './pages/ClearShifts';
 import ClearData from './pages/ClearData';
 import AddConnection from './pages/AddConnection';
 import ViewConnections from './pages/ViewConnections';
@@ -105,6 +106,15 @@ export default function App() {
         element={
           <RequireAuth>
             <PerformanceReview />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/ClearShifts"
+        element={
+          <RequireAuth>
+            <ClearShifts />
           </RequireAuth>
         }
       />

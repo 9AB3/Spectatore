@@ -8,6 +8,7 @@ import { loadEquipment, loadLocations } from '../lib/datalists';
 
 type Field = { field: string; required: number; unit: string; input: string };
 type EquipRow = { id?: number; type: string; equipment_id: string };
+type LocationRow = { id?: number; name: string; type: 'Heading' | 'Stope' | 'Stockpile' };
 
 // Authoritative equipment → activity mapping
 const EQUIPMENT_ACTIVITY_MAP: Record<string, string[]> = {
@@ -42,6 +43,57 @@ function parseRule(input: string) {
   return { kind: 'text' };
 }
 
+function allowedLocationTypes(
+  activity: string,
+  sub: string,
+  field: string,
+): Array<'Heading' | 'Stope' | 'Stockpile'> {
+  const a = String(activity || '').trim();
+  const s = String(sub || '').trim();
+  const f = String(field || '').trim();
+
+  // Development: all subs -> Heading locations
+  if (a === 'Development') return ['Heading'];
+
+  // Production Drilling
+  if (a === 'Production Drilling') {
+    if (s === 'Service Hole') return ['Heading'];
+    if (s === 'Stope') return ['Stope'];
+  }
+
+  // Charging
+  if (a === 'Charging') {
+    if (s === 'Development') return ['Heading'];
+    if (s === 'Production') return ['Stope'];
+  }
+
+  // Loading
+  if (a === 'Loading') {
+    if (s === 'Development') return ['Heading'];
+    if (s === 'Production') return ['Stope'];
+  }
+
+  // Hauling
+  if (a === 'Hauling') {
+    if (s === 'Development') {
+      // Source is the heading; From/To are stockpiles
+      if (f === 'Source') return ['Heading'];
+      if (f === 'From' || f === 'To') return ['Stockpile'];
+      return ['Stockpile'];
+    }
+    if (s === 'Production') {
+      // Treat production hauling as stope → stockpile
+      // Source must be stope only; stockpiles are only valid for From/To.
+      if (f === 'Source') return ['Stope'];
+      if (f === 'From' || f === 'To') return ['Stockpile'];
+      return ['Stockpile'];
+    }
+  }
+
+  // Default: allow any (so we don't block other future forms)
+  return ['Heading', 'Stope', 'Stockpile'];
+}
+
 export default function Activity() {
   const nav = useNavigate();
   const { setMsg, Toast } = useToast();
@@ -51,7 +103,12 @@ export default function Activity() {
   const [fields, setFields] = useState<Field[]>([]);
   const [values, setValues] = useState<Record<string, any>>({});
   const [equipmentRows, setEquipmentRows] = useState<EquipRow[]>([]);
-  const [locationList, setLocationList] = useState<string[]>([]);
+  const [locationList, setLocationList] = useState<LocationRow[]>([]);
+
+  function locationOptionsForField(fieldName: string): LocationRow[] {
+    const allowed = new Set<LocationRow['type']>(allowedLocationTypes(activity, sub, fieldName));
+    return (locationList || []).filter((l) => allowed.has(l.type));
+  }
 
   const [boltInputs, setBoltInputs] = useState<
     { length: string; lengthOther: string; type: string; count: string }[]
@@ -361,9 +418,9 @@ export default function Activity() {
                         }
                       >
                         <option value="">-</option>
-                        {locationList.map((o) => (
-                          <option key={o} value={o}>
-                            {o}
+                        {locationOptionsForField(f.field).map((o) => (
+                          <option key={o.id || o.name} value={o.name}>
+                            {o.name}
                           </option>
                         ))}
                         <option value="__manual__">Other (manual)</option>

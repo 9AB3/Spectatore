@@ -33,7 +33,9 @@ export default function Main() {
     } catch {
       // ignore local delete errors
     }
-    nav('/Home');
+    setMsg('Tagged out');
+    // Keep toast visible for at least 2s before route change
+    setTimeout(() => nav('/Home'), 2000);
   }
 
   useEffect(() => {
@@ -71,7 +73,8 @@ export default function Main() {
     await db.put('shift', { date, dn }, 'current');
     setMsg('Entering portal');
     setOpen(false);
-    setTimeout(() => nav('/Shift'), 300);
+    // Keep toast visible for at least 2s before route change
+    setTimeout(() => nav('/Shift'), 2000);
   }
 
   return (
@@ -96,6 +99,10 @@ export default function Main() {
             Admin – Users
           </button>
         )}
+
+        <button className="btn" onClick={() => nav('/ClearShifts')}>
+          Clear Shifts
+        </button>
         <button className="btn" onClick={tagOut}>
           TAG OUT
         </button>

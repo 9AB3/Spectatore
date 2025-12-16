@@ -10,6 +10,9 @@ export default function ViewConnections() {
   const [outgoing, setOutgoing] = useState<any[]>([]);
   const [accepted, setAccepted] = useState<any[]>([]);
 
+  const [removeId, setRemoveId] = useState<number | null>(null);
+  const [removeName, setRemoveName] = useState<string>('');
+
   async function reloadConnections() {
     const db = await getDB();
     const session = await db.get('session', 'auth');
@@ -40,6 +43,15 @@ export default function ViewConnections() {
     await reloadConnections();
   }
 
+  async function removeAccepted() {
+    if (!removeId) return;
+    await api(`/api/connections/${removeId}/remove`, { method: 'POST' });
+    setMsg('Removed from your crew');
+    setRemoveId(null);
+    setRemoveName('');
+    await reloadConnections();
+  }
+
   return (
     <div>
       <Toast />
@@ -57,6 +69,16 @@ export default function ViewConnections() {
                     <div className="font-medium">{r.name || 'Unknown'}</div>
                     <div className="text-xs text-slate-600">{r.email}</div>
                   </div>
+                  <button
+                    className="ml-3 w-8 h-8 rounded-full border border-slate-300 flex items-center justify-center text-slate-600 hover:bg-slate-50"
+                    title="Remove"
+                    onClick={() => {
+                      setRemoveId(r.id);
+                      setRemoveName(r.name || 'this crew member');
+                    }}
+                  >
+                    ✕
+                  </button>
                 </li>
               ))}
             </ul>
@@ -112,6 +134,30 @@ export default function ViewConnections() {
           BACK
         </a>
       </div>
+
+      {removeId !== null && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="card w-full max-w-sm">
+            <h3 className="text-lg font-semibold mb-2">Remove crew member</h3>
+            <div className="text-sm text-slate-700 mb-4">Remove from your crew? (Y/N)</div>
+            <div className="text-sm text-slate-500 mb-4 truncate">{removeName}</div>
+            <div className="flex gap-2">
+              <button className="btn flex-1" onClick={removeAccepted}>
+                Yes
+              </button>
+              <button
+                className="btn flex-1"
+                onClick={() => {
+                  setRemoveId(null);
+                  setRemoveName('');
+                }}
+              >
+                No
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

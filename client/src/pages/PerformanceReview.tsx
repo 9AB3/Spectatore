@@ -1,5 +1,6 @@
 import Header from '../components/Header';
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getDB } from '../lib/idb';
 
@@ -300,6 +301,7 @@ async function fetchCrewGraphData(
 }
 
 export default function PerformanceReview() {
+  const nav = useNavigate();
   // separate date ranges
   const [fromTable, setFromTable] = useState(formatDate(startOfMonth(new Date())));
   const [toTable, setToTable] = useState(formatDate(new Date()));
@@ -1579,13 +1581,15 @@ export default function PerformanceReview() {
                 })
               )}
 
-              <div className="flex gap-2">
-                <a href="/Main" className="btn flex-1 text-center">
-                  BACK
-                </a>
-              </div>
             </div>
           )}
+        </div>
+
+        {/* Back button sits below the main card so it shows for both tabs */}
+        <div className="mt-4">
+          <button className="btn w-full" onClick={() => nav('/Main')}>
+            BACK
+          </button>
         </div>
       </div>
     </div>
