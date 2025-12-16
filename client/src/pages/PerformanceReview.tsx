@@ -771,7 +771,7 @@ export default function PerformanceReview() {
       return `${m}/${y.slice(2)}`;
     })();
 
-    // Most productive shift (avg per NON-ZERO shift)
+    // DS/NS averages (avg per NON-ZERO shift)
     let dsSum = 0,
       nsSum = 0;
     let dsNonZero = 0,
@@ -862,6 +862,10 @@ export default function PerformanceReview() {
         <div className="text-right tabular-nums">{showCrew ? <PctPill value={p} /> : ''}</div>
       </div>
     );
+  }
+
+  function fmtAvg(v: number) {
+    return Number.isFinite(v) ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '–';
   }
 
   // ✅ dates-with-data for the CURRENT selection (graph calendars should be green only for selected metric)
@@ -1203,97 +1207,53 @@ export default function PerformanceReview() {
                       </div>
                     </div>
 
-                   {/* Most Productive Shift */}
-<div className="bg-white border rounded p-2">
-  <div className="text-xs text-slate-600 mb-2">Most Productive Shift</div>
+                    {/* Most Productive Shift (RESTORED DS/NS AVG) */}
+                    <div className="bg-white border rounded p-2">
+                      <div className="flex items-baseline justify-between">
+                        <div className="text-xs text-slate-600">Most Productive Shift</div>
+                        <div className="text-xs text-slate-500">
+                          Winner:{' '}
+                          <span className="font-semibold text-slate-700">
+                            {milestonesAllTime.shiftCompare.bestShiftLabel}
+                          </span>
+                          {selectedCrewId && milestonesAllTimeCrew ? (
+                            <>
+                              {' '}
+                              | Crew:{' '}
+                              <span className="font-semibold text-slate-700">
+                                {milestonesAllTimeCrew.shiftCompare.bestShiftLabel}
+                              </span>
+                            </>
+                          ) : null}
+                        </div>
+                      </div>
 
-  {/* Column headers only when crew comparison is on */}
-  {selectedCrewId && (
-    <div className="grid items-center gap-2 grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)_3.5rem] text-[11px] text-slate-500 mb-1">
-      <div />
-      <div className="truncate">{currentUserName}</div>
-      <div className="text-right truncate">{crewName || 'Crew'}</div>
-      <div className="text-right">Δ</div>
-    </div>
-  )}
-
-  {/* DS avg */}
-  <div className="grid items-center gap-2 grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)_3.5rem]">
-    <div className="text-xs text-slate-600">DS Avg</div>
-    <div className="font-semibold truncate">
-      {Number.isFinite(milestonesAllTime.shiftCompare.dsAvg)
-        ? milestonesAllTime.shiftCompare.dsAvg.toLocaleString(undefined, { maximumFractionDigits: 2 })
-        : '–'}
-    </div>
-    <div className="text-right truncate">
-      {selectedCrewId
-        ? Number.isFinite(milestonesAllTimeCrew?.shiftCompare.dsAvg ?? NaN)
-          ? (milestonesAllTimeCrew!.shiftCompare.dsAvg).toLocaleString(undefined, {
-              maximumFractionDigits: 2,
-            })
-          : '–'
-        : ''}
-    </div>
-    <div className="text-right tabular-nums">
-      {selectedCrewId ? (
-        <PctPill
-          value={
-            Number.isFinite(milestonesAllTime.shiftCompare.dsAvg) &&
-            Number.isFinite(milestonesAllTimeCrew?.shiftCompare.dsAvg ?? NaN)
-              ? pctDiff(milestonesAllTime.shiftCompare.dsAvg, milestonesAllTimeCrew!.shiftCompare.dsAvg)
-              : null
-          }
-        />
-      ) : (
-        ''
-      )}
-    </div>
-  </div>
-
-  {/* NS avg */}
-  <div className="grid items-center gap-2 grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)_3.5rem] mt-1">
-    <div className="text-xs text-slate-600">NS Avg</div>
-    <div className="font-semibold truncate">
-      {Number.isFinite(milestonesAllTime.shiftCompare.nsAvg)
-        ? milestonesAllTime.shiftCompare.nsAvg.toLocaleString(undefined, { maximumFractionDigits: 2 })
-        : '–'}
-    </div>
-    <div className="text-right truncate">
-      {selectedCrewId
-        ? Number.isFinite(milestonesAllTimeCrew?.shiftCompare.nsAvg ?? NaN)
-          ? (milestonesAllTimeCrew!.shiftCompare.nsAvg).toLocaleString(undefined, {
-              maximumFractionDigits: 2,
-            })
-          : '–'
-        : ''}
-    </div>
-    <div className="text-right tabular-nums">
-      {selectedCrewId ? (
-        <PctPill
-          value={
-            Number.isFinite(milestonesAllTime.shiftCompare.nsAvg) &&
-            Number.isFinite(milestonesAllTimeCrew?.shiftCompare.nsAvg ?? NaN)
-              ? pctDiff(milestonesAllTime.shiftCompare.nsAvg, milestonesAllTimeCrew!.shiftCompare.nsAvg)
-              : null
-          }
-        />
-      ) : (
-        ''
-      )}
-    </div>
-  </div>
-
-  {/* Winner label */}
-  <div className="grid items-center gap-2 grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)_3.5rem] mt-2 pt-2 border-t">
-    <div className="text-xs text-slate-600">Winner</div>
-    <div className="font-semibold truncate">{milestonesAllTime.shiftCompare.bestShiftLabel}</div>
-    <div className="text-right font-semibold truncate">
-      {selectedCrewId ? milestonesAllTimeCrew?.shiftCompare.bestShiftLabel || '–' : ''}
-    </div>
-    <div className="text-right">{selectedCrewId ? <span className="text-slate-400">–</span> : ''}</div>
-  </div>
-</div>
-
+                      <div className="mt-1 space-y-1">
+                        <CompareRowWithPct
+                          userNum={milestonesAllTime.shiftCompare.dsAvg}
+                          userText={`DS avg: ${fmtAvg(milestonesAllTime.shiftCompare.dsAvg)}`}
+                          crewNum={milestonesAllTimeCrew?.shiftCompare.dsAvg}
+                          crewText={
+                            milestonesAllTimeCrew
+                              ? `DS avg: ${fmtAvg(milestonesAllTimeCrew.shiftCompare.dsAvg)}`
+                              : undefined
+                          }
+                        />
+                        <CompareRowWithPct
+                          userNum={milestonesAllTime.shiftCompare.nsAvg}
+                          userText={`NS avg: ${fmtAvg(milestonesAllTime.shiftCompare.nsAvg)}`}
+                          crewNum={milestonesAllTimeCrew?.shiftCompare.nsAvg}
+                          crewText={
+                            milestonesAllTimeCrew
+                              ? `NS avg: ${fmtAvg(milestonesAllTimeCrew.shiftCompare.nsAvg)}`
+                              : undefined
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* 3) Graph date range (green depends on selected metric; does NOT affect dropdown availability) */}
               <div className="flex flex-wrap gap-2 items-end">
@@ -1366,7 +1326,12 @@ export default function PerformanceReview() {
                     />
 
                     {/* left axis label */}
-                    <text x={chartPaddingLeft - 24} y={chartPaddingTop - 4} fontSize={10} fill="#475569">
+                    <text
+                      x={chartPaddingLeft - 24}
+                      y={chartPaddingTop - 4}
+                      fontSize={10}
+                      fill="#475569"
+                    >
                       Daily total
                     </text>
                     {/* right axis label */}
@@ -1457,16 +1422,30 @@ export default function PerformanceReview() {
 
                       return (
                         <g key={`bar-${pt.date}`}>
-                          <rect x={xUser} y={yUser} width={singleWidth} height={hUser} fill="#64748b" />
+                          <rect
+                            x={xUser}
+                            y={yUser}
+                            width={singleWidth}
+                            height={hUser}
+                            fill="#64748b"
+                          />
                           {selectedCrewId && (
-                            <rect x={xCrew} y={yCrew} width={singleWidth} height={hCrew} fill="#f59e0b" />
+                            <rect
+                              x={xCrew}
+                              y={yCrew}
+                              width={singleWidth}
+                              height={hCrew}
+                              fill="#f59e0b"
+                            />
                           )}
                         </g>
                       );
                     })}
 
                     {/* cumulative line (you) */}
-                    {cumPathCurrent && <path d={cumPathCurrent} fill="none" stroke="#0f766e" strokeWidth={2} />}
+                    {cumPathCurrent && (
+                      <path d={cumPathCurrent} fill="none" stroke="#0f766e" strokeWidth={2} />
+                    )}
 
                     {/* cumulative line (crew) */}
                     {selectedCrewId && cumPathCrew && (
@@ -1483,13 +1462,23 @@ export default function PerformanceReview() {
                     {seriesCurrent.map((pt, i) => {
                       const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
                       const y = yCum(pt.cumulative);
-                      return <circle key={`dot-me-${pt.date}`} cx={xCenter} cy={y} r={3} fill="#0f766e" />;
+                      return (
+                        <circle key={`dot-me-${pt.date}`} cx={xCenter} cy={y} r={3} fill="#0f766e" />
+                      );
                     })}
                     {selectedCrewId &&
                       seriesCrew.map((pt, i) => {
                         const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
                         const y = yCum(pt.cumulative);
-                        return <circle key={`dot-crew-${pt.date}`} cx={xCenter} cy={y} r={2} fill="#f97316" />;
+                        return (
+                          <circle
+                            key={`dot-crew-${pt.date}`}
+                            cx={xCenter}
+                            cy={y}
+                            r={2}
+                            fill="#f97316"
+                          />
+                        );
                       })}
 
                     {/* x-axis labels */}
@@ -1530,7 +1519,11 @@ export default function PerformanceReview() {
                   onChange={setToTable}
                   datesWithData={datesWithData}
                 />
-                <button className="btn" onClick={() => fetchTableData(fromTable, toTable)} disabled={loading}>
+                <button
+                  className="btn"
+                  onClick={() => fetchTableData(fromTable, toTable)}
+                  disabled={loading}
+                >
                   Apply
                 </button>
               </div>
