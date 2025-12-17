@@ -1,8 +1,10 @@
 import Header from '../components/Header';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getDB } from '../lib/idb';
+// (milestones card no longer uses a background image)
 
 type ShiftRow = { id: number; date: string; dn: string; totals_json: any };
 type Rollup = Record<string, Record<string, Record<string, number>>>;
@@ -963,7 +965,7 @@ export default function PerformanceReview() {
   const chartPaddingLeft = 48;
   const chartPaddingRight = 48;
   const chartPaddingTop = 16;
-  const chartPaddingBottom = 40;
+  const chartPaddingBottom = 56; // room for x-axis title
   const innerHeight = 180;
   const svgHeight = chartPaddingTop + innerHeight + chartPaddingBottom;
   const barWidth = 24;
@@ -1002,6 +1004,35 @@ export default function PerformanceReview() {
 
   const cumPathCurrent = buildCumPath(seriesCurrent);
   const cumPathCrew = buildCumPath(seriesCrew);
+
+  // -------- graph hover tooltip --------
+  const chartWrapRef = useRef<HTMLDivElement | null>(null);
+  const [hoverTip, setHoverTip] = useState<
+    | null
+    | {
+        x: number;
+        y: number;
+        title: string;
+        valueLabel: string;
+      }
+  >(null);
+
+  function fmtDdMmm(ymd: string) {
+    try {
+      const d = parseYmd(ymd);
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mmm = d.toLocaleString(undefined, { month: 'short' });
+      return `${dd}/${mmm}`;
+    } catch {
+      return ymd;
+    }
+  }
+
+  function showTip(e: ReactMouseEvent, title: string, valueLabel: string) {
+    const r = chartWrapRef.current?.getBoundingClientRect();
+    if (!r) return;
+    setHoverTip({ x: e.clientX - r.left, y: e.clientY - r.top, title, valueLabel });
+  }
 
   const crewMatch = crew.find((c) => c.id === Number(selectedCrewId || 0));
   const crewName = crewMatch?.name || '';
@@ -1112,7 +1143,7 @@ export default function PerformanceReview() {
 
               {/* 2) Milestones */}
               {selectionReady && milestonesAllTime && (
-                <div className="border rounded p-3 bg-slate-50">
+                <div className="border rounded p-3">
                   <div className="font-semibold mb-2">Milestones</div>
 
                   {selectedCrewId && (
@@ -1307,8 +1338,24 @@ export default function PerformanceReview() {
               ) : seriesCurrent.length === 0 && seriesCrew.length === 0 ? (
                 <div className="text-sm text-slate-500">No data for this selection</div>
               ) : (
-                <div className="border rounded p-3 overflow-x-auto">
-                  <svg width={svgWidth} height={svgHeight} className="block">
+                <div ref={chartWrapRef} className="border rounded p-3 overflow-x-auto relative">
+                  {/* tooltip */}
+                  {hoverTip && (
+                    <div
+                      className="absolute z-10 pointer-events-none bg-white border border-slate-300 rounded shadow px-2 py-1 text-xs"
+                      style={{ left: Math.min(hoverTip.x + 10, svgWidth - 120), top: Math.max(hoverTip.y - 40, 0) }}
+                    >
+                      <div className="font-semibold">{hoverTip.title}</div>
+                      <div>{hoverTip.valueLabel}</div>
+                    </div>
+                  )}
+
+                  <svg
+                    width={svgWidth}
+                    height={svgHeight}
+                    className="block"
+                    onMouseLeave={() => setHoverTip(null)}
+                  >
                     {/* axes */}
                     <line
                       x1={chartPaddingLeft - 6}
@@ -1327,21 +1374,26 @@ export default function PerformanceReview() {
                       strokeWidth={1}
                     />
 
-                    {/* left axis label */}
+                    {/* y-axis titles (rotated, bold) */}
                     <text
-                      x={chartPaddingLeft - 24}
-                      y={chartPaddingTop - 4}
-                      fontSize={10}
+                      x={16}
+                      y={chartPaddingTop + innerHeight / 2}
+                      fontSize={11}
+                      fontWeight={700}
                       fill="#475569"
+                      textAnchor="middle"
+                      transform={`rotate(-90 16 ${chartPaddingTop + innerHeight / 2})`}
                     >
                       Daily total
                     </text>
-                    {/* right axis label */}
                     <text
-                      x={svgWidth - chartPaddingRight + 10}
-                      y={chartPaddingTop - 4}
-                      fontSize={10}
+                      x={svgWidth - 16}
+                      y={chartPaddingTop + innerHeight / 2}
+                      fontSize={11}
+                      fontWeight={700}
                       fill="#475569"
+                      textAnchor="middle"
+                      transform={`rotate(90 ${svgWidth - 16} ${chartPaddingTop + innerHeight / 2})`}
                     >
                       Cumulative
                     </text>
@@ -1430,6 +1482,10 @@ export default function PerformanceReview() {
                             width={singleWidth}
                             height={hUser}
                             fill="#64748b"
+                            onMouseMove={(e) =>
+                              showTip(e, fmtDdMmm(pt.date), `Daily (You): ${userVal.toLocaleString()}`)
+                            }
+                            onMouseLeave={() => setHoverTip(null)}
                           />
                           {selectedCrewId && (
                             <rect
@@ -1438,6 +1494,14 @@ export default function PerformanceReview() {
                               width={singleWidth}
                               height={hCrew}
                               fill="#f59e0b"
+                              onMouseMove={(e) =>
+                                showTip(
+                                  e,
+                                  fmtDdMmm(pt.date),
+                                  `Daily (${crewName || 'Crew'}): ${crewVal.toLocaleString()}`,
+                                )
+                              }
+                              onMouseLeave={() => setHoverTip(null)}
                             />
                           )}
                         </g>
@@ -1465,7 +1529,17 @@ export default function PerformanceReview() {
                       const xCenter = chartPaddingLeft + i * (barWidth + gap) + barWidth / 2;
                       const y = yCum(pt.cumulative);
                       return (
-                        <circle key={`dot-me-${pt.date}`} cx={xCenter} cy={y} r={3} fill="#0f766e" />
+                        <circle
+                          key={`dot-me-${pt.date}`}
+                          cx={xCenter}
+                          cy={y}
+                          r={3}
+                          fill="#0f766e"
+                          onMouseMove={(e) =>
+                            showTip(e, fmtDdMmm(pt.date), `Cumulative (You): ${pt.cumulative.toLocaleString()}`)
+                          }
+                          onMouseLeave={() => setHoverTip(null)}
+                        />
                       );
                     })}
                     {selectedCrewId &&
@@ -1479,6 +1553,14 @@ export default function PerformanceReview() {
                             cy={y}
                             r={2}
                             fill="#f97316"
+                            onMouseMove={(e) =>
+                              showTip(
+                                e,
+                                fmtDdMmm(pt.date),
+                                `Cumulative (${crewName || 'Crew'}): ${pt.cumulative.toLocaleString()}`,
+                              )
+                            }
+                            onMouseLeave={() => setHoverTip(null)}
                           />
                         );
                       })}
@@ -1495,10 +1577,22 @@ export default function PerformanceReview() {
                           fill="#64748b"
                           textAnchor="middle"
                         >
-                          {pt.date.slice(5)}
+                          {fmtDdMmm(pt.date)}
                         </text>
                       );
                     })}
+
+                    {/* x-axis title */}
+                    <text
+                      x={svgWidth / 2}
+                      y={svgHeight - 6}
+                      fontSize={11}
+                      fontWeight={700}
+                      fill="#475569"
+                      textAnchor="middle"
+                    >
+                      Date
+                    </text>
                   </svg>
                 </div>
               )}

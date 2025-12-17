@@ -4,6 +4,8 @@ import useToast from '../hooks/useToast';
 import { useEffect, useState } from 'react';
 import { getDB } from '../lib/idb';
 import { api } from '../lib/api';
+import portalIcon from '../assets/portal_icon.png';
+import tagoutIcon from '../assets/tagout.png';
 
 function parseYmd(ymd: string): Date {
   const [y, m, d] = ymd.split('-').map((v) => parseInt(v, 10));
@@ -82,29 +84,38 @@ export default function Main() {
       <Toast />
       <Header />
       <div className="p-6 grid gap-4 max-w-xl mx-auto">
-        <button className="btn" onClick={() => setOpen(true)}>
-          Start Shift
-        </button>
-        <button className="btn" onClick={() => nav('/PerformanceReview')}>
-          Performance Review
-        </button>
-        <button className="btn" onClick={() => nav('/Connections')}>
-          Crew Members
-        </button>
-        <button className="btn" onClick={() => nav('/Equipment&Locations')}>
-          Equipment / Locations
+        <button
+          className="btn"
+          onClick={() => setOpen(true)}
+          style={{ paddingTop: 22, paddingBottom: 22 }}
+        >
+          <div className="flex flex-col items-center justify-center gap-2">
+            <span>START SHIFT</span>
+            <img
+              src={portalIcon}
+              alt="Portal"
+              className="h-24 w-24 button-icon"
+            />
+          </div>
         </button>
         {isAdmin && (
           <button className="btn" onClick={() => nav('/AdminUsers')}>
             Admin – Users
           </button>
         )}
-
-        <button className="btn" onClick={() => nav('/ClearShifts')}>
-          Clear Shifts
-        </button>
-        <button className="btn" onClick={tagOut}>
-          TAG OUT
+        <button
+          className="btn"
+          onClick={tagOut}
+          style={{ paddingTop: 22, paddingBottom: 22 }}
+        >
+          <div className="flex flex-col items-center justify-center gap-2">
+            <span>TAG OUT</span>
+            <img
+              src={tagoutIcon}
+              alt="Tag"
+              className="h-24 w-24 button-icon"
+            />
+          </div>
         </button>
       </div>
 
@@ -136,6 +147,18 @@ export default function Main() {
                   Cancel
                 </button>
               </div>
+
+              <button
+                type="button"
+                className="text-[12px] underline text-center w-full mt-3 opacity-80 hover:opacity-100"
+                style={{ color: '#b00020' }}
+                onClick={() => {
+                  setOpen(false);
+                  nav('/ClearShifts');
+                }}
+              >
+                Click here to clear shifts
+              </button>
             </div>
           </div>
         </div>

@@ -40,6 +40,28 @@ body {
   @apply rounded-2xl shadow p-5;
   background: var(--card);
 }
+
+/* Milestones card background (subtle podium watermark) */
+.milestones-card {
+  position: relative;
+  overflow: hidden;
+  background: rgba(248, 250, 252, 0.88);
+}
+.milestones-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--milestones-bg);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  opacity: 0.13;
+  pointer-events: none;
+}
+.milestones-card > * {
+  position: relative;
+  z-index: 1;
+}
 .input {
   @apply border rounded-xl px-3 py-2 w-full outline-none;
   background: var(--input);
@@ -70,7 +92,7 @@ body {
   height: 10px;
   border-radius: 9999px;
   display: inline-block;
-  margin-left: 8px;
+  margin-left: 0;
 }
 .sync-ok {
   background: var(--ok);
@@ -80,6 +102,34 @@ body {
 }
 .sync-bad {
   background: var(--bad);
+}
+
+/* Sync indicator: dots with inline labels */
+.sync-inline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.sync-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sync-text {
+  font-size: 10px;
+  color: #64748b; /* slate-500 */
+  white-space: nowrap;
+}
+
+/* Used for the Start Shift / Tag Out button images so they read like "icon text" */
+.button-icon {
+  /* Force the raster icon to match the button text colour (white on dark buttons) */
+  filter: brightness(0) invert(1);
+}
+
+/* When a sync light is not active, show it as dimmed but still visible */
+.sync-off {
+  opacity: 0.25;
 }
 
 a.link {

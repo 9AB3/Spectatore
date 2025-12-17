@@ -14,28 +14,87 @@ function SyncIndicator() {
       window.removeEventListener('offline', on);
     };
   }, []);
+  // Refresh pending count periodically (keeps indicator accurate while user logs activities)
   useEffect(() => {
-    (async () => {
-      const db = await getDB();
-      const acts = await db.getAll('activities');
-      setPending(acts.length);
-    })();
+    let alive = true;
+    const tick = async () => {
+      try {
+        const db = await getDB();
+        const acts = await db.getAll('activities');
+        if (alive) setPending(acts.length);
+      } catch {
+        // ignore
+      }
+    };
+    tick();
+    const t = setInterval(tick, 2000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
   }, []);
-  const cls = !online ? 'sync-bad' : pending > 0 ? 'sync-warn' : 'sync-ok';
-  const label = !online ? 'Offline' : pending > 0 ? `Pending sync (${pending})` : 'Synced';
-  return <span title={label} className={`sync-dot ${cls}`}></span>;
+
+  const syncedOn = online && pending === 0;
+  const pendingOn = pending > 0;
+  const offlineOn = !online;
+
+  // Three lights always visible
+return (
+  <div className="sync-inline" aria-label="Sync status">
+    <div className="sync-item">
+      <span
+        title={syncedOn ? 'Synced' : 'Synced (not active)'}
+        className={`sync-dot sync-ok ${syncedOn ? '' : 'sync-off'}`}
+      />
+      <span className="sync-text">Synced</span>
+    </div>
+
+    <div className="sync-item">
+      <span
+        title={pendingOn ? `Pending Sync (${pending})` : 'Pending Sync (0)'}
+        className={`sync-dot sync-warn ${pendingOn ? '' : 'sync-off'}`}
+      />
+      <span className="sync-text">Pending Sync</span>
+    </div>
+
+    <div className="sync-item">
+      <span
+        title={offlineOn ? 'Offline' : 'Offline (not active)'}
+        className={`sync-dot sync-bad ${offlineOn ? '' : 'sync-off'}`}
+      />
+      <span className="sync-text">Offline</span>
+    </div>
+  </div>
+);
+
 }
 
 export default function Header() {
   const [shift, setShift] = useState<{ date?: string; dn?: 'DS' | 'NS' }>({});
   const loc = useLocation();
   useEffect(() => {
-    (async () => {
-      const db = await getDB();
-      const s = await db.get('shift', 'current');
-      setShift(s || {});
-    })();
-  }, []);
+    let alive = true;
+    const load = async () => {
+      try {
+        const db = await getDB();
+        const s = await db.get('shift', 'current');
+        if (alive) setShift(s || {});
+      } catch {
+        if (alive) setShift({});
+      }
+    };
+
+    // initial + whenever route changes
+    load();
+
+    // allow pages to force-refresh the shift display (e.g. FinalizeShift change date/shift)
+    const onShift = () => load();
+    window.addEventListener('spectatore:shift', onShift as any);
+    return () => {
+      alive = false;
+      window.removeEventListener('spectatore:shift', onShift as any);
+    };
+  }, [loc.pathname]);
 
   function fmt(dateIso?: string) {
     if (!dateIso) return '';

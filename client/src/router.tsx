@@ -17,8 +17,10 @@ import ClearData from './pages/ClearData';
 import AddConnection from './pages/AddConnection';
 import ViewConnections from './pages/ViewConnections';
 import AdminUsers from './pages/AdminUsers';
+import Settings from './pages/Settings';
 import { useEffect, useState } from 'react';
 import { getDB } from './lib/idb';
+import ProtectedLayout from './components/ProtectedLayout';
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const [ok, setOk] = useState<boolean | null>(null);
@@ -46,102 +48,28 @@ export default function App() {
 
       {/* Protected */}
       <Route
-        path="/Main"
         element={
           <RequireAuth>
-            <Main />
+            <ProtectedLayout />
           </RequireAuth>
         }
-      />
-      <Route
-        path="/Shift"
-        element={
-          <RequireAuth>
-            <Shift />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/Activity"
-        element={
-          <RequireAuth>
-            <Activity />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/ViewActivities"
-        element={
-          <RequireAuth>
-            <ViewActivities />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/FinalizeShift"
-        element={
-          <RequireAuth>
-            <FinalizeShift />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/Connections"
-        element={
-          <RequireAuth>
-            <Connections />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/Equipment&Locations"
-        element={
-          <RequireAuth>
-            <EquipmentLocations />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/PerformanceReview"
-        element={
-          <RequireAuth>
-            <PerformanceReview />
-          </RequireAuth>
-        }
-      />
+      >
+        <Route path="/Main" element={<Main />} />
+        <Route path="/Shift" element={<Shift />} />
+        <Route path="/Activity" element={<Activity />} />
+        <Route path="/ViewActivities" element={<ViewActivities />} />
+        <Route path="/FinalizeShift" element={<FinalizeShift />} />
 
-      <Route
-        path="/ClearShifts"
-        element={
-          <RequireAuth>
-            <ClearShifts />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/AddConnection"
-        element={
-          <RequireAuth>
-            <AddConnection />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/ViewConnections"
-        element={
-          <RequireAuth>
-            <ViewConnections />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/AdminUsers"
-        element={
-          <RequireAuth>
-            <AdminUsers />
-          </RequireAuth>
-        }
-      />
+        <Route path="/Connections" element={<Connections />} />
+        <Route path="/Equipment&Locations" element={<EquipmentLocations />} />
+        <Route path="/PerformanceReview" element={<PerformanceReview />} />
+        <Route path="/Settings" element={<Settings />} />
+
+        <Route path="/ClearShifts" element={<ClearShifts />} />
+        <Route path="/AddConnection" element={<AddConnection />} />
+        <Route path="/ViewConnections" element={<ViewConnections />} />
+        <Route path="/AdminUsers" element={<AdminUsers />} />
+      </Route>
 
       <Route
         path="*"
