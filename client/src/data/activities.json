@@ -423,19 +423,19 @@
         "field": "No of Holes",
         "required": 1,
         "unit": "No.",
-        "input": "number|1-500"
+        "input": "number|1-1000"
       },
       {
         "field": "Charge Metres",
         "required": 1,
         "unit": "m",
-        "input": "number|1-500"
+        "input": "number|1-10000"
       },
       {
         "field": "Charge kg",
         "required": 1,
         "unit": "Kg",
-        "input": "number|1-2000"
+        "input": "number|1-100000"
       },
       {
         "field": "Tonnes Fired",
