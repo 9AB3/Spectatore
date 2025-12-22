@@ -113,7 +113,8 @@ function computeTotalsBySubFromPayloads(payloads: any[]) {
 
       // Weighted totals
       totals[activity][subActivity]['Weight'] = (totals[activity][subActivity]['Weight'] || 0) + wt * trucks;
-      totals[activity][subActivity]['Distance'] = (totals[activity][subActivity]['Distance'] || 0) + dist * trucks;
+      totals[activity][subActivity]['Distance'] =
+        (totals[activity][subActivity]['Distance'] || 0) + dist * trucks;
 
       // TKMs stays weighted by wt × dist × trucks
       totals[activity][subActivity]['TKMs'] = (totals[activity][subActivity]['TKMs'] || 0) + wt * dist * trucks;
@@ -169,7 +170,7 @@ function flattenObject(obj: any, prefix = ''): FlatKV[] {
     return out;
   }
   for (const k of keys) {
-    const v = (obj as any)[k];
+    const v = (obj as any)[k]; // ✅ avoid TS index issues
     const p = prefix ? `${prefix}.${k}` : k;
     if (v != null && typeof v === 'object') out.push(...flattenObject(v, p));
     else push(p, v, 'primitive');
@@ -348,7 +349,7 @@ function allowedLocationTypes(activity: string, sub: string, fieldName: string) 
   return ['Heading', 'Stope', 'Stockpile'];
 }
 
-/** ✅ FIXED TYPES HERE (this resolves TS7006 on Vercel) */
+/** ✅ FIX: typed actKeyBase (removes TS7006) */
 type ActKeyBaseInput = { dn: string; activity: string; sub_activity: string };
 function actKeyBase(act: ActKeyBaseInput, userEmail: string, location: string) {
   return `${userEmail}|||${act.dn}|||${act.activity}|||${act.sub_activity}|||${location}`;
@@ -399,7 +400,7 @@ export default function SiteAdminValidate() {
         // ignore
       }
     })();
-  }, []);
+  }, []); // intentionally once
 
   // Load calendar status
   useEffect(() => {
@@ -563,9 +564,9 @@ export default function SiteAdminValidate() {
       const subName = getSubNameFromObj(a as any, obj);
       const grp = getGroupValue(actName, obj);
       const base = `${String(a?.user_email || '')}|||${String(a?.dn || '')}|||${actName}|||${subName}|||${grp}`;
-      const n1 = (counts.get(base) || 0) + 1;
-      counts.set(base, n1);
-      const full = `${base}|||${n1}`;
+      const nn = (counts.get(base) || 0) + 1;
+      counts.set(base, nn);
+      const full = `${base}|||${nn}`;
       m.set(full, obj);
     }
     return m;
@@ -624,21 +625,1163 @@ export default function SiteAdminValidate() {
     }
   }
 
-  // --- your existing rest of file continues unchanged ---
-  // NOTE: I’m keeping your content exactly as-is; only the TS7006 fix was needed.
-  // Paste the remainder of your component below this point from your original file.
+  const totalRows = useMemo(() => {
+    // Build the Shift Totals section from VALIDATED activities (including any local edits).
+    const payloadsAll = (validatedActs as any[]).map((a) => getValidatedActObj(a)).filter(Boolean);
+    const payloadsDS = (validatedActs as any[])
+      .filter((a) => String(a?.dn || '').toUpperCase() === 'DS')
+      .map((a) => getValidatedActObj(a))
+      .filter(Boolean);
+    const payloadsNS = (validatedActs as any[])
+      .filter((a) => String(a?.dn || '').toUpperCase() === 'NS')
+      .map((a) => getValidatedActObj(a))
+      .filter(Boolean);
 
-  // ------------------------------------------------------------------------
-  // ✅ IMPORTANT:
-  // Replace your old actKeyBase(...) with the typed one above.
-  // Everything else can stay the same.
-  // ------------------------------------------------------------------------
+    const n2 = (v: any) => {
+      const num = typeof v === 'number' ? v : parseFloat(String(v ?? ''));
+      return Number.isFinite(num) ? num : 0;
+    };
+
+    const locOf = (p0: any) => {
+      const p: any = p0 || {};
+      const v: any = p.values && typeof p.values === 'object' ? p.values : {};
+      return String(p.location ?? p.Location ?? v.Location ?? v.location ?? '').trim();
+    };
+
+    const uniqCount = (vals: string[]) => {
+      const s = new Set<string>();
+      for (const v of vals) {
+        const t = String(v || '').trim();
+        if (t) s.add(t);
+      }
+      return s.size;
+    };
+
+    // ---- Haulage (kept as-is, just shown under "Haulage") ----
+    function aggHaul(payloads: any[]) {
+      const out = {
+        oreTrucks: 0,
+        oreT: 0,
+        wasteTrucks: 0,
+        wasteT: 0,
+        prodTrucks: 0,
+        prodT: 0,
+        devOreTrucks: 0,
+        devOreT: 0,
+        devWasteTrucks: 0,
+        devWasteT: 0,
+      };
+      for (const p0 of payloads || []) {
+        const p: any = p0 || {};
+        if (String(p.activity || '') !== 'Hauling') continue;
+
+        const sub = String(p.sub || p.sub_activity || '').toLowerCase();
+        const v: any = p.values && typeof p.values === 'object' ? p.values : {};
+
+        const trucks = n2(v['No of trucks'] ?? v['No. of trucks'] ?? v['Trucks'] ?? v['No of Trucks']);
+        const weightPer = n2(v['Weight'] ?? v['weight']); // t/truck
+        const tonnes = trucks * weightPer;
+
+        const material = String(v['Material'] ?? v.material ?? '').toLowerCase();
+
+        // Ore/Waste totals (by material)
+        if (material.includes('ore')) {
+          out.oreTrucks += trucks;
+          out.oreT += tonnes;
+        } else if (material.includes('waste')) {
+          out.wasteTrucks += trucks;
+          out.wasteT += tonnes;
+        }
+
+        // Production/Development breakdown
+        const isProd = sub.includes('production') || sub === 'production';
+        const isDev = sub.includes('development') || sub === 'development';
+
+        if (isProd) {
+          out.prodTrucks += trucks;
+          out.prodT += tonnes;
+        } else if (isDev) {
+          if (material.includes('ore')) {
+            out.devOreTrucks += trucks;
+            out.devOreT += tonnes;
+          } else if (material.includes('waste')) {
+            out.devWasteTrucks += trucks;
+            out.devWasteT += tonnes;
+          }
+        }
+      }
+      return out;
+    }
+
+    const hds = aggHaul(payloadsDS);
+    const hns = aggHaul(payloadsNS);
+    const htotal = aggHaul(payloadsAll);
+
+    const fmtTW = (trucks: number, tonnes: number) => `${Math.round(trucks)} (${Math.round(tonnes)})`;
+
+    // ---- Production ----
+    function prodDrillm(payloads: any[]) {
+      let sum = 0;
+      for (const p0 of payloads || []) {
+        const p: any = p0 || {};
+        if (String(p.activity || '') !== 'Production Drilling') continue;
+        const sub = String(p.sub || p.sub_activity || '');
+        if (sub !== 'Stope' && sub !== 'Service Hole') continue;
+        const v: any = p.values && typeof p.values === 'object' ? p.values : {};
+        sum += n2(v['Metres Drilled']) + n2(v['Cleanouts Drilled']) + n2(v['Redrills']);
+      }
+      return sum;
+    }
+
+    function stopesFired(payloads: any[]) {
+      const locs: string[] = [];
+      for (const p0 of payloads || []) {
+        const p: any = p0 || {};
+        if (String(p.activity || '') !== 'Charging') continue;
+        const sub = String(p.sub || p.sub_activity || '');
+        if (sub !== 'Production') continue;
+        locs.push(locOf(p));
+      }
+      return uniqCount(locs);
+    }
+
+    function tonnesFired(payloads: any[]) {
+      let sum = 0;
+      for (const p0 of payloads || []) {
+        const p: any = p0 || {};
+        if (String(p.activity || '') !== 'Charging') continue;
+        const sub = String(p.sub || p.sub_activity || '');
+        if (sub !== 'Production') continue;
+        const v: any = p.values && typeof p.values === 'object' ? p.values : {};
+        sum += n2(v['Tonnes Fired']);
+      }
+      return sum;
+    }
+
+    // ---- Development ----
+    function headingsFired(payloads: any[]) {
+      const locs: string[] = [];
+      for (const p0 of payloads || []) {
+        const p: any = p0 || {};
+        if (String(p.activity || '') !== 'Charging') continue;
+        const sub = String(p.sub || p.sub_activity || '');
+        if (sub !== 'Development') continue;
+        locs.push(locOf(p));
+      }
+      return uniqCount(locs);
+    }
+
+    function devAdvance(payloads: any[]) {
+      let sum = 0;
+      for (const p0 of payloads || []) {
+        const p: any = p0 || {};
+        if (String(p.activity || '') !== 'Charging') continue;
+        const sub = String(p.sub || p.sub_activity || '');
+        if (sub !== 'Development') continue;
+        const v: any = p.values && typeof p.values === 'object' ? p.values : {};
+        sum += n2(v['Cut Length']);
+      }
+      return sum;
+    }
+
+    function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
+      const locs: string[] = [];
+      for (const p0 of payloads || []) {
+        const p: any = p0 || {};
+        if (String(p.activity || '') !== 'Development') continue;
+        const sub = String(p.sub || p.sub_activity || '');
+        if (sub !== subWanted) continue;
+        locs.push(locOf(p));
+      }
+      return uniqCount(locs);
+    }
+
+    function gsDrillm(payloads: any[]) {
+      let sum = 0;
+      for (const p0 of payloads || []) {
+        const p: any = p0 || {};
+        if (String(p.activity || '') !== 'Development') continue;
+        const sub = String(p.sub || p.sub_activity || '');
+        if (sub !== 'Ground Support' && sub !== 'Rehab') continue;
+        const v: any = p.values && typeof p.values === 'object' ? p.values : {};
+        const direct = n2(v['GS Drillm']);
+        if (direct > 0) {
+          sum += direct;
+        } else {
+          // Fallback: bolts * bolt length (e.g. "2.4m")
+          const bolts = n2(v['No. of Bolts'] ?? v['No of Bolts'] ?? v['No. of bolts'] ?? v['No of bolts']);
+          const bl = String(v['Bolt Length'] ?? '').toLowerCase();
+          const blNum = n2(bl.replace(/[^0-9.]/g, ''));
+          if (bolts > 0 && blNum > 0) sum += bolts * blNum;
+        }
+      }
+      return sum;
+    }
+
+    function faceDrillm(payloads: any[]) {
+      let sum = 0;
+      for (const p0 of payloads || []) {
+        const p: any = p0 || {};
+        if (String(p.activity || '') !== 'Development') continue;
+        const sub = String(p.sub || p.sub_activity || '');
+        if (sub !== 'Face Drilling') continue;
+        const v: any = p.values && typeof p.values === 'object' ? p.values : {};
+        const direct = n2(v['Face Drillm']);
+        if (direct > 0) {
+          sum += direct;
+        } else {
+          const holes = n2(v['No of Holes'] ?? v['No. of Holes']);
+          const cut = n2(v['Cut Length']);
+          if (holes > 0 && cut > 0) sum += holes * cut;
+        }
+      }
+      return sum;
+    }
+
+    function shotcrete(payloads: any[]) {
+      let sum = 0;
+      for (const p0 of payloads || []) {
+        const p: any = p0 || {};
+        if (String(p.activity || '') !== 'Development') continue;
+        const sub = String(p.sub || p.sub_activity || '');
+        if (sub !== 'Ground Support' && sub !== 'Rehab') continue;
+        const v: any = p.values && typeof p.values === 'object' ? p.values : {};
+        sum += n2(v['Spray Volume']);
+      }
+      return sum;
+    }
+
+    const rows: any[] = [];
+
+    // ---- Hoisting (always at top) ----
+    const hoistSum = (payloads: any[]) => {
+      const out = { oreT: 0, wasteT: 0 };
+      for (const p0 of payloads || []) {
+        const p: any = p0 || {};
+        if (String(p.activity || '') !== 'Hoisting') continue;
+        const v: any = p.values && typeof p.values === 'object' ? p.values : {};
+        out.oreT += n2(v['Ore Tonnes']);
+        out.wasteT += n2(v['Waste Tonnes']);
+      }
+      return out;
+    };
+    const hoAll = hoistSum(payloadsAll);
+    const hoDS = hoistSum(payloadsDS);
+    const hoNS = hoistSum(payloadsNS);
+
+    rows.push(
+      { activity: 'Hoisting', sub: 'Ore / Waste', metric: 'Ore', ds: hoDS.oreT, ns: hoNS.oreT, total: hoAll.oreT },
+      {
+        activity: 'Hoisting',
+        sub: 'Ore / Waste',
+        metric: 'Waste',
+        ds: hoDS.wasteT,
+        ns: hoNS.wasteT,
+        total: hoAll.wasteT,
+      },
+    );
+
+    // ---- Haulage (kept as-is) ----
+    rows.push(
+      {
+        activity: 'Haulage',
+        sub: 'Ore / Waste',
+        metric: 'Ore',
+        ds: fmtTW(hds.oreTrucks, hds.oreT),
+        ns: fmtTW(hns.oreTrucks, hns.oreT),
+        total: fmtTW(htotal.oreTrucks, htotal.oreT),
+      },
+      {
+        activity: 'Haulage',
+        sub: 'Ore / Waste',
+        metric: 'Waste',
+        ds: fmtTW(hds.wasteTrucks, hds.wasteT),
+        ns: fmtTW(hns.wasteTrucks, hns.wasteT),
+        total: fmtTW(htotal.wasteTrucks, htotal.wasteT),
+      },
+
+      {
+        activity: 'Haulage',
+        sub: 'Production / Development',
+        metric: 'Production',
+        ds: fmtTW(hds.prodTrucks, hds.prodT),
+        ns: fmtTW(hns.prodTrucks, hns.prodT),
+        total: fmtTW(htotal.prodTrucks, htotal.prodT),
+      },
+      {
+        activity: 'Haulage',
+        sub: 'Production / Development',
+        metric: 'Development Ore',
+        ds: fmtTW(hds.devOreTrucks, hds.devOreT),
+        ns: fmtTW(hns.devOreTrucks, hns.devOreT),
+        total: fmtTW(htotal.devOreTrucks, htotal.devOreT),
+      },
+      {
+        activity: 'Haulage',
+        sub: 'Production / Development',
+        metric: 'Development Waste',
+        ds: fmtTW(hds.devWasteTrucks, hds.devWasteT),
+        ns: fmtTW(hns.devWasteTrucks, hns.devWasteT),
+        total: fmtTW(htotal.devWasteTrucks, htotal.devWasteT),
+      },
+    );
+
+    // ---- Loading (always shown on left column) ----
+    const loadSum = (payloads: any[]) => {
+      const out = {
+        primStope: 0,
+        rehandleStope: 0,
+        primDev: 0,
+        rehandleDev: 0,
+      };
+      for (const p0 of payloads || []) {
+        const p: any = p0 || {};
+        if (String(p.activity || '') !== 'Loading') continue;
+        const v: any = p.values && typeof p.values === 'object' ? p.values : {};
+        const sub = String(p.sub || p.sub_activity || (p as any).subActivity || '').trim();
+
+        if (sub === 'Production') {
+          out.primStope += n2(v['Stope to Truck']) + n2(v['Stope to SP']);
+          out.rehandleStope += n2(v['Stope SP to Truck']) + n2(v['Stope SP to SP']);
+        } else if (sub === 'Development') {
+          out.primDev += n2(v['Heading to Truck']) + n2(v['Heading to SP']);
+          out.rehandleDev += n2(v['Dev SP to SP']) + n2(v['Dev SP to Truck']);
+        }
+      }
+      return out;
+    };
+    const ldAll = loadSum(payloadsAll);
+    const ldDS = loadSum(payloadsDS);
+    const ldNS = loadSum(payloadsNS);
+
+    rows.push(
+      {
+        activity: 'Loading',
+        sub: 'Production',
+        metric: 'Primary stope bogging',
+        ds: ldDS.primStope,
+        ns: ldNS.primStope,
+        total: ldAll.primStope,
+      },
+      {
+        activity: 'Loading',
+        sub: 'Production',
+        metric: 'Rehandle stope bogging',
+        ds: ldDS.rehandleStope,
+        ns: ldNS.rehandleStope,
+        total: ldAll.rehandleStope,
+      },
+      {
+        activity: 'Loading',
+        sub: 'Development',
+        metric: 'Primary development bogging',
+        ds: ldDS.primDev,
+        ns: ldNS.primDev,
+        total: ldAll.primDev,
+      },
+      {
+        activity: 'Loading',
+        sub: 'Development',
+        metric: 'Rehandle development bogging',
+        ds: ldDS.rehandleDev,
+        ns: ldNS.rehandleDev,
+        total: ldAll.rehandleDev,
+      },
+    );
+
+    // ---- Production ----
+    rows.push(
+      {
+        activity: 'Production',
+        sub: '',
+        metric: 'Production Drillm',
+        ds: prodDrillm(payloadsDS),
+        ns: prodDrillm(payloadsNS),
+        total: prodDrillm(payloadsAll),
+      },
+      { activity: 'Production', sub: '', metric: 'Stopes fired', ds: stopesFired(payloadsDS), ns: stopesFired(payloadsNS), total: stopesFired(payloadsAll) },
+      { activity: 'Production', sub: '', metric: 'Tonnes fired', ds: tonnesFired(payloadsDS), ns: tonnesFired(payloadsNS), total: tonnesFired(payloadsAll) },
+    );
+
+    // ---- Development ----
+    const gsAll = gsDrillm(payloadsAll);
+    const faceAll = faceDrillm(payloadsAll);
+    const gsDS = gsDrillm(payloadsDS);
+    const gsNS = gsDrillm(payloadsNS);
+    const faceDS = faceDrillm(payloadsDS);
+    const faceNS = faceDrillm(payloadsNS);
+
+    rows.push(
+      { activity: 'Development', sub: '', metric: 'Headings fired', ds: headingsFired(payloadsDS), ns: headingsFired(payloadsNS), total: headingsFired(payloadsAll) },
+      { activity: 'Development', sub: '', metric: 'Development advance', ds: devAdvance(payloadsDS), ns: devAdvance(payloadsNS), total: devAdvance(payloadsAll) },
+      { activity: 'Development', sub: '', metric: 'Headings supported', ds: uniqueLocCountForDevSub(payloadsDS, 'Ground Support'), ns: uniqueLocCountForDevSub(payloadsNS, 'Ground Support'), total: uniqueLocCountForDevSub(payloadsAll, 'Ground Support') },
+      { activity: 'Development', sub: '', metric: 'Headings rehabbed', ds: uniqueLocCountForDevSub(payloadsDS, 'Rehab'), ns: uniqueLocCountForDevSub(payloadsNS, 'Rehab'), total: uniqueLocCountForDevSub(payloadsAll, 'Rehab') },
+      { activity: 'Development', sub: '', metric: 'GS Drillm', ds: gsDS, ns: gsNS, total: gsAll },
+      { activity: 'Development', sub: '', metric: 'Face Drillm', ds: faceDS, ns: faceNS, total: faceAll },
+      { activity: 'Development', sub: '', metric: 'Total Drillm', ds: gsDS + faceDS, ns: gsNS + faceNS, total: gsAll + faceAll },
+      { activity: 'Development', sub: '', metric: 'Shotcrete', ds: shotcrete(payloadsDS), ns: shotcrete(payloadsNS), total: shotcrete(payloadsAll) },
+    );
+
+    return rows;
+  }, [validatedActs, editedActs]);
+
+  const liveActObjByFullKey = useMemo(() => {
+    const m = new Map<string, any>();
+    const counts = new Map<string, number>();
+
+    for (const a of acts as any[]) {
+      const obj: any = getLiveActObj(a as any) || {};
+      const actName = getActNameFromObj(a as any, obj);
+      const subName = getSubNameFromObj(a as any, obj);
+      const grp = getGroupValue(actName, obj);
+      const base = `${String((a as any)?.user_email || '')}|||${String((a as any)?.dn || '')}|||${actName}|||${subName}|||${grp}`;
+      const nn = (counts.get(base) || 0) + 1;
+      counts.set(base, nn);
+      const key = `${base}|||${nn}`;
+      m.set(key, obj);
+    }
+    return m;
+  }, [acts]);
+
+  const validatedFullKeyById = useMemo(() => {
+    const byId = new Map<number, string>();
+    const counts = new Map<string, number>();
+    for (const a of validatedActs as any[]) {
+      const obj: any = getValidatedActObjOriginal(a) || {};
+      const actName = getActNameFromObj(a as any, obj);
+      const subName = getSubNameFromObj(a as any, obj);
+      const grp = getGroupValue(actName, obj);
+      const base = `${String((a as any)?.user_email || '')}|||${String((a as any)?.dn || '')}|||${actName}|||${subName}|||${grp}`;
+      const nn = (counts.get(base) || 0) + 1;
+      counts.set(base, nn);
+      const full = `${base}|||${nn}`;
+      if (a?.id != null) byId.set(Number(a.id), full);
+    }
+    return byId;
+  }, [validatedActs, editedActs]);
+
+  const liveObjByValidatedId = useMemo(() => {
+    // Pair validated rows to live rows (shift_activities) as best-effort.
+    // We *always* want the tooltip/baseline to reference the original shift_activities row,
+    // even if the validated row's editable fields (eg Location/Source) change.
+    //
+    // Strategy:
+    //  1) Try strict match on (user_email+dn+activity+sub+group/location)
+    //  2) Fallback to loose match on (user_email+dn+activity+sub) and pick the next unused row
+    //  3) Prefer exact payload match when possible
+    const bucketsStrict = new Map<string, { obj: any; used: boolean }[]>();
+    const bucketsLoose = new Map<string, { obj: any; used: boolean }[]>();
+
+    function pushBucket(map: Map<string, { obj: any; used: boolean }[]>, key: string, obj: any) {
+      const arr = map.get(key) || [];
+      arr.push({ obj, used: false });
+      map.set(key, arr);
+    }
+
+    for (const a of acts as any[]) {
+      const obj: any = getLiveActObj(a as any) || {};
+      const actName = getActNameFromObj(a as any, obj);
+      const subName = getSubNameFromObj(a as any, obj);
+      const grp = getGroupValue(actName, obj);
+      const em = String((a as any)?.user_email || '');
+      const dn = String((a as any)?.dn || '');
+      const strictKey = `${em}|||${dn}|||${actName}|||${subName}|||${String(grp ?? '')}`;
+      const looseKey = `${em}|||${dn}|||${actName}|||${subName}`;
+      pushBucket(bucketsStrict, strictKey, obj);
+      pushBucket(bucketsLoose, looseKey, obj);
+    }
+
+    const out = new Map<number, any>();
+
+    for (const va of validatedActs as any[]) {
+      const vid = Number((va as any)?.id);
+      if (!vid) continue;
+
+      // IMPORTANT: use the persisted validated payload_json (not the edited overlay) to find the original live row
+      const vObj: any = getValidatedActObjOriginal(va) || {};
+      const vActName = getActNameFromObj(va as any, vObj);
+      const vSubName = getSubNameFromObj(va as any, vObj);
+      const vGrp = getGroupValue(vActName, vObj);
+
+      const em = String((va as any)?.user_email || '');
+      const dn = String((va as any)?.dn || '');
+      const strictKey = `${em}|||${dn}|||${vActName}|||${vSubName}|||${String(vGrp ?? '')}`;
+      const looseKey = `${em}|||${dn}|||${vActName}|||${vSubName}`;
+
+      const vStr = JSON.stringify(vObj || {});
+
+      const tryPick = (arr: { obj: any; used: boolean }[]) => {
+        if (!arr || !arr.length) return null;
+        let pick = arr.find((x) => !x.used && JSON.stringify(x.obj || {}) === vStr);
+        if (!pick) pick = arr.find((x) => !x.used);
+        if (pick) pick.used = true;
+        return pick ? pick.obj : null;
+      };
+
+      let pickObj: any = null;
+      pickObj = tryPick(bucketsStrict.get(strictKey) || []);
+      if (!pickObj) pickObj = tryPick(bucketsLoose.get(looseKey) || []);
+
+      out.set(vid, pickObj || null);
+    }
+
+    return out;
+  }, [acts, validatedActs]);
+
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const week = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <div className="max-w-7xl mx-auto p-4 space-y-4">
         <Toast />
-        {/* ... keep the rest of your JSX exactly as you had it ... */}
+
+        <div className="flex items-center justify-between">
+          <div className="font-bold text-lg">Validate Shifts</div>
+          <button
+            className="px-4 py-2 rounded-xl bg-slate-900 text-white shadow-sm hover:bg-slate-800"
+            onClick={() => nav('/siteadmin')}
+            type="button"
+          >
+            Back
+          </button>
+        </div>
+
+        <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="font-bold">Calendar</div>
+          </div>
+
+          {calendarOpen && (
+            <>
+              <div className="flex flex-wrap gap-2 items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <button
+                    className="px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50"
+                    onClick={() => setYear((y) => y - 1)}
+                    type="button"
+                  >
+                    ‹
+                  </button>
+                  <div className="font-semibold text-lg px-1">{year}</div>
+                  <button
+                    className="px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50"
+                    onClick={() => setYear((y) => y + 1)}
+                    type="button"
+                  >
+                    ›
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="text-xs opacity-70">Site</div>
+                  <select className="input" value={site} onChange={(e) => setSite(e.target.value)}>
+                    {sites.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
+                {Array.from({ length: 12 }).map((_, mi) => {
+                  const cells = monthGrid(year, mi);
+                  const mm = String(mi + 1).padStart(2, '0');
+                  return (
+                    <div key={mi} className="border border-slate-200 rounded-2xl p-3 bg-white">
+                      <div className="font-bold mb-1">{monthNames[mi]}</div>
+                      <div className="grid grid-cols-7 text-[11px] opacity-70 mb-1">
+                        {week.map((w) => (
+                          <div key={w} className="text-center">
+                            {w}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1">
+                        {cells.map((d, idx) => {
+                          if (d == null) return <div key={idx} className="h-6" />;
+                          const dd = String(d).padStart(2, '0');
+                          const dateStr = `${year}-${mm}-${dd}`;
+                          const st = days[dateStr] || 'none';
+                          const isSel = selectedDate === dateStr;
+                          return (
+                            <button
+                              key={idx}
+                              className={`h-6 rounded-md text-[11px] ${dayClass(st)} ${
+                                isSel ? 'ring-2 ring-slate-400' : ''
+                              }`}
+                              onClick={() => loadDate(dateStr)}
+                              type="button"
+                            >
+                              {d}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex gap-4 text-xs mt-3 opacity-70">
+                <div className="flex items-center gap-2">
+                  <span className="inline-block w-3 h-3 rounded bg-emerald-500" />
+                  Validated
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="inline-block w-3 h-3 rounded bg-rose-500" />
+                  Unvalidated
+                </div>
+              </div>
+
+              <div className="flex justify-center mt-2">
+                <button
+                  className="px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50"
+                  type="button"
+                  onClick={() => setCalendarOpen((o) => !o)}
+                  aria-label="Collapse calendar"
+                  title="Collapse calendar"
+                >
+                  −
+                </button>
+              </div>
+            </>
+          )}
+
+          {!calendarOpen && (
+            <div className="flex justify-center">
+              <button
+                className="px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50"
+                type="button"
+                onClick={() => setCalendarOpen(true)}
+                aria-label="Expand calendar"
+                title="Expand calendar"
+              >
+                +
+              </button>
+            </div>
+          )}
+        </div>
+
+        {selectedDate && (
+          <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="font-bold">{selectedDate}</div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="px-4 py-2 rounded-xl bg-sky-600 text-white shadow-sm hover:bg-sky-700 disabled:opacity-50"
+                  onClick={saveEdits}
+                  disabled={loadingDay}
+                  type="button"
+                >
+                  Save edits
+                </button>
+                <button
+                  className="px-4 py-2 rounded-xl bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
+                  onClick={validate}
+                  disabled={loadingDay}
+                  type="button"
+                >
+                  Validate shift
+                </button>
+              </div>
+            </div>
+
+            {loadingDay ? (
+              <div className="p-4 opacity-70">Loading...</div>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <div>
+                    <div className="font-bold mb-2">Shift Totals</div>
+
+                    {totalRows.length ? (
+                      <div className="space-y-3">
+                        {(() => {
+                          // Group into activity blocks (keeps layout familiar)
+                          const byAct: Record<string, any[]> = {};
+                          for (const r of totalRows as any[]) {
+                            const a = String(r.activity || '');
+                            if (!byAct[a]) byAct[a] = [];
+                            byAct[a].push(r);
+                          }
+
+                          const renderTable = (actsList: string[]) => (
+                            <div className="overflow-auto">
+                              <table className="min-w-full text-sm">
+                                <thead>
+                                  <tr className="text-xs text-slate-500 bg-slate-50 border-b border-slate-200">
+                                    <th className="text-left p-2 whitespace-nowrap">Metric</th>
+                                    <th className="text-right p-2 whitespace-nowrap">DS</th>
+                                    <th className="text-right p-2 whitespace-nowrap">NS</th>
+                                    <th className="text-right p-2 whitespace-nowrap">24hrs</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {(() => {
+                                    const out: any[] = [];
+                                    for (const a of actsList) {
+                                      const rows = byAct[a] || [];
+                                      if (!rows.length) continue;
+                                      let lastS = '__none__';
+                                      // activity header
+                                      out.push(
+                                        <tr key={`act|||${a}`} className="border-b border-slate-200 bg-slate-50">
+                                          <td className="p-2 font-semibold" colSpan={4}>
+                                            {a}
+                                          </td>
+                                        </tr>,
+                                      );
+                                      for (const r of rows) {
+                                        // sub header (skip blank subs)
+                                        if (r.sub && r.sub !== lastS) {
+                                          lastS = r.sub;
+                                          out.push(
+                                            <tr
+                                              key={`${a}|||sub|||${r.sub}`}
+                                              className="border-b border-slate-200 bg-slate-50/60"
+                                            >
+                                              <td className="p-2 pl-6 font-semibold" colSpan={4}>
+                                                {r.sub}
+                                              </td>
+                                            </tr>,
+                                          );
+                                        }
+                                        out.push(
+                                          <tr
+                                            key={`${r.activity}|||${r.sub}|||${r.metric}`}
+                                            className="border-b last:border-b-0"
+                                          >
+                                            <td className="p-2 pl-10">{r.metric}</td>
+                                            <td className="p-2 text-right whitespace-nowrap">
+                                              {typeof r.ds === 'string'
+                                                ? r.ds
+                                                : Number(r.ds || 0).toLocaleString()}
+                                            </td>
+                                            <td className="p-2 text-right whitespace-nowrap">
+                                              {typeof r.ns === 'string'
+                                                ? r.ns
+                                                : Number(r.ns || 0).toLocaleString()}
+                                            </td>
+                                            <td className="p-2 text-right whitespace-nowrap">
+                                              {typeof r.total === 'string'
+                                                ? r.total
+                                                : Number(r.total || 0).toLocaleString()}
+                                            </td>
+                                          </tr>,
+                                        );
+                                      }
+                                    }
+                                    return out;
+                                  })()}
+                                </tbody>
+                              </table>
+                            </div>
+                          );
+
+                          // Fixed layout:
+                          // - Hoisting always at top
+                          // - Left column: Haulage, Loading
+                          // - Right column: Production, Development
+                          return (
+                            <>
+                              {renderTable(['Hoisting'])}
+                              <div className="grid md:grid-cols-2 gap-3">
+                                {renderTable(['Haulage', 'Loading'])}
+                                {renderTable(['Production', 'Development'])}
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    ) : (
+                      <div className="text-sm opacity-70">No totals for this date yet.</div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="font-bold">Activities</div>
+                    <div className="text-xs opacity-80 flex items-center gap-2">
+                      <span className="inline-block w-4 h-3 rounded-sm bg-amber-50/40 border border-black/10 relative overflow-hidden">
+                        <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-amber-400/70" />
+                      </span>
+                      <span>Edited (changed from finalized)</span>
+                    </div>
+                  </div>
+
+                  {(() => {
+                    // Grouping: Activity -> Sub Activity -> Location/Source
+                    const byAct: Record<string, any[]> = {};
+                    for (const a of validatedActs as any[]) {
+                      const obj: any = getValidatedActObjOriginal(a) || {};
+                      const activityName = String(obj?.activity || a?.activity || '(No Activity)');
+                      (byAct[activityName] ||= []).push(a);
+                    }
+
+                    const desiredOrder = ['Hoisting', 'Hauling', 'Loading', 'Development', 'Production Drilling', 'Charging'];
+                    const rank = (name: string) => {
+                      const i = desiredOrder.indexOf(name);
+                      return i === -1 ? 999 : i;
+                    };
+                    const actNames = Object.keys(byAct).sort((a, b) => {
+                      const ra = rank(a);
+                      const rb = rank(b);
+                      if (ra !== rb) return ra - rb;
+                      return a.localeCompare(b);
+                    });
+                    if (!actNames.length) return <div className="text-sm opacity-70">No activities for this date.</div>;
+
+                    return (
+                      <div className="space-y-4">
+                        {actNames.map((actName) => {
+                          const rowsForAct = byAct[actName] || [];
+
+                          const actLc = String(actName || '').toLowerCase();
+                          const groupKey = actLc === 'hoisting' ? '' : actLc === 'hauling' || actLc === 'loading' ? 'Source' : 'Location';
+
+                          // Columns: union across the whole ACTIVITY so headers don't repeat
+                          const colSet = new Set<string>();
+                          for (const r of rowsForAct) {
+                            const objOrig: any = getValidatedActObjOriginal(r) || {};
+                            const obj: any = getValidatedActObj(r) || objOrig || {};
+                            const values: any = obj?.values && typeof obj.values === 'object' ? obj.values : {};
+                            Object.keys(values || {}).forEach((k) => {
+                              const kl = String(k).toLowerCase();
+                              if (kl === 'location' || kl === 'source') return;
+                              colSet.add(k);
+                            });
+                          }
+
+                          const prio = (k: string) => {
+                            const kl = String(k || '').toLowerCase();
+                            if (kl === 'equipment') return 0;
+                            if (kl === 'from') return 1;
+                            if (kl === 'to') return 2;
+                            if (kl === 'material') return 3;
+                            return 100;
+                          };
+                          const cols = Array.from(colSet).sort((a, b) => {
+                            const pa = prio(a);
+                            const pb = prio(b);
+                            if (pa !== pb) return pa - pb;
+                            return a.localeCompare(b);
+                          });
+
+                          // Build Sub -> GroupValue -> rows structure
+                          const bySub: Record<string, Record<string, any[]>> = {};
+                          for (const r of rowsForAct) {
+                            const objOrig: any = getValidatedActObjOriginal(r) || {};
+                            const objCur: any = getValidatedActObj(r) || objOrig || {};
+                            const values: any = objCur?.values && typeof objCur.values === 'object' ? objCur.values : {};
+                            const sub = getSubNameFromObj(r as any, objCur);
+                            const grp = String(getGroupValue(actName, values) || '');
+                            (bySub[sub] ||= {});
+                            (bySub[sub][grp] ||= []).push(r);
+                          }
+
+                          const subNames = Object.keys(bySub).sort((a, b) => a.localeCompare(b));
+                          const colSpan = 2 + (groupKey ? 1 : 0) + cols.length;
+
+                          return (
+                            <div key={actName} className="rounded-2xl bg-white border border-slate-200 shadow-sm p-4">
+                              <div className="font-bold mb-2">{actName}</div>
+
+                              <div className="overflow-auto">
+                                <table className="min-w-[900px] w-full text-sm">
+                                  <thead>
+                                    <tr className="border-b border-slate-200">
+                                      <th className="p-2 text-left">User</th>
+                                      <th className="p-2 text-left">Shift</th>
+                                      {groupKey ? <th className="p-2 text-left">{groupKey}</th> : null}
+                                      {cols.map((c) => (
+                                        <th key={c} className="p-2 text-left whitespace-nowrap">
+                                          {c}
+                                        </th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+
+                                  <tbody>
+                                    {subNames.map((sub) => {
+                                      const locMap = bySub[sub] || {};
+                                      const locNames = Object.keys(locMap).sort((a, b) => a.localeCompare(b));
+                                      return (
+                                        <Fragment key={sub}>
+                                          {sub ? (
+                                            <tr className="bg-slate-50 border-b border-slate-200">
+                                              <td className="p-2 font-bold" colSpan={colSpan}>
+                                                {sub}
+                                              </td>
+                                            </tr>
+                                          ) : null}
+
+                                          {locNames.map((loc) => {
+                                            const rows = locMap[loc] || [];
+                                            return (
+                                              <Fragment key={`${sub}|||${loc}`}>
+                                                {groupKey && loc ? (
+                                                  <tr className="border-b border-slate-200">
+                                                    <td className="p-2 pl-4 font-semibold text-sm" colSpan={colSpan}>
+                                                      {loc}
+                                                    </td>
+                                                  </tr>
+                                                ) : null}
+
+                                                {rows.map((r) => {
+                                                  const userLabel =
+                                                    nameByEmail.get(String((r as any)?.user_email || '')) ||
+                                                    String((r as any)?.user_email || '') ||
+                                                    'User';
+
+                                                  const originalObj: any = getValidatedActObjOriginal(r) || {};
+                                                  const currentObj: any = getValidatedActObj(r) || originalObj || {};
+                                                  const originalValues: any =
+                                                    originalObj?.values && typeof originalObj.values === 'object' ? originalObj.values : {};
+                                                  const currentValues: any =
+                                                    currentObj?.values && typeof currentObj.values === 'object' ? currentObj.values : {};
+
+                                                  const originalGrp = String(getGroupValue(actName, originalObj) || '');
+                                                  const currentGrp = String(getGroupValue(actName, currentObj) || '');
+
+                                                  // Pair validated rows to "live" rows (acts) for tooltip & baseline comparisons
+                                                  const liveObj: any = liveObjByValidatedId.get(Number((r as any)?.id)) || null;
+                                                  const liveValues: any = liveObj?.values && typeof liveObj.values === 'object' ? liveObj.values : {};
+                                                  const liveGrp = liveObj ? String(getGroupValue(actName, liveObj) || '') : '';
+
+                                                  const baselineGrp = liveObj ? liveGrp : originalGrp;
+                                                  const diffGroup = String(currentGrp ?? '') !== String(baselineGrp ?? '');
+
+                                                  return (
+                                                    <tr key={(r as any)?.id} className="border-b border-slate-200">
+                                                      <td className="p-2 whitespace-nowrap">{userLabel}</td>
+                                                      <td className="p-2 whitespace-nowrap">{(r as any)?.dn}</td>
+
+                                                      {groupKey ? (
+                                                        <td className={`p-2 min-w-[220px] ${changedCellTdClass(diffGroup)}`}>
+                                                          <ChangedBadge show={diffGroup} />
+                                                          {(() => {
+                                                            const allowed = new Set(allowedLocationTypes(actName, sub, groupKey));
+                                                            const opts = (adminLocRows || [])
+                                                              .filter((l) => allowed.has((l as any).type))
+                                                              .map((l) => String((l as any).name || '').trim())
+                                                              .filter(Boolean)
+                                                              .sort((a, b) => a.localeCompare(b));
+
+                                                            const selVal = currentGrp || '';
+                                                            return (
+                                                              <div>
+                                                                <select
+                                                                  className="input w-full"
+                                                                  title={`Validated: ${currentGrp || ''} | Original: ${String(baselineGrp || '')}`}
+                                                                  value={selVal}
+                                                                  onChange={(e) => {
+                                                                    const v = e.target.value;
+                                                                    setEditedActs((prev) => ({
+                                                                      ...prev,
+                                                                      [Number((r as any)?.id)]: setValuesKey(currentObj, groupKey, v),
+                                                                    }));
+                                                                  }}
+                                                                >
+                                                                  <option value="">-</option>
+                                                                  {opts.map((nm) => (
+                                                                    <option key={nm} value={nm}>
+                                                                      {nm}
+                                                                    </option>
+                                                                  ))}
+                                                                </select>
+                                                              </div>
+                                                            );
+                                                          })()}
+                                                        </td>
+                                                      ) : null}
+
+                                                      {cols.map((c) => {
+                                                        const hasLive = !!liveObj && Object.prototype.hasOwnProperty.call(liveValues, c);
+                                                        const liveVal = hasLive ? (liveValues as any)?.[c] : undefined;
+                                                        const originalVal = (originalValues as any)?.[c];
+                                                        const curVal = (currentValues as any)?.[c];
+                                                        const baselineVal = hasLive ? liveVal : originalVal;
+
+                                                        // numeric-aware compare (difference vs ORIGINAL finalized data)
+                                                        let diff = false;
+                                                        const an = parseFloat(String(baselineVal ?? ''));
+                                                        const bn = parseFloat(String(curVal ?? ''));
+                                                        if (Number.isFinite(an) && Number.isFinite(bn)) diff = Math.abs(an - bn) > 1e-9;
+                                                        else diff = String(baselineVal ?? '') !== String(curVal ?? '');
+
+                                                        const applicable =
+                                                          Object.prototype.hasOwnProperty.call(originalValues || {}, c) ||
+                                                          Object.prototype.hasOwnProperty.call(currentValues || {}, c) ||
+                                                          (hasLive && Object.prototype.hasOwnProperty.call(liveValues || {}, c));
+
+                                                        return (
+                                                          <td
+                                                            key={c}
+                                                            className={`p-2 min-w-[140px] ${
+                                                              !applicable ? 'bg-slate-100 opacity-60' : changedCellTdClass(diff)
+                                                            }`}
+                                                          >
+                                                            <ChangedBadge show={!!applicable && diff} />
+                                                            {(() => {
+                                                              const cn = String(c || '');
+                                                              const cur = (currentValues as any)?.[c];
+
+                                                              if (!applicable) {
+                                                                return <span className="text-xs">—</span>;
+                                                              }
+
+                                                              // Strict dropdowns for admin-managed fields
+                                                              if (cn === 'Equipment') {
+                                                                const allowedTypes = new Set(allowedEquipmentTypes(actName, sub));
+                                                                const optsEq = (adminEquipRows || [])
+                                                                  .filter(
+                                                                    (e: any) =>
+                                                                      allowedTypes.size === 0 || allowedTypes.has(String(e.type || '')),
+                                                                  )
+                                                                  .map((e: any) => String(e.equipment_id || '').trim())
+                                                                  .filter(Boolean)
+                                                                  .sort((a: string, b: string) => a.localeCompare(b));
+                                                                const inList = optsEq.includes(String(cur || ''));
+                                                                return (
+                                                                  <select
+                                                                    className="input w-full"
+                                                                    title={`Validated: ${String(curVal ?? '')} | Original: ${String(
+                                                                      (hasLive ? liveVal : baselineVal) ?? '',
+                                                                    )}`}
+                                                                    value={String(cur || '')}
+                                                                    onChange={(e) => {
+                                                                      const v = e.target.value;
+                                                                      setEditedActs((prev) => ({
+                                                                        ...prev,
+                                                                        [Number((r as any)?.id)]: setValuesKey(currentObj, c, v),
+                                                                      }));
+                                                                    }}
+                                                                  >
+                                                                    <option value="">-</option>
+                                                                    {!inList && cur ? (
+                                                                      <option value={String(cur)} disabled>
+                                                                        {String(cur)} (legacy)
+                                                                      </option>
+                                                                    ) : null}
+                                                                    {optsEq.map((nm: string) => (
+                                                                      <option key={nm} value={nm}>
+                                                                        {nm}
+                                                                      </option>
+                                                                    ))}
+                                                                  </select>
+                                                                );
+                                                              }
+
+                                                              if (cn === 'From' || cn === 'To') {
+                                                                const allowed = new Set(allowedLocationTypes(actName, sub, cn));
+                                                                const optsLoc = (adminLocRows || [])
+                                                                  .filter((l: any) => allowed.has(String(l.type || '')))
+                                                                  .map((l: any) => String(l.name || '').trim())
+                                                                  .filter(Boolean)
+                                                                  .sort((a: string, b: string) => a.localeCompare(b));
+                                                                const inList = optsLoc.includes(String(cur || ''));
+                                                                return (
+                                                                  <select
+                                                                    className="input w-full"
+                                                                    title={`Validated: ${String(curVal ?? '')} | Original: ${String(
+                                                                      (hasLive ? liveVal : baselineVal) ?? '',
+                                                                    )}`}
+                                                                    value={String(cur || '')}
+                                                                    onChange={(e) => {
+                                                                      const v = e.target.value;
+                                                                      setEditedActs((prev) => ({
+                                                                        ...prev,
+                                                                        [Number((r as any)?.id)]: setValuesKey(currentObj, c, v),
+                                                                      }));
+                                                                    }}
+                                                                  >
+                                                                    <option value="">-</option>
+                                                                    {!inList && cur ? (
+                                                                      <option value={String(cur)} disabled>
+                                                                        {String(cur)} (legacy)
+                                                                      </option>
+                                                                    ) : null}
+                                                                    {optsLoc.map((nm: string) => (
+                                                                      <option key={nm} value={nm}>
+                                                                        {nm}
+                                                                      </option>
+                                                                    ))}
+                                                                  </select>
+                                                                );
+                                                              }
+
+                                                              if (cn === 'Material') {
+                                                                const curStr = String(cur || '').toLowerCase();
+                                                                const normalized =
+                                                                  curStr === 'ore' || curStr === 'waste' ? curStr : curStr ? curStr : '';
+                                                                return (
+                                                                  <select
+                                                                    className="input w-full"
+                                                                    title={`Shift: ${String(hasLive ? liveVal : baselineVal)} | Validated: ${String(
+                                                                      cur ?? '',
+                                                                    )}`}
+                                                                    value={normalized}
+                                                                    onChange={(e) => {
+                                                                      const v = e.target.value;
+                                                                      setEditedActs((prev) => ({
+                                                                        ...prev,
+                                                                        [Number((r as any)?.id)]: setValuesKey(currentObj, c, v),
+                                                                      }));
+                                                                    }}
+                                                                  >
+                                                                    <option value="">-</option>
+                                                                    <option value="ore">ore</option>
+                                                                    <option value="waste">waste</option>
+                                                                  </select>
+                                                                );
+                                                              }
+
+                                                              // Default: free input (numeric/text)
+                                                              return (
+                                                                <input
+                                                                  className="input w-full"
+                                                                  title={`Validated: ${String(curVal ?? '')} | Original: ${String(
+                                                                    (hasLive ? liveVal : baselineVal) ?? '',
+                                                                  )}`}
+                                                                  value={String(cur ?? '')}
+                                                                  onChange={(e) => {
+                                                                    const v = e.target.value;
+                                                                    setEditedActs((prev) => ({
+                                                                      ...prev,
+                                                                      [Number((r as any)?.id)]: setValuesKey(currentObj, c, v),
+                                                                    }));
+                                                                  }}
+                                                                />
+                                                              );
+                                                            })()}
+                                                          </td>
+                                                        );
+                                                      })}
+                                                    </tr>
+                                                  );
+                                                })}
+                                              </Fragment>
+                                            );
+                                          })}
+                                        </Fragment>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
