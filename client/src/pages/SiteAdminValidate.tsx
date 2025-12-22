@@ -351,9 +351,11 @@ function allowedLocationTypes(activity: string, sub: string, fieldName: string) 
 
 /** ✅ FIX: typed actKeyBase (removes TS7006) */
 type ActKeyBaseInput = { dn: string; activity: string; sub_activity: string };
-function actKeyBase(act: ActKeyBaseInput, userEmail: string, location: string) {
+
+function actKeyBase(act: ActKeyBaseInput, userEmail: string, location: string): string {
   return `${userEmail}|||${act.dn}|||${act.activity}|||${act.sub_activity}|||${location}`;
 }
+
 
 export default function SiteAdminValidate() {
   const nav = useNavigate();
