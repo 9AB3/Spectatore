@@ -1,261 +1,328 @@
 import { Router } from 'express';
-import { db } from '../lib/db.js';
+import { pool } from '../lib/pg.js';
 
 const router = Router();
 
-// Equipment
-router.post('/equipment', (req, res) => {
-  const { user_id, type, equipment_id } = req.body;
-  const eid = (equipment_id || '').trim().toUpperCase();
+// -------------------- Equipment --------------------
+router.post('/equipment', async (req, res) => {
+  try {
+    const { user_id, type, equipment_id } = req.body || {};
+    const uid = Number(user_id);
+    const eid = String(equipment_id || '').trim().toUpperCase();
+    const t = String(type || '').trim();
+    if (!uid || !eid || !t) {
+      return res.status(400).json({ error: 'missing user_id, type or equipment_id' });
+    }
 
-  if (!user_id || !eid || !type) {
-    return res.status(400).json({ error: 'missing user_id, type or equipment_id' });
+    const r = await pool.query(
+      `INSERT INTO equipment (user_id, type, equipment_id)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (user_id, equipment_id) DO NOTHING
+       RETURNING id`,
+      [uid, t, eid],
+    );
+    return res.json({ id: r.rows[0]?.id || null });
+  } catch (err) {
+    console.error('equipment insert failed', err);
+    return res.status(500).json({ error: 'insert failed' });
   }
-
-  db.run(
-    // ignore duplicate rows instead of failing
-    'INSERT OR IGNORE INTO equipment (user_id, type, equipment_id) VALUES (?,?,?)',
-    [user_id, type, eid],
-    function (err) {
-      if (err) {
-        console.error('equipment insert failed', err);
-        return res.status(500).json({ error: 'insert failed', detail: String(err) });
-      }
-      // if it was a duplicate, lastID will be 0/null but that’s fine
-      res.json({ id: this.lastID || null });
-    },
-  );
 });
 
-// Locations
-router.post('/locations', (req, res) => {
-  const { user_id, name, type } = req.body;
-  const trimmed = (name || '').trim();
-  const t = String(type || '').trim();
-
-  if (!user_id || !trimmed || !t) {
-    return res.status(400).json({ error: 'missing user_id, name or type' });
+router.get('/equipment', async (req, res) => {
+  try {
+    const uid = Number(req.query.user_id);
+    if (!uid) return res.status(400).json({ error: 'missing user_id' });
+    const r = await pool.query(
+      'SELECT id, type, equipment_id FROM equipment WHERE user_id=$1 ORDER BY created_at DESC',
+      [uid],
+    );
+    return res.json({ items: r.rows });
+  } catch (err) {
+    console.error('equipment list failed', err);
+    return res.status(500).json({ error: 'query failed' });
   }
+});
 
-  const allowed = new Set(['Heading', 'Stope', 'Stockpile']);
-  if (!allowed.has(t)) {
-    return res.status(400).json({ error: 'invalid location type' });
+router.delete('/equipment', async (req, res) => {
+  try {
+    const uid = Number(req.body?.user_id);
+    const eid = String(req.body?.equipment_id || '').trim().toUpperCase();
+    if (!uid || !eid) return res.status(400).json({ error: 'missing user_id or equipment_id' });
+    const r = await pool.query('DELETE FROM equipment WHERE user_id=$1 AND equipment_id=$2', [uid, eid]);
+    return res.json({ deleted: r.rowCount });
+  } catch (err) {
+    console.error('equipment delete failed', err);
+    return res.status(500).json({ error: 'delete failed' });
   }
-
-  db.run(
-    // ignore duplicate rows instead of failing
-    'INSERT OR IGNORE INTO locations (user_id, name, type) VALUES (?,?,?)',
-    [user_id, trimmed, t],
-    function (err) {
-      if (err) {
-        console.error('locations insert failed', err);
-        return res.status(500).json({ error: 'insert failed', detail: String(err) });
-      }
-      res.json({ id: this.lastID || null });
-    },
-  );
 });
 
-// Delete a single equipment entry for a user
-router.delete('/equipment', (req, res) => {
-  const { user_id, equipment_id } = req.body || {};
-  if (!user_id || !equipment_id) {
-    return res.status(400).json({ error: 'missing user_id or equipment_id' });
+// -------------------- Locations --------------------
+router.post('/locations', async (req, res) => {
+  try {
+    const { user_id, name, type } = req.body || {};
+    const uid = Number(user_id);
+    const trimmed = String(name || '').trim();
+    const t = String(type || '').trim();
+    if (!uid || !trimmed || !t) {
+      return res.status(400).json({ error: 'missing user_id, name or type' });
+    }
+    const allowed = new Set(['Heading', 'Stope', 'Stockpile']);
+    if (!allowed.has(t)) return res.status(400).json({ error: 'invalid location type' });
+
+    const r = await pool.query(
+      `INSERT INTO locations (user_id, name, type)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (user_id, name) DO NOTHING
+       RETURNING id`,
+      [uid, trimmed, t],
+    );
+    return res.json({ id: r.rows[0]?.id || null });
+  } catch (err) {
+    console.error('locations insert failed', err);
+    return res.status(500).json({ error: 'insert failed' });
   }
-
-  db.run(
-    'DELETE FROM equipment WHERE user_id = ? AND equipment_id = ?',
-    [user_id, equipment_id],
-    function (err) {
-      if (err) {
-        return res.status(400).json({ error: 'delete failed' });
-      }
-      res.json({ deleted: this.changes });
-    },
-  );
 });
 
-// Delete a single location entry for a user
-router.delete('/locations', (req, res) => {
-  const { user_id, name } = req.body || {};
-  if (!user_id || !name) {
-    return res.status(400).json({ error: 'missing user_id or name' });
+router.get('/locations', async (req, res) => {
+  try {
+    const uid = Number(req.query.user_id);
+    if (!uid) return res.status(400).json({ error: 'missing user_id' });
+    const r = await pool.query(
+      'SELECT id, name, type FROM locations WHERE user_id=$1 ORDER BY created_at DESC',
+      [uid],
+    );
+    return res.json({ items: r.rows });
+  } catch (err) {
+    console.error('locations list failed', err);
+    return res.status(500).json({ error: 'query failed' });
   }
-
-  db.run(
-    'DELETE FROM locations WHERE user_id = ? AND name = ?',
-    [user_id, name],
-    function (err) {
-      if (err) {
-        return res.status(400).json({ error: 'delete failed' });
-      }
-      res.json({ deleted: this.changes });
-    },
-  );
 });
 
-
-
-// Shifts
-router.post('/shifts', (req, res) => {
-  const { user_id, date, day_night } = req.body;
-  db.run(
-    'INSERT INTO shifts (user_id, date, day_night) VALUES (?,?,?)',
-    [user_id, date, day_night],
-    function (err) {
-      if (err) return res.status(400).json({ error: 'insert failed' });
-      res.json({ id: this.lastID });
-    },
-  );
+router.delete('/locations', async (req, res) => {
+  try {
+    const uid = Number(req.body?.user_id);
+    const name = String(req.body?.name || '').trim();
+    if (!uid || !name) return res.status(400).json({ error: 'missing user_id or name' });
+    const r = await pool.query('DELETE FROM locations WHERE user_id=$1 AND name=$2', [uid, name]);
+    return res.json({ deleted: r.rowCount });
+  } catch (err) {
+    console.error('locations delete failed', err);
+    return res.status(500).json({ error: 'delete failed' });
+  }
 });
 
-router.post('/shifts/:id/finalize', (req, res) => {
-  db.run('UPDATE shifts SET finalized=1 WHERE id=?', [req.params.id], function (err) {
-    if (err) return res.status(400).json({ error: 'update failed' });
-    res.json({ ok: true });
-  });
+// -------------------- Legacy shift + activity endpoints (kept for compatibility) --------------------
+router.post('/shifts', async (req, res) => {
+  try {
+    const { user_id, date, day_night } = req.body || {};
+    const uid = Number(user_id);
+    const dn = String(day_night || 'DS');
+    if (!uid || !date) return res.status(400).json({ error: 'missing fields' });
+
+    // keep legacy endpoints working with the current schema (denormalized user + required site)
+    const u = await pool.query('SELECT site, email, name FROM users WHERE id=$1', [uid]);
+    const site = String(u.rows?.[0]?.site || 'default');
+    const user_email = String(u.rows?.[0]?.email || '');
+    const user_name = String(u.rows?.[0]?.name || '');
+
+    const r = await pool.query(
+      `INSERT INTO shifts (user_id, user_email, user_name, site, date, dn, totals_json)
+       VALUES ($1,$2,$3,$4,$5::date,$6,$7::jsonb)
+       ON CONFLICT (user_id, date, dn) DO UPDATE SET totals_json=EXCLUDED.totals_json
+       RETURNING id`,
+      [uid, user_email, user_name, site, date, dn, JSON.stringify({})],
+    );
+    return res.json({ id: r.rows[0].id });
+  } catch (err) {
+    console.error('legacy shift insert failed', err);
+    return res.status(400).json({ error: 'insert failed' });
+  }
 });
 
-// Activities
-router.post('/activities', (req, res) => {
-  const { shift_id, payload } = req.body;
-  db.run(
-    'INSERT INTO activities (shift_id, payload) VALUES (?,?)',
-    [shift_id, JSON.stringify(payload)],
-    function (err) {
-      if (err) return res.status(400).json({ error: 'insert failed' });
-      res.json({ id: this.lastID });
-    },
-  );
+router.post('/shifts/:id/finalize', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'bad id' });
+    await pool.query('UPDATE shifts SET finalized_at=NOW() WHERE id=$1', [id]);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('legacy shift finalize failed', err);
+    return res.status(400).json({ error: 'update failed' });
+  }
 });
 
-// Connections (simple invite workflow)
-router.post('/connections/request', (req, res) => {
-  const { requester_id, addressee_id } = req.body;
-  db.run(
-    'INSERT INTO connections (requester_id, addressee_id, status) VALUES (?,?,?)',
-    [requester_id, addressee_id, 'pending'],
-    function (err) {
-      if (err) return res.status(400).json({ error: 'insert failed' });
-      res.json({ id: this.lastID });
-    },
-  );
+router.post('/activities', async (req, res) => {
+  try {
+    const { shift_id, payload } = req.body || {};
+    const sid = Number(shift_id);
+    if (!sid || !payload) return res.status(400).json({ error: 'missing fields' });
+    const p = payload || {};
+
+    const sh = await pool.query('SELECT site, user_email, user_name FROM shifts WHERE id=$1', [sid]);
+    const site = String(sh.rows?.[0]?.site || 'default');
+    const user_email = String(sh.rows?.[0]?.user_email || '');
+    const user_name = String(sh.rows?.[0]?.user_name || '');
+
+    const r = await pool.query(
+      `INSERT INTO shift_activities (shift_id, user_email, user_name, site, activity, sub_activity, payload_json)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
+       RETURNING id`,
+      [sid, user_email, user_name, site, p.activity || '', p.sub || '', JSON.stringify(p)],
+    );
+    return res.json({ id: r.rows[0].id });
+  } catch (err) {
+    console.error('legacy activities insert failed', err);
+    return res.status(400).json({ error: 'insert failed' });
+  }
 });
 
-router.post('/connections/:id/accept', (req, res) => {
-  db.run('UPDATE connections SET status=? WHERE id=?', ['accepted', req.params.id], function (err) {
-    if (err) return res.status(400).json({ error: 'update failed' });
-    res.json({ ok: true });
-  });
+// -------------------- Connections (simple invite workflow) --------------------
+router.post('/connections/request', async (req, res) => {
+  try {
+    const { requester_id, addressee_id } = req.body || {};
+    const rid = Number(requester_id);
+    const aid = Number(addressee_id);
+    if (!rid || !aid) return res.status(400).json({ error: 'missing fields' });
+    const r = await pool.query(
+      'INSERT INTO connections (requester_id, addressee_id, status) VALUES ($1,$2,$3) RETURNING id',
+      [rid, aid, 'pending'],
+    );
+    return res.json({ id: r.rows[0].id });
+  } catch (err) {
+    console.error('connections request failed', err);
+    return res.status(400).json({ error: 'insert failed' });
+  }
 });
 
-router.post('/connections/:id/decline', (req, res) => {
-  db.run('UPDATE connections SET status=? WHERE id=?', ['declined', req.params.id], function (err) {
-    if (err) return res.status(400).json({ error: 'update failed' });
-    res.json({ ok: true });
-  });
+router.post('/connections/:id/accept', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    await pool.query('UPDATE connections SET status=$1 WHERE id=$2', ['accepted', id]);
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(400).json({ error: 'update failed' });
+  }
 });
 
-// Remove an accepted connection (used by "View Crew Members" list)
-router.post('/connections/:id/remove', (req, res) => {
-  // We "decline" it (soft-remove) so it no longer appears in accepted lists
-  db.run('UPDATE connections SET status=? WHERE id=?', ['declined', req.params.id], function (err) {
-    if (err) return res.status(400).json({ error: 'update failed' });
-    res.json({ ok: true });
-  });
+router.post('/connections/:id/decline', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    await pool.query('UPDATE connections SET status=$1 WHERE id=$2', ['declined', id]);
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(400).json({ error: 'update failed' });
+  }
 });
 
-export default router;
-
-// List Equipment by user
-router.get('/equipment', (req, res) => {
-  const user_id = req.query.user_id;
-  db.all(
-    'SELECT id, type, equipment_id FROM equipment WHERE user_id=? ORDER BY created_at DESC',
-    [user_id],
-    (err, rows) => {
-      if (err) return res.status(400).json({ error: 'query failed' });
-      res.json({ items: rows });
-    },
-  );
+router.post('/connections/:id/remove', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    await pool.query('UPDATE connections SET status=$1 WHERE id=$2', ['declined', id]);
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(400).json({ error: 'update failed' });
+  }
 });
 
-// List Locations by user
-router.get('/locations', (req, res) => {
-  const user_id = req.query.user_id;
-  db.all(
-    'SELECT id, name, type FROM locations WHERE user_id=? ORDER BY created_at DESC',
-    [user_id],
-    (err, rows) => {
-      if (err) return res.status(400).json({ error: 'query failed' });
-      res.json({ items: rows });
-    },
-  );
+router.get('/connections/incoming', async (req, res) => {
+  try {
+    const uid = Number(req.query.user_id);
+    const r = await pool.query(
+      `SELECT c.id, c.requester_id, u.name, u.email, c.status, c.created_at
+         FROM connections c
+         JOIN users u ON u.id=c.requester_id
+        WHERE c.addressee_id=$1 AND c.status='pending'
+        ORDER BY c.created_at DESC`,
+      [uid],
+    );
+    return res.json({ items: r.rows });
+  } catch (err) {
+    return res.status(400).json({ error: 'query failed' });
+  }
+});
+
+router.get('/connections/outgoing', async (req, res) => {
+  try {
+    const uid = Number(req.query.user_id);
+    const r = await pool.query(
+      `SELECT c.id, c.addressee_id, u.name, u.email, c.status, c.created_at
+         FROM connections c
+         JOIN users u ON u.id=c.addressee_id
+        WHERE c.requester_id=$1 AND c.status='pending'
+        ORDER BY c.created_at DESC`,
+      [uid],
+    );
+    return res.json({ items: r.rows });
+  } catch (err) {
+    return res.status(400).json({ error: 'query failed' });
+  }
+});
+
+router.get('/connections/accepted', async (req, res) => {
+  try {
+    const uid = Number(req.query.user_id);
+    const r = await pool.query(
+      `SELECT c.id,
+              CASE WHEN c.requester_id=$1 THEN c.addressee_id ELSE c.requester_id END as other_id,
+              u.name, u.email, c.status, c.created_at
+         FROM connections c
+         JOIN users u ON u.id = CASE WHEN c.requester_id=$1 THEN c.addressee_id ELSE c.requester_id END
+        WHERE (c.requester_id=$1 OR c.addressee_id=$1) AND c.status='accepted'
+        ORDER BY c.created_at DESC`,
+      [uid],
+    );
+    return res.json({ items: r.rows });
+  } catch (err) {
+    return res.status(400).json({ error: 'query failed' });
+  }
 });
 
 // Finalize: create shift + activities atomically (simple version)
-router.post('/shift/finalize', (req, res) => {
-  const { user_id, date, day_night, activities } = req.body;
-  if (!user_id || !date || !day_night) return res.status(400).json({ error: 'missing fields' });
-  db.run(
-    'INSERT INTO shifts (user_id, date, day_night, finalized) VALUES (?,?,?,1)',
-    [user_id, date, day_night],
-    function (err) {
-      if (err) return res.status(400).json({ error: 'insert shift failed' });
-      const shiftId = this.lastID;
-      if (!Array.isArray(activities) || activities.length === 0)
-        return res.json({ ok: true, shift_id: shiftId, activities: 0 });
-      const stmt = db.prepare('INSERT INTO activities (shift_id, payload) VALUES (?,?)');
+router.post('/shift/finalize', async (req, res) => {
+  const { user_id, date, day_night, activities } = req.body || {};
+  const uid = Number(user_id);
+  const dn = String(day_night || 'DS');
+  if (!uid || !date || !dn) return res.status(400).json({ error: 'missing fields' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const u = await client.query('SELECT site, email, name FROM users WHERE id=$1', [uid]);
+    const site = String(u.rows?.[0]?.site || 'default');
+    const user_email = String(u.rows?.[0]?.email || '');
+    const user_name = String(u.rows?.[0]?.name || '');
+
+    const up = await client.query(
+      `INSERT INTO shifts (user_id, user_email, user_name, site, date, dn, totals_json, finalized_at)
+       VALUES ($1,$2,$3,$4,$5::date,$6,$7::jsonb,NOW())
+       ON CONFLICT (user_id, date, dn)
+       DO UPDATE SET totals_json=EXCLUDED.totals_json, finalized_at=NOW()
+       RETURNING id`,
+      [uid, user_email, user_name, site, date, dn, JSON.stringify({})],
+    );
+    const shiftId = up.rows[0].id;
+
+    await client.query('DELETE FROM shift_activities WHERE shift_id=$1', [shiftId]);
+    if (Array.isArray(activities)) {
       for (const a of activities) {
-        stmt.run(shiftId, JSON.stringify(a));
+        const p = a?.payload || a || {};
+        await client.query(
+          `INSERT INTO shift_activities (shift_id, user_email, user_name, site, activity, sub_activity, payload_json)
+           VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+          [shiftId, user_email, user_name, site, p.activity || '', p.sub || '', JSON.stringify(p)],
+        );
       }
-      stmt.finalize((e) => {
-        if (e) return res.status(400).json({ error: 'insert activities failed' });
-        res.json({ ok: true, shift_id: shiftId, activities: activities.length });
-      });
-    },
-  );
+    }
+    await client.query('COMMIT');
+    return res.json({ ok: true, shift_id: shiftId, activities: Array.isArray(activities) ? activities.length : 0 });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    console.error('legacy shift/finalize failed', err);
+    return res.status(400).json({ error: 'insert failed' });
+  } finally {
+    client.release();
+  }
 });
 
-// List incoming/outgoing connection requests
-router.get('/connections/incoming', (req, res) => {
-  const user_id = req.query.user_id;
-  db.all(
-    'SELECT c.id, c.requester_id, u.name, u.email, c.status, c.created_at FROM connections c JOIN users u ON u.id=c.requester_id WHERE c.addressee_id=? AND c.status="pending" ORDER BY c.created_at DESC',
-    [user_id],
-    (err, rows) => {
-      if (err) return res.status(400).json({ error: 'query failed' });
-      res.json({ items: rows });
-    },
-  );
-});
-
-router.get('/connections/outgoing', (req, res) => {
-  const user_id = req.query.user_id;
-  db.all(
-    'SELECT c.id, c.addressee_id, u.name, u.email, c.status, c.created_at FROM connections c JOIN users u ON u.id=c.addressee_id WHERE c.requester_id=? AND c.status="pending" ORDER BY c.created_at DESC',
-    [user_id],
-    (err, rows) => {
-      if (err) return res.status(400).json({ error: 'query failed' });
-      res.json({ items: rows });
-    },
-  );
-});
-
-// List accepted connections (show the counterpart user)
-router.get('/connections/accepted', (req, res) => {
-  const user_id = req.query.user_id;
-  const sql = `
-    SELECT c.id,
-      CASE WHEN c.requester_id = ? THEN c.addressee_id ELSE c.requester_id END as other_id,
-      u.name, u.email, c.status, c.created_at
-    FROM connections c
-    JOIN users u ON u.id = CASE WHEN c.requester_id = ? THEN c.addressee_id ELSE c.requester_id END
-    WHERE (c.requester_id = ? OR c.addressee_id = ?) AND c.status = 'accepted'
-    ORDER BY c.created_at DESC
-  `;
-  db.all(sql, [user_id, user_id, user_id, user_id], (err, rows) => {
-    if (err) return res.status(400).json({ error: 'query failed' });
-    res.json({ items: rows });
-  });
-});
+export default router;

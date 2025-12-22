@@ -10,8 +10,17 @@ export default function AddConnection() {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [uid, setUid] = useState(0);
   const { setMsg, Toast } = useToast();
   const lastQueryRef = useRef<string>('');
+
+  useEffect(() => {
+    (async () => {
+      const db = await getDB();
+      const session = await db.get('session', 'auth');
+      setUid(session?.user_id || 0);
+    })();
+  }, []);
 
   useEffect(() => {
     const query = q.trim();
@@ -53,6 +62,10 @@ export default function AddConnection() {
       setMsg('Please TAG IN again');
       return;
     }
+    if (id === uid) {
+      setMsg("You can't add yourself as a crew member");
+      return;
+    }
     await api(`/api/connections/request`, {
       method: 'POST',
       body: JSON.stringify({ requester_id: uid, addressee_id: id }),
@@ -78,11 +91,12 @@ export default function AddConnection() {
 
         <div className="card">
           <ul className="space-y-2">
-            {results.map((r: any) => (
+            {results
+              .filter((r: any) => (uid ? r.id !== uid : true))
+              .map((r: any) => (
               <li key={r.id} className="flex items-center justify-between">
                 <div>
                   <div className="font-medium">{r.name}</div>
-                  <div className="text-xs text-slate-500">{r.email}</div>
                 </div>
                 <button className="btn btn-primary" onClick={() => add(r.id)}>
                   Add Crew Member

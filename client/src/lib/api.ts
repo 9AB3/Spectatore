@@ -59,9 +59,21 @@ export async function api(path: string, init: RequestInit = {}) {
   // Attach auth token from IndexedDB session store
   try {
     const db = await getDB();
-    const session = await db.get('session', 'auth');
-    if (session?.token && !headers.has('Authorization')) {
-      headers.set('Authorization', `Bearer ${session.token}`);
+    if (!headers.has('Authorization')) {
+      if (path.startsWith('/api/site-admin')) {
+        // Prefer the dedicated site-admin token, but fall back to normal auth token
+        // when the logged-in user is an admin (is_admin=true).
+        const sa = await db.get('session', 'site_admin');
+        if (sa?.token) {
+          headers.set('Authorization', `Bearer ${sa.token}`);
+        } else {
+          const auth = await db.get('session', 'auth');
+          if (auth?.token) headers.set('Authorization', `Bearer ${auth.token}`);
+        }
+      } else {
+        const session = await db.get('session', 'auth');
+        if (session?.token) headers.set('Authorization', `Bearer ${session.token}`);
+      }
     }
   } catch {
     // ignore – offline or no session yet

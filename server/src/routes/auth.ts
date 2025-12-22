@@ -1,41 +1,15 @@
 import { Router } from 'express';
-import { db } from '../lib/db.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import dotenv from 'dotenv';
+import { pool } from '../lib/pg.js';
 import { sendEmail } from '../lib/email.js';
-
-dotenv.config();
-const DEV_SKIP = process.env.DEV_SKIP_EMAIL_CONFIRM === '1';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
-
-// ---- Helpers --------------------------------------------------------
+const DEV_SKIP = process.env.DEV_SKIP_EMAIL_CONFIRM === '1';
 
 function normaliseEmail(raw: any): string {
   return String(raw || '').trim().toLowerCase();
-}
-
-// rate limiting helpers
-function recordFailed(email: string) {
-  const e = normaliseEmail(email);
-  db.run(
-    "INSERT INTO failed_logins (email, ts) VALUES (?, strftime('%Y-%m-%d %H:%M:%f','now'))",
-    [e],
-  );
-}
-
-function tooMany(email: string, cb: (blocked: boolean) => void) {
-  const e = normaliseEmail(email);
-  db.get(
-    "SELECT COUNT(*) as c FROM failed_logins WHERE email=? AND ts >= datetime('now','-10 minutes')",
-    [e],
-    (err, row: any) => {
-      if (err) return cb(false);
-      cb(row?.c >= 5);
-    },
-  );
 }
 
 function tokenFor(user: any) {
@@ -46,146 +20,207 @@ function tokenFor(user: any) {
   );
 }
 
-// ---- Routes ---------------------------------------------------------
-
-router.post('/register', (req, res) => {
-  const { email, password, site, state, name } = req.body;
-  const normEmail = normaliseEmail(email);
-
-  if (!normEmail || !password || !name) {
-    return res.status(400).json({ error: 'name, email and password required' });
-  }
-
-  const hash = bcrypt.hashSync(password, 10);
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
-
-  db.run(
-    'INSERT INTO users (email, password_hash, site, state, name, confirm_code) VALUES (?,?,?,?,?,?)',
-    [normEmail, hash, site || null, state || null, name, code],
-    function (err) {
-      if (err) return res.status(400).json({ error: 'email may already exist' });
-
-      if (DEV_SKIP) {
-        db.get('SELECT * FROM users WHERE email=?', [normEmail], (e2, user: any) => {
-          if (e2 || !user) return res.status(500).json({ error: 'user create failed' });
-          db.run(
-            'UPDATE users SET email_confirmed=1, confirm_code=NULL WHERE id=?',
-            [user.id],
-            (e3) => {
-              if (e3) return res.status(500).json({ error: 'confirm failed' });
-              const token = tokenFor(user);
-              return res.json({
-                ok: true,
-                token,
-                user: { id: user.id, email: user.email, name: user.name },
-              });
-            },
-          );
-        });
-      } else {
-        sendEmail(
-          normEmail,
-          'Spectatore confirmation code',
-          `Your code is: ${code}`,
-        ).catch(() => {});
-        res.json({ ok: true });
-      }
-    },
+async function recordFailed(email: string, ip?: string, reason?: string) {
+  const e = normaliseEmail(email);
+  await pool.query(
+    'INSERT INTO failed_logins (email, ip, reason) VALUES ($1, $2, $3)',
+    [e, ip || null, reason || null],
   );
+}
+
+async function tooMany(email: string): Promise<boolean> {
+  const e = normaliseEmail(email);
+  const r = await pool.query(
+    `SELECT COUNT(*)::int AS c
+       FROM failed_logins
+      WHERE email = $1
+        AND ts >= NOW() - INTERVAL '10 minutes'`,
+    [e],
+  );
+  return (r.rows?.[0]?.c || 0) >= 5;
+}
+
+router.post('/register', async (req, res) => {
+  try {
+    const { email, password, site, state, name } = req.body || {};
+    const normEmail = normaliseEmail(email);
+    if (!normEmail || !password || !name) {
+      return res.status(400).json({ error: 'name, email and password required' });
+    }
+
+    const hash = bcrypt.hashSync(String(password), 10);
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+    const inserted = await pool.query(
+      `INSERT INTO users (email, password_hash, site, state, name, confirm_code)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id, email, name, is_admin, email_confirmed`,
+      [normEmail, hash, site || null, state || null, name, code],
+    );
+
+    const user = inserted.rows[0];
+
+    if (DEV_SKIP) {
+      await pool.query(
+        'UPDATE users SET email_confirmed = TRUE, confirm_code = NULL WHERE id = $1',
+        [user.id],
+      );
+      const token = tokenFor({ ...user, email_confirmed: true });
+      return res.json({
+        ok: true,
+        token,
+        user: { id: user.id, email: user.email, name: user.name },
+      });
+    }
+
+    // Normal flow: email the confirmation code
+    sendEmail(normEmail, 'Spectatore confirmation code', `Your code is: ${code}`).catch(
+      () => {},
+    );
+    return res.json({ ok: true });
+  } catch (err: any) {
+    // 23505 = unique_violation
+    if (String(err?.code) === '23505') {
+      return res.status(400).json({ error: 'email may already exist' });
+    }
+    console.error('register failed', err);
+    return res.status(500).json({ error: 'register failed' });
+  }
 });
 
-router.post('/confirm', (req, res) => {
-  const { email, code } = req.body;
-  const normEmail = normaliseEmail(email);
-
-  db.get('SELECT * FROM users WHERE email=?', [normEmail], (err, user: any) => {
-    if (err || !user) return res.status(400).json({ error: 'invalid email' });
-    if (user.confirm_code !== code) return res.status(400).json({ error: 'incorrect code' });
-    db.run('UPDATE users SET email_confirmed=1, confirm_code=NULL WHERE id=?', [user.id]);
-    res.json({ ok: true });
-  });
+router.post('/confirm', async (req, res) => {
+  try {
+    const { email, code } = req.body || {};
+    const normEmail = normaliseEmail(email);
+    const r = await pool.query('SELECT id, confirm_code FROM users WHERE email = $1', [
+      normEmail,
+    ]);
+    const user = r.rows[0];
+    if (!user) return res.status(400).json({ error: 'invalid email' });
+    if (String(user.confirm_code || '') !== String(code || '')) {
+      return res.status(400).json({ error: 'incorrect code' });
+    }
+    await pool.query(
+      'UPDATE users SET email_confirmed = TRUE, confirm_code = NULL WHERE id = $1',
+      [user.id],
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('confirm failed', err);
+    return res.status(500).json({ error: 'confirm failed' });
+  }
 });
 
-router.post('/login', (req, res) => {
-  const { email, password } = req.body;
+router.post('/login', async (req, res) => {
+  const { email, password } = req.body || {};
   const normEmail = normaliseEmail(email);
-
   if (!normEmail || !password) {
     return res.status(400).json({ error: 'email and password required' });
   }
 
-  tooMany(normEmail, (blocked) => {
+  try {
+    const blocked = await tooMany(normEmail);
     if (blocked) {
       return res
         .status(429)
         .json({ error: 'Too many attempts. Try again in 5 minutes' });
     }
 
-    db.get('SELECT * FROM users WHERE email=?', [normEmail], (err, user: any) => {
-      if (err || !user) {
-        recordFailed(normEmail);
-        return res.status(401).json({ error: 'invalid credentials' });
-      }
-      if (!bcrypt.compareSync(password, user.password_hash)) {
-        recordFailed(normEmail);
-        return res.status(401).json({ error: 'invalid credentials' });
-      }
-            if (!user.email_confirmed) {
-        return res.status(403).json({ error: 'EMAIL_NOT_CONFIRMED' });
-      }
+    const r = await pool.query(
+      'SELECT id, email, password_hash, is_admin, email_confirmed FROM users WHERE email = $1',
+      [normEmail],
+    );
+    const user = r.rows[0];
+    if (!user) {
+      await recordFailed(normEmail, req.ip, 'no_user');
+      return res.status(401).json({ error: 'invalid credentials' });
+    }
 
-      const token = tokenFor(user);
-      res.json({ token, is_admin: !!user.is_admin, user_id: user.id });
-    });
-  });
+    if (!bcrypt.compareSync(String(password), String(user.password_hash || ''))) {
+      await recordFailed(normEmail, req.ip, 'bad_password');
+      return res.status(401).json({ error: 'invalid credentials' });
+    }
+
+    if (!user.email_confirmed) {
+      return res.status(403).json({ error: 'EMAIL_NOT_CONFIRMED' });
+    }
+
+    const token = tokenFor(user);
+    return res.json({ token, is_admin: !!user.is_admin, user_id: user.id });
+  } catch (err) {
+    console.error('login failed', err);
+    return res.status(500).json({ error: 'login failed' });
+  }
 });
 
-router.post('/forgot', (req, res) => {
-  const { email } = req.body;
-  const normEmail = normaliseEmail(email);
+router.post('/forgot', async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    const normEmail = normaliseEmail(email);
+    const r = await pool.query('SELECT id FROM users WHERE email = $1', [normEmail]);
+    const user = r.rows[0];
+    if (!user) return res.json({ ok: true }); // don't leak
 
-  db.get('SELECT * FROM users WHERE email=?', [normEmail], async (err, user: any) => {
-    if (err || !user) return res.json({ ok: true }); // don't leak
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    db.run('UPDATE users SET reset_code=? WHERE id=?', [code, user.id]);
-    sendEmail(
-      normEmail,
-      'Spectatore reset code',
-      `Your reset code is: ${code}`,
-    ).catch(() => {});
-    res.json({ ok: true });
-  });
+    await pool.query('UPDATE users SET reset_code = $1 WHERE id = $2', [code, user.id]);
+    sendEmail(normEmail, 'Spectatore reset code', `Your reset code is: ${code}`).catch(
+      () => {},
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('forgot failed', err);
+    return res.status(500).json({ error: 'forgot failed' });
+  }
 });
 
-router.post('/reset', (req, res) => {
-  const { email, code, password } = req.body;
-  const normEmail = normaliseEmail(email);
-
-  db.get('SELECT * FROM users WHERE email=?', [normEmail], (err, user: any) => {
-    if (err || !user) return res.status(400).json({ error: 'invalid email' });
-    if (user.reset_code !== code) return res.status(400).json({ error: 'incorrect code' });
-    const hash = bcrypt.hashSync(password, 10);
-    db.run('UPDATE users SET password_hash=?, reset_code=NULL WHERE id=?', [hash, user.id]);
-    res.json({ ok: true });
-  });
+router.post('/reset', async (req, res) => {
+  try {
+    const { email, code, password } = req.body || {};
+    const normEmail = normaliseEmail(email);
+    const r = await pool.query('SELECT id, reset_code FROM users WHERE email = $1', [
+      normEmail,
+    ]);
+    const user = r.rows[0];
+    if (!user) return res.status(400).json({ error: 'invalid email' });
+    if (String(user.reset_code || '') !== String(code || '')) {
+      return res.status(400).json({ error: 'incorrect code' });
+    }
+    const hash = bcrypt.hashSync(String(password), 10);
+    await pool.query('UPDATE users SET password_hash = $1, reset_code = NULL WHERE id = $2', [
+      hash,
+      user.id,
+    ]);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('reset failed', err);
+    return res.status(500).json({ error: 'reset failed' });
+  }
 });
 
 // Dev helper: get a token for an existing user
-router.get('/dev-token', (req, res) => {
+router.get('/dev-token', async (req, res) => {
   if (process.env.DEV_SKIP_EMAIL_CONFIRM !== '1') return res.status(404).end();
   const email = req.query.email as string;
   const normEmail = normaliseEmail(email);
   if (!normEmail) return res.status(400).json({ error: 'email required' });
 
-  db.get('SELECT * FROM users WHERE email=?', [normEmail], (err, user: any) => {
-    if (err || !user) return res.status(404).json({ error: 'user not found' });
+  try {
+    const r = await pool.query(
+      'SELECT id, email, is_admin FROM users WHERE email = $1',
+      [normEmail],
+    );
+    const user = r.rows[0];
+    if (!user) return res.status(404).json({ error: 'user not found' });
     const token = jwt.sign(
       { id: user.id, email: user.email, is_admin: !!user.is_admin },
       JWT_SECRET,
       { expiresIn: '7d' },
     );
-    res.json({ token });
-  });
+    return res.json({ token });
+  } catch (err) {
+    console.error('dev-token failed', err);
+    return res.status(500).json({ error: 'dev-token failed' });
+  }
 });
 
 export default router;

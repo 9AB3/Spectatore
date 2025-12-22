@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db } from '../lib/db.js';
+import { pool } from '../lib/pg.js';
 import { authMiddleware } from '../lib/auth.js';
 
 const router = Router();
@@ -18,334 +18,286 @@ const EQUIPMENT_ACTIVITY_MAP: Record<string, string[]> = {
   'Charge Rig': ['Charging'],
 };
 
-// GET /api/shifts/dates-with-data
-router.get('/dates-with-data', authMiddleware, (req, res) => {
-  const user_id = (req as any).user_id;
-  if (!user_id) {
-    return res.status(401).json({ error: 'missing user' });
-  }
+function isYmd(s: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
 
-  db.all(
-    'SELECT DISTINCT date FROM shifts WHERE user_id = ? ORDER BY date ASC',
-    [user_id],
-    (err, rows) => {
-      if (err) {
-        console.error('dates-with-data failed', err);
-        return res.status(500).json({ error: 'db failed' });
-      }
-      const dates = rows.map((r: any) => r.date).filter(Boolean);
-      res.json({ dates });
-    },
-  );
+async function getUserSite(client: any, user_id: number): Promise<string> {
+  const r = await client.query('SELECT site FROM users WHERE id=$1', [user_id]);
+  const site = String(r.rows?.[0]?.site || '').trim();
+  return site || 'default';
+}
+
+async function getUserEmail(client: any, user_id: number): Promise<string> {
+  const r = await client.query('SELECT email FROM users WHERE id=$1', [user_id]);
+  const email = String(r.rows?.[0]?.email || '').trim();
+  return email || '';
+}
+
+async function getUserName(client: any, user_id: number): Promise<string> {
+  const r = await client.query('SELECT name FROM users WHERE id=$1', [user_id]);
+  const name = String(r.rows?.[0]?.name || '').trim();
+  return name || '';
+}
+
+// GET /api/shifts/dates-with-data
+router.get('/dates-with-data', authMiddleware, async (req: any, res) => {
+  const user_id = req.user_id;
+  if (!user_id) return res.status(401).json({ error: 'missing user' });
+
+  try {
+    const r = await pool.query(
+      'SELECT DISTINCT date::text AS date FROM shifts WHERE user_id=$1 ORDER BY date ASC',
+      [user_id],
+    );
+    res.json({ dates: r.rows.map((x) => x.date) });
+  } catch (err) {
+    console.error('dates-with-data failed', err);
+    res.status(500).json({ error: 'db failed' });
+  }
 });
 
 // GET /api/shifts/dates-with-finalized
-// Returns distinct dates where the user has finalized shift data
-router.get('/dates-with-finalized', authMiddleware, (req, res) => {
-  const user_id = (req as any).user_id;
+router.get('/dates-with-finalized', authMiddleware, async (req: any, res) => {
+  const user_id = req.user_id;
   if (!user_id) return res.status(401).json({ error: 'missing user' });
 
-  db.all(
-    'SELECT DISTINCT date FROM shifts WHERE user_id = ? AND finalized_at IS NOT NULL ORDER BY date ASC',
-    [user_id],
-    (err, rows) => {
-      if (err) {
-        console.error('dates-with-finalized failed', err);
-        return res.status(500).json({ error: 'db failed' });
-      }
-      const dates = rows.map((r: any) => r.date).filter(Boolean);
-      res.json({ dates });
-    },
-  );
+  try {
+    const r = await pool.query(
+      'SELECT DISTINCT date::text AS date FROM shifts WHERE user_id=$1 AND finalized_at IS NOT NULL ORDER BY date ASC',
+      [user_id],
+    );
+    res.json({ dates: r.rows.map((x) => x.date) });
+  } catch (err) {
+    console.error('dates-with-finalized failed', err);
+    res.status(500).json({ error: 'db failed' });
+  }
 });
 
 // POST /api/shifts/delete-finalized
-// Body: { dates: string[] }
-// Deletes finalized shifts (and their activities) for the given dates (DS+NS) for the current user
-router.post('/delete-finalized', authMiddleware, (req: any, res: any) => {
-  const user_id = (req as any).user_id;
+router.post('/delete-finalized', authMiddleware, async (req: any, res: any) => {
+  const user_id = req.user_id;
   if (!user_id) return res.status(401).json({ error: 'missing user' });
 
   let dates: any = req.body?.dates;
   if (!Array.isArray(dates)) dates = [];
   dates = dates
     .map((d: any) => String(d || '').trim())
-    .filter((d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+    .filter((d: string) => isYmd(d));
 
   if (dates.length === 0) return res.json({ ok: true, deleted: 0 });
 
-  // 1) Fetch shift ids to delete
-  const placeholders = dates.map(() => '?').join(',');
-  db.all(
-    `SELECT id FROM shifts WHERE user_id=? AND finalized_at IS NOT NULL AND date IN (${placeholders})`,
-    [user_id, ...dates],
-    (err, rows) => {
-      if (err) {
-        console.error('delete-finalized select failed', err);
-        return res.status(500).json({ error: 'db failed' });
-      }
-      const ids = (rows || []).map((r: any) => r.id).filter(Boolean);
-      if (ids.length === 0) return res.json({ ok: true, deleted: 0 });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-      const idPlaceholders = ids.map(() => '?').join(',');
-      db.serialize(() => {
-        db.run('BEGIN');
-        db.run(`DELETE FROM shift_activities WHERE shift_id IN (${idPlaceholders})`, ids, (e1: any) => {
-          if (e1) {
-            console.error('delete-finalized activities failed', e1);
-            db.run('ROLLBACK');
-            return res.status(500).json({ error: 'db failed' });
-          }
-          db.run(`DELETE FROM shifts WHERE id IN (${idPlaceholders})`, ids, function (e2: any) {
-            if (e2) {
-              console.error('delete-finalized shifts failed', e2);
-              db.run('ROLLBACK');
-              return res.status(500).json({ error: 'db failed' });
-            }
-            db.run('COMMIT');
-            res.json({ ok: true, deleted: ids.length });
-          });
-        });
-      });
-    },
-  );
+    const r = await client.query(
+      `SELECT id FROM shifts
+        WHERE user_id=$1 AND finalized_at IS NOT NULL AND date = ANY($2::date[])`,
+      [user_id, dates],
+    );
+    const ids = r.rows.map((x) => x.id);
+
+    if (ids.length === 0) {
+
+      // --- mirror finalized data into validation layer (default validated=0) ---
+      const user_email = await getUserEmail(client, user_id);
+
+      // Replace any prior validated rows for this user/date/dn (latest finalized snapshot wins)
+      await client.query(
+        `DELETE FROM validated_shift_activities
+          WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
+        [site, date, dn, user_email],
+      );
+      await client.query(
+        `DELETE FROM validated_shifts
+          WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
+        [site, date, dn, user_email],
+      );
+
+      await client.query(
+        `INSERT INTO validated_shifts (site, date, dn, user_email, validated, totals_json)
+         VALUES ($1,$2::date,$3,$4,0,$5::jsonb)`,
+        [site, date, dn, user_email, JSON.stringify(totals || {})],
+      );
+
+      for (const it of activities) {
+        const activity = String(it?.activity || '');
+        const sub = String(it?.sub_activity || '');
+        const p = it?.payload || {};
+        await client.query(
+          `INSERT INTO validated_shift_activities (site, date, dn, user_email, activity, sub_activity, payload_json)
+           VALUES ($1,$2::date,$3,$4,$5,$6,$7::jsonb)`,
+          [site, date, dn, user_email, activity, sub, JSON.stringify(p)],
+        );
+      }
+
+      await client.query('COMMIT');
+      return res.json({ ok: true, deleted: 0 });
+    }
+
+    // shift_activities cascade via FK, but be explicit just in case
+    await client.query('DELETE FROM shift_activities WHERE shift_id = ANY($1::bigint[])', [ids]);
+    await client.query('DELETE FROM shifts WHERE id = ANY($1::bigint[])', [ids]);
+
+    await client.query('COMMIT');
+    return res.json({ ok: true, deleted: ids.length });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    console.error('delete-finalized failed', err);
+    return res.status(500).json({ error: 'db failed' });
+  } finally {
+    client.release();
+  }
 });
 
-function ensureShiftTables(cb: (err?: any) => void) {
-  db.serialize(() => {
-    db.run(
-      `CREATE TABLE IF NOT EXISTS shifts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        date TEXT,
-        dn TEXT,
-        totals_json TEXT,
-        finalized_at TEXT,
-        UNIQUE (user_id, date, dn)
-      )`,
-      (e: any) => {
-        if (e) return cb(e);
-        db.run(
-          `CREATE TABLE IF NOT EXISTS shift_activities (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            shift_id INTEGER,
-            activity TEXT,
-            sub_activity TEXT,
-            payload_json TEXT
-          )`,
-          cb,
-        );
-      },
-    );
-  });
-}
-
-/**
- * Validate all equipment/activity combinations BEFORE inserting
- */
-function validateActivities(
-  user_id: number,
-  activities: any[],
-  cb: (err?: string) => void,
-) {
+async function validateActivities(user_id: number, activities: any[]): Promise<string | null> {
   const equipmentIds = new Set<string>();
 
   for (const it of activities) {
     const values = it?.payload?.values || {};
-    const eq =
-      values?.Equipment ||
-      values?.equipment ||
-      values?.['Equipment ID'];
-
+    const eq = values?.Equipment || values?.equipment || values?.['Equipment ID'];
     if (eq) {
       const norm = String(eq).trim().toUpperCase();
       if (norm) equipmentIds.add(norm);
     }
   }
 
-  if (equipmentIds.size === 0) {
-    // No equipment used anywhere — nothing to validate
-    return cb();
+  if (equipmentIds.size === 0) return null;
+
+  const ids = Array.from(equipmentIds);
+  const r = await pool.query(
+    `SELECT equipment_id, type
+       FROM equipment
+      WHERE user_id=$1 AND equipment_id = ANY($2::text[])`,
+    [user_id, ids],
+  );
+
+  const typeByEquip: Record<string, string> = {};
+  for (const row of r.rows) typeByEquip[String(row.equipment_id).toUpperCase()] = row.type;
+
+  for (const it of activities) {
+    const p = it?.payload || {};
+    const activity = p.activity;
+    const values = p.values || {};
+    const eqRaw = values?.Equipment || values?.equipment || values?.['Equipment ID'];
+    const eq = eqRaw ? String(eqRaw).trim().toUpperCase() : '';
+    if (!eq) continue;
+
+    const eqType = typeByEquip[eq];
+    if (!eqType) continue; // allow unknown equipment values
+
+    const allowed = EQUIPMENT_ACTIVITY_MAP[eqType]?.includes(activity);
+    if (!allowed) return `Equipment "${eqType}" not allowed for activity "${activity}"`;
   }
 
-  const placeholders = Array.from(equipmentIds).map(() => '?').join(',');
-  const sql = `
-    SELECT equipment_id, type
-    FROM equipment
-    WHERE user_id = ?
-      AND equipment_id IN (${placeholders})
-  `;
-
-  db.all(sql, [user_id, ...equipmentIds], (err, rows: any[]) => {
-    if (err) return cb('equipment lookup failed');
-
-    const typeByEquip: Record<string, string> = {};
-    rows.forEach((r) => {
-      typeByEquip[r.equipment_id] = r.type;
-    });
-
-    for (const it of activities) {
-      const p = it?.payload || {};
-      const activity = p.activity;
-      const values = p.values || {};
-      const eqRaw =
-        values?.Equipment ||
-        values?.equipment ||
-        values?.['Equipment ID'];
-
-      const eq = eqRaw ? String(eqRaw).trim().toUpperCase() : '';
-
-      if (!eq) continue; // activity without equipment is allowed
-
-      const eqType = typeByEquip[eq];
-      if (!eqType) {
-        // Allow manual/typed equipment values that aren't in the user's Equipment list.
-        // (These are valid for local logging; we just can't enforce the type→activity map.)
-        continue;
-      }
-
-      const allowed = EQUIPMENT_ACTIVITY_MAP[eqType]?.includes(activity);
-      if (!allowed) {
-        return cb(`Equipment "${eqType}" not allowed for activity "${activity}"`);
-      }
-    }
-
-    cb();
-  });
+  return null;
 }
 
 // POST /api/shifts/finalize
-router.post('/finalize', authMiddleware, (req, res) => {
-  const { date, dn, totals, activities } = req.body || {};
-  const user_id = (req as any).user_id || null;
+router.post('/finalize', authMiddleware, async (req: any, res: any) => {
+  const user_id = req.user_id;
+  const date = String(req.body?.date || '').trim();
+  const dn = String(req.body?.dn || '').trim();
+  const totals = req.body?.totals || {};
+  const activities = req.body?.activities;
 
-  if (!date || !dn) return res.status(400).json({ error: 'missing date or dn' });
   if (!user_id) return res.status(401).json({ error: 'missing user' });
-  if (!Array.isArray(activities))
-    return res.status(400).json({ error: 'activities must be an array' });
+  if (!date || !dn) return res.status(400).json({ error: 'missing date or dn' });
+  if (!isYmd(date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+  if (!Array.isArray(activities)) return res.status(400).json({ error: 'activities must be an array' });
 
-  // 🔒 VALIDATE FIRST (before touching DB)
-  validateActivities(user_id, activities, (valErr) => {
-    if (valErr) {
-      return res.status(400).json({ error: valErr });
-    }
+  try {
+    const valErr = await validateActivities(user_id, activities);
+    if (valErr) return res.status(400).json({ error: valErr });
 
-    ensureShiftTables((err?: any) => {
-      if (err)
-        return res.status(500).json({ error: 'db init failed', detail: String(err) });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-      db.serialize(() => {
-        db.run('BEGIN');
+      // ✅ get user's profile info for not-null constraints, filtering, and denormalized columns
+      const site = await getUserSite(client, user_id);
+      const user_email = await getUserEmail(client, user_id);
+      const user_name = await getUserName(client, user_id);
 
-        db.run(
-          `UPDATE shifts
-           SET totals_json=?, finalized_at=datetime('now')
-           WHERE user_id=? AND date=? AND dn=?`,
-          [JSON.stringify(totals || {}), user_id, date, dn],
-          function (updateErr: any) {
-            if (updateErr) {
-              db.run('ROLLBACK');
-              return res
-                .status(500)
-                .json({ error: 'update shift failed', detail: String(updateErr) });
-            }
+      // Upsert shift row (INCLUDES site)
+      const up = await client.query(
+        `INSERT INTO shifts (user_id, user_email, user_name, site, date, dn, totals_json, finalized_at)
+         VALUES ($1,$2,$3,$4,$5::date,$6,$7::jsonb,NOW())
+         ON CONFLICT (user_id, date, dn)
+         DO UPDATE SET
+           user_email = EXCLUDED.user_email,
+           user_name = EXCLUDED.user_name,
+           site = EXCLUDED.site,
+           totals_json = EXCLUDED.totals_json,
+           finalized_at = NOW()
+         RETURNING id`,
+        [user_id, user_email, user_name, site, date, dn, JSON.stringify(totals || {})],
+      );
 
-            const updated = (this as any)?.changes || 0;
+      const shift_id = up.rows[0].id;
 
-            const insertShift = () => {
-              db.run(
-                `INSERT INTO shifts (user_id, date, dn, totals_json, finalized_at)
-                 VALUES (?,?,?,?,datetime('now'))`,
-                [user_id, date, dn, JSON.stringify(totals || {})],
-                (insErr: any) => {
-                  if (insErr) {
-                    db.run('ROLLBACK');
-                    return res
-                      .status(500)
-                      .json({ error: 'insert shift failed', detail: String(insErr) });
-                  }
-                  afterShift();
-                },
-              );
-            };
+      // Replace activities for that shift
+      await client.query('DELETE FROM shift_activities WHERE shift_id=$1', [shift_id]);
 
-            const afterShift = () => {
-              db.get(
-                'SELECT id FROM shifts WHERE user_id=? AND date=? AND dn=?',
-                [user_id, date, dn],
-                (ge: any, row: any) => {
-                  if (ge || !row) {
-                    db.run('ROLLBACK');
-                    return res
-                      .status(500)
-                      .json({ error: 'select shift failed', detail: String(ge) });
-                  }
+      for (const it of activities as any[]) {
+        const p = it?.payload || {};
+        const activity = String(p.activity || '');
+        const sub = String(p.sub || '');
 
-                  const shift_id = row.id;
-
-                  db.run(
-                    'DELETE FROM shift_activities WHERE shift_id=?',
-                    [shift_id],
-                    (de: any) => {
-                      if (de) {
-                        db.run('ROLLBACK');
-                        return res
-                          .status(500)
-                          .json({ error: 'delete activities failed', detail: String(de) });
-                      }
-
-                      const stmt = db.prepare(
-                        'INSERT INTO shift_activities (shift_id, activity, sub_activity, payload_json) VALUES (?,?,?,?)',
-                      );
-
-                      try {
-                        for (const it of activities as any[]) {
-                          const p = it?.payload || {};
-                          stmt.run([
-                            shift_id,
-                            p.activity || '',
-                            p.sub || '',
-                            JSON.stringify(p),
-                          ]);
-                        }
-
-                        stmt.finalize((fe: any) => {
-                          if (fe) {
-                            db.run('ROLLBACK');
-                            return res
-                              .status(500)
-                              .json({ error: 'insert activities failed', detail: String(fe) });
-                          }
-
-                          db.run('COMMIT', (ce: any) => {
-                            if (ce)
-                              return res
-                                .status(500)
-                                .json({ error: 'commit failed', detail: String(ce) });
-
-                            return res.json({ ok: true, shift_id });
-                          });
-                        });
-                      } catch (ex: any) {
-                        stmt.finalize(() => {});
-                        db.run('ROLLBACK');
-                        return res
-                          .status(500)
-                          .json({ error: 'exception', detail: String(ex?.message || ex) });
-                      }
-                    },
-                  );
-                },
-              );
-            };
-
-            if (updated === 0) insertShift();
-            else afterShift();
-          },
+        // ✅ store site so admin/site filtering is easy
+        await client.query(
+          `INSERT INTO shift_activities (shift_id, user_email, user_name, site, activity, sub_activity, payload_json)
+           VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+          [shift_id, user_email, user_name, site, activity, sub, JSON.stringify(p)],
         );
-      });
-    });
-  });
+      }
+
+
+      // --- mirror finalized data into validation layer (default validated=0) ---
+
+      // Replace any prior validated rows for this user/date/dn (latest finalized snapshot wins)
+      await client.query(
+        `DELETE FROM validated_shift_activities
+          WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
+        [site, date, dn, user_email],
+      );
+      await client.query(
+        `DELETE FROM validated_shifts
+          WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
+        [site, date, dn, user_email],
+      );
+
+      await client.query(
+        `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, validated, totals_json)
+         VALUES ($1,$2::date,$3,$4,$5,0,$6::jsonb)`,
+        [site, date, dn, user_email, user_name, JSON.stringify(totals || {})],
+      );
+
+      for (const it of activities) {
+        const activity = String(it?.activity || '');
+        const sub = String(it?.sub_activity || '');
+        const p = it?.payload || {};
+        await client.query(
+          `INSERT INTO validated_shift_activities (site, date, dn, user_email, user_name, activity, sub_activity, payload_json)
+           VALUES ($1,$2::date,$3,$4,$5,$6,$7,$8::jsonb)`,
+          [site, date, dn, user_email, user_name, activity, sub, JSON.stringify(p)],
+        );
+      }
+
+      await client.query('COMMIT');
+      return res.json({ ok: true, shift_id });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      console.error('finalize failed', err);
+      return res.status(500).json({ error: 'db failed' });
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('finalize failed (outer)', err);
+    return res.status(500).json({ error: 'db failed' });
+  }
 });
 
 export default router;

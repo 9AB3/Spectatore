@@ -215,12 +215,18 @@ export default function Activity() {
       if (baseValues[key] === '__manual__') {
         if (key === 'Equipment' && baseValues['__manual_equipment'])
           baseValues[key] = baseValues['__manual_equipment'];
-        if (key === 'Location' && baseValues['__manual_location'])
-          baseValues[key] = baseValues['__manual_location'];
+        const mk = `__manual_location_${key}`;
+        if ((baseValues as any)[mk]) baseValues[key] = (baseValues as any)[mk];
       }
     }
 
-    // ✅ FIX: prevent "SP to Truck/SP to SP" collisions between Dev vs Production loading
+    
+
+    // remove helper manual-location fields so they don't pollute saved payload
+    for (const k of Object.keys(baseValues)) {
+      if (k.startsWith('__manual_location_')) delete baseValues[k];
+    }
+// ✅ FIX: prevent "SP to Truck/SP to SP" collisions between Dev vs Production loading
     // This avoids Dev rehandle buckets being attributed to Production (stope) in downstream rollups.
     if (activity === 'Loading') {
       const subLc = String(sub || '').toLowerCase();
@@ -320,6 +326,7 @@ export default function Activity() {
   }
 
   const subKeys = Object.keys((data as any)[activity] || {});
+  const hideSub = activity === 'Hoisting' || (subKeys.length === 1 && (subKeys[0] === '' || subKeys[0] == null));
 
   // ✅ Correct: filter equipment IDs by CURRENT selected Activity, using type->activities map
   const filteredEquipment = useMemo(() => {
@@ -345,14 +352,14 @@ export default function Activity() {
                 ))}
               </select>
             </div>
-            <div>
+            {!hideSub && (<div>
               <label className="block text-sm font-medium">Sub-Activity</label>
               <select className="input" value={sub} onChange={(e) => setSub(e.target.value)}>
                 {subKeys.map((k) => (
                   <option key={k}>{k}</option>
                 ))}
               </select>
-            </div>
+            </div>)}
           </div>
 
           <div className="space-y-3">
@@ -413,7 +420,7 @@ export default function Activity() {
                           setValues((v) => ({
                             ...v,
                             [f.field]: e.target.value,
-                            ...(e.target.value !== '__manual__' ? { __manual_location: '' } : {}),
+                            ...(e.target.value !== '__manual__' ? { [`__manual_location_${f.field}`]: '' } : {}),
                           }))
                         }
                       >
@@ -430,8 +437,8 @@ export default function Activity() {
                         <input
                           className={`${common} mt-2`}
                           placeholder="Enter location"
-                          value={values.__manual_location || ''}
-                          onChange={(e) => setValues((v) => ({ ...v, __manual_location: e.target.value }))}
+                          value={(values as any)[`__manual_location_${f.field}`] || ''}
+                          onChange={(e) => setValues((v) => ({ ...v, [`__manual_location_${f.field}`]: e.target.value }))}
                         />
                       )}
                     </>

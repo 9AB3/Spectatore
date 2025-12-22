@@ -332,7 +332,7 @@ export default function PerformanceReview() {
   const [error, setError] = useState<string | undefined>();
 
   // ✅ Make graph the default left-most tab
-  const [tab, setTab] = useState<'graph' | 'table'>('graph');
+  const [tab, setTab] = useState<'graph' | 'table' | 'milestones'>('graph');
 
   // global dates-with-any-data (useful for Table calendars)
   const [datesWithData, setDatesWithData] = useState<Set<string>>(() => new Set());
@@ -1060,6 +1060,14 @@ export default function PerformanceReview() {
               Graph data view
             </button>
             <button
+              onClick={() => setTab('milestones')}
+              className={`px-3 py-2 text-sm ${
+                tab === 'milestones' ? 'border-b-2 border-slate-900 font-semibold' : ''
+              }`}
+            >
+              Milestones
+            </button>
+            <button
               onClick={() => setTab('table')}
               className={`px-3 py-2 text-sm ${
                 tab === 'table' ? 'border-b-2 border-slate-900 font-semibold' : ''
@@ -1068,6 +1076,65 @@ export default function PerformanceReview() {
               Tabulated data view
             </button>
           </div>
+
+          {tab === 'milestones' && (
+            <div className="space-y-4">
+              {!selectionReady ? (
+                <div className="text-sm text-slate-600">
+                  Select an <b>Activity</b>, <b>Sub-activity</b>, and <b>Metric</b> to view milestones.
+                </div>
+              ) : !milestonesAllTime ? (
+                <div className="text-sm text-slate-600">No milestone data found for this selection.</div>
+              ) : (
+                <div className="card p-4">
+                  <div className="text-sm font-semibold mb-3">All-time milestones (You)</div>
+
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-slate-600">
+                          <th className="py-2 pr-4">Milestone</th>
+                          <th className="py-2 pr-4">Achieved</th>
+                          <th className="py-2 pr-4 text-right">Value</th>
+                        </tr>
+                      </thead>
+                      <tbody className="align-top">
+                        <tr className="border-t border-slate-200">
+                          <td className="py-2 pr-4 font-medium">Record shift</td>
+                          <td className="py-2 pr-4">{formatDMY(milestonesAllTime.bestDay.date)}</td>
+                          <td className="py-2 pr-4 text-right tabular-nums">
+                            {Number(milestonesAllTime.bestDay.total || 0).toLocaleString(undefined, {
+                              maximumFractionDigits: 2,
+                            })}
+                          </td>
+                        </tr>
+                        <tr className="border-t border-slate-200">
+                          <td className="py-2 pr-4 font-medium">Record week</td>
+                          <td className="py-2 pr-4">
+                            {formatDMY(milestonesAllTime.best7.start)} – {formatDMY(milestonesAllTime.best7.end)}
+                          </td>
+                          <td className="py-2 pr-4 text-right tabular-nums">
+                            {Number(milestonesAllTime.best7.total || 0).toLocaleString(undefined, {
+                              maximumFractionDigits: 2,
+                            })}
+                          </td>
+                        </tr>
+                        <tr className="border-t border-slate-200">
+                          <td className="py-2 pr-4 font-medium">Record month</td>
+                          <td className="py-2 pr-4">{milestonesAllTime.bestMonth.label || '–'}</td>
+                          <td className="py-2 pr-4 text-right tabular-nums">
+                            {Number(milestonesAllTime.bestMonth.total || 0).toLocaleString(undefined, {
+                              maximumFractionDigits: 2,
+                            })}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {tab === 'graph' && (
             <div className="space-y-4">

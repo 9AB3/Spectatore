@@ -150,6 +150,12 @@ export default function Home() {
           <button className="btn w-full" onClick={() => nav('/ForgotPassword')}>
             LOST TAG
           </button>
+          <div
+            className="text-xs text-sky-600 cursor-pointer mt-1"
+            onClick={() => nav('/SiteAdminLogin')}
+          >
+            Site Admin Login
+          </div>
         </div>
       </div>
     </div>

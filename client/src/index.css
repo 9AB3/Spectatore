@@ -2,33 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
-.btn {
-  @apply px-4 py-2 rounded-2xl shadow text-white font-semibold;
-}
-.btn-primary {
-  @apply bg-sky-600 hover:bg-sky-700;
-}
-.btn-secondary {
-  @apply bg-slate-700 hover:bg-slate-800;
-}
-.input {
-  @apply border rounded-lg px-3 py-2 w-full;
-}
-.card {
-  @apply bg-white rounded-2xl shadow p-4;
-}
+/*
+  Professional, low-saturation theme (matches the Site Admin / Validate page tone)
+  - Slate + muted amber accents
+  - Minimal “fun” colour flooding
+*/
 
 :root {
-  --brand: #3b2a1a; /* dark brown */
-  --brand-press: #2e2016;
-  --bg: #fdf1e3; /* cream */
-  --card: #fff8ee; /* lighter cream */
-  --input: #f6e8d7; /* tan */
-  --text: #2a1b10;
-  --muted: #6b5b4f;
-  --ok: #16a34a; /* green */
-  --warn: #d97706; /* orange */
-  --bad: #dc2626; /* red */
+  --brand: #0f172a; /* slate-900 */
+  --brand-press: #111827; /* slate-900-ish */
+  --bg: #f1f5f9; /* slate-100 */
+  --card: #ffffff;
+  --input: #ffffff;
+  --text: #0f172a;
+  --muted: #475569; /* slate-600 */
+  --ok: #16a34a;
+  --warn: #b45309; /* amber-700 */
+  --bad: #dc2626;
 }
 
 body {
@@ -36,50 +26,47 @@ body {
   color: var(--text);
 }
 
+/* Cards / surfaces */
 .card {
-  @apply rounded-2xl shadow p-5;
+  @apply rounded-2xl shadow-sm border border-slate-200/70 p-5;
   background: var(--card);
 }
 
-/* Milestones card background (subtle podium watermark) */
-.milestones-card {
-  position: relative;
-  overflow: hidden;
-  background: rgba(248, 250, 252, 0.88);
-}
-.milestones-card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: var(--milestones-bg);
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: cover;
-  opacity: 0.13;
-  pointer-events: none;
-}
-.milestones-card > * {
-  position: relative;
-  z-index: 1;
-}
+/* Inputs */
 .input {
-  @apply border rounded-xl px-3 py-2 w-full outline-none;
+  @apply w-full rounded-xl px-3 py-2 outline-none border border-slate-200 focus:border-slate-400 focus:ring-2 focus:ring-slate-200;
   background: var(--input);
-  border-color: #e9d9c3;
+  color: var(--text);
 }
+
+/* Buttons */
 .btn {
-  @apply px-4 py-3 rounded-2xl shadow text-white font-semibold tracking-wide;
+  @apply px-4 py-3 rounded-2xl shadow-sm font-semibold tracking-wide border border-transparent;
   background: var(--brand);
+  color: white;
 }
 .btn:hover {
   background: var(--brand-press);
 }
-.btn-secondary {
-  background: var(--brand);
-} /* keep same look per request */
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 
+.btn-primary {
+  background: var(--brand);
+}
+.btn-primary:hover {
+  background: var(--brand-press);
+}
+
+.btn-secondary {
+  @apply bg-slate-700 hover:bg-slate-800;
+}
+
+/* Header */
 .header-bar {
-  @apply flex justify-between items-center p-4 shadow;
+  @apply flex justify-between items-center p-4 border-b border-slate-200/70;
   background: var(--card);
 }
 .logo-title {
@@ -87,12 +74,12 @@ body {
   color: var(--text);
 }
 
+/* Sync indicator dots */
 .sync-dot {
   width: 10px;
   height: 10px;
   border-radius: 9999px;
   display: inline-block;
-  margin-left: 0;
 }
 .sync-ok {
   background: var(--ok);
@@ -123,8 +110,15 @@ body {
 
 /* Used for the Start Shift / Tag Out button images so they read like "icon text" */
 .button-icon {
-  /* Force the raster icon to match the button text colour (white on dark buttons) */
   filter: brightness(0) invert(1);
+}
+
+/* Secondary action card below TAG OUT */
+.feedback-card {
+  opacity: 0.78;
+}
+.feedback-card:hover {
+  opacity: 1;
 }
 
 /* When a sync light is not active, show it as dimmed but still visible */

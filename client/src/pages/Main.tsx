@@ -7,6 +7,40 @@ import { api } from '../lib/api';
 import portalIcon from '../assets/portal_icon.png';
 import tagoutIcon from '../assets/tagout.png';
 
+function FeedbackIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden="true"
+    >
+      <path
+        d="M21 15a4 4 0 0 1-4 4H7l-4 4V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M7 8h10"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M7 12h6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function parseYmd(ymd: string): Date {
   const [y, m, d] = ymd.split('-').map((v) => parseInt(v, 10));
   return new Date(y, (m || 1) - 1, d || 1);
@@ -98,11 +132,6 @@ export default function Main() {
             />
           </div>
         </button>
-        {isAdmin && (
-          <button className="btn" onClick={() => nav('/AdminUsers')}>
-            Admin – Users
-          </button>
-        )}
         <button
           className="btn"
           onClick={tagOut}
@@ -117,6 +146,29 @@ export default function Main() {
             />
           </div>
         </button>
+
+        {/* Share feedback (separate card below TAG OUT) */}
+        <button
+          type="button"
+          onClick={() => nav('/Feedback')}
+          className="btn feedback-card"
+          style={{ paddingTop: 14, paddingBottom: 14 }}
+        >
+          <div className="flex items-center justify-center gap-2">
+            <FeedbackIcon className="h-5 w-5" />
+            <span>Share your feedback</span>
+          </div>
+        </button>
+
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => nav('/AdminUsers')}
+            className="text-sm text-slate-600 hover:underline mt-1"
+          >
+            Admin – Users
+          </button>
+        )}
       </div>
 
       {open && (

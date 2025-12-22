@@ -12,7 +12,8 @@ export default function Register() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [name, setName] = useState('');
-  const [site, setSite] = useState('CSA');
+  const [siteSelect, setSiteSelect] = useState<'CSA' | 'Endeavor' | 'Peak' | 'Not in List'>('CSA');
+  const [siteManual, setSiteManual] = useState('');
   const [state, setState] = useState('NSW');
 
   async function submit() {
@@ -22,6 +23,12 @@ export default function Register() {
     }
     if (password !== confirm) {
       setMsg('Passwords do not match');
+      return;
+    }
+
+    const site = siteSelect === 'Not in List' ? siteManual.trim() : siteSelect;
+    if (!site) {
+      setMsg('Please select a site (or type your site name)');
       return;
     }
     try {
@@ -55,7 +62,7 @@ export default function Register() {
   return (
     <div>
       <Toast />
-      <Header />
+      <Header showSync={false} />
       <div className="p-6 card max-w-md mx-auto space-y-3">
         <input
           className="input"
@@ -83,12 +90,41 @@ export default function Register() {
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
         />
-        <select className="input" value={site} onChange={(e) => setSite(e.target.value)}>
-          <option>CSA</option>
-          <option>Endeavor</option>
-          <option>Peak</option>
-          <option>Not in List</option>
-        </select>
+        <div className="space-y-2">
+          <select
+            className="input"
+            value={siteSelect}
+            onChange={(e) => {
+              const v = e.target.value as any;
+              setSiteSelect(v);
+              if (v !== 'Not in List') setSiteManual('');
+            }}
+          >
+            <option>CSA</option>
+            <option>Endeavor</option>
+            <option>Peak</option>
+            <option>Not in List</option>
+          </select>
+
+          {siteSelect === 'Not in List' && (
+            <div>
+              <input
+                className="input"
+                list="site-suggestions"
+                placeholder="Type your site name"
+                value={siteManual}
+                onChange={(e) => setSiteManual(e.target.value)}
+              />
+              {/* Dropdown suggestions + allows free typing (saved as the site) */}
+              <datalist id="site-suggestions">
+                <option value="CSA" />
+                <option value="Endeavor" />
+                <option value="Peak" />
+              </datalist>
+              <div className="text-xs text-slate-500 mt-1">This will be saved as your site.</div>
+            </div>
+          )}
+        </div>
         <select className="input" value={state} onChange={(e) => setState(e.target.value)}>
           <option>NSW</option>
           <option>QLD</option>
@@ -98,12 +134,14 @@ export default function Register() {
           <option>WA</option>
           <option>TAS</option>
         </select>
-        <button className="btn btn-primary" onClick={submit}>
-          SUBMIT
-        </button>
-        <button className="btn btn-secondary" onClick={() => nav('/Home')}>
-          BACK
-        </button>
+        <div className="grid grid-cols-2 gap-3 pt-2">
+          <button className="btn btn-primary w-full" onClick={submit}>
+            SUBMIT
+          </button>
+          <button className="btn btn-secondary w-full" onClick={() => nav('/Home')}>
+            BACK
+          </button>
+        </div>
       </div>
     </div>
   );

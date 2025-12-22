@@ -69,7 +69,7 @@ return (
 
 }
 
-export default function Header() {
+export default function Header({ showSync = true }: { showSync?: boolean }) {
   const [shift, setShift] = useState<{ date?: string; dn?: 'DS' | 'NS' }>({});
   const loc = useLocation();
   useEffect(() => {
@@ -119,7 +119,7 @@ export default function Header() {
             {fmt(shift.date)} • {shift.dn}
           </div>
         )}
-        <SyncIndicator />
+        {showSync ? <SyncIndicator /> : null}
       </div>
     </div>
   );

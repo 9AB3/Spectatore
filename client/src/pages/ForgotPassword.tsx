@@ -30,7 +30,7 @@ export default function ForgotPassword() {
   return (
     <div>
       <Toast />
-      <Header />
+      <Header showSync={false} />
       <div className="p-6 card max-w-md mx-auto space-y-3">
         <input
           className="input"

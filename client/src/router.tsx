@@ -18,6 +18,18 @@ import AddConnection from './pages/AddConnection';
 import ViewConnections from './pages/ViewConnections';
 import AdminUsers from './pages/AdminUsers';
 import Settings from './pages/Settings';
+import Feedback from './pages/Feedback';
+import SiteAdminLogin from './pages/SiteAdminLogin';
+import SiteAdmin from './pages/SiteAdmin';
+import SiteAdminValidate from './pages/SiteAdminValidate';
+import SiteAdminEquipmentLocations from './pages/SiteAdminEquipmentLocations';
+import SiteAdminCreateSite from './pages/SiteAdminCreateSite';
+import SiteAdminCreateSiteAdministrators from './pages/SiteAdminCreateSiteAdministrators';
+import SiteAdminMenu from './pages/SiteAdminMenu';
+import SiteAdminLayout from './components/SiteAdminLayout';
+import SiteAdminSites from './pages/SiteAdminSites';
+import SiteAdminSiteAdmins from './pages/SiteAdminSiteAdmins';
+import SiteAdminFeedbackApproval from './pages/SiteAdminFeedbackApproval';
 import { useEffect, useState } from 'react';
 import { getDB } from './lib/idb';
 import ProtectedLayout from './components/ProtectedLayout';
@@ -35,16 +47,59 @@ function RequireAuth({ children }: { children: JSX.Element }) {
   return ok ? children : <Navigate to="/Home" replace />;
 }
 
+function RequireSiteAdmin({ children }: { children: JSX.Element }) {
+  const [ok, setOk] = useState<boolean | null>(null);
+  useEffect(() => {
+    (async () => {
+      const db = await getDB();
+      const sa = await db.get('session', 'site_admin');
+      if (sa?.token) return setOk(true);
+      const auth = await db.get('session', 'auth');
+      setOk(!!auth?.token && !!auth?.is_admin);
+    })();
+  }, []);
+  if (ok === null) return null;
+  return ok ? children : <Navigate to="/SiteAdminLogin" replace />;
+}
+
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/Home" />} />
       {/* Public */}
       <Route path="/Home" element={<Home />} />
+      <Route path="/SiteAdminLogin" element={<SiteAdminLogin />} />
       <Route path="/Register" element={<Register />} />
       <Route path="/ConfirmEmail" element={<ConfirmEmail />} />
       <Route path="/ForgotPassword" element={<ForgotPassword />} />
       <Route path="/ResetPassword" element={<ResetPassword />} />
+
+      {/* Site Admin (layout + bottom nav) */}
+      <Route
+        path="/SiteAdmin"
+        element={
+          <RequireSiteAdmin>
+            <SiteAdminLayout />
+          </RequireSiteAdmin>
+        }
+      >
+        <Route index element={<SiteAdmin />} />
+        <Route path="Validate" element={<SiteAdminValidate />} />
+        <Route path="Equipment&Locations" element={<SiteAdminEquipmentLocations />} />
+        <Route path="Sites" element={<SiteAdminSites />} />
+        <Route path="SiteAdmins" element={<SiteAdminSiteAdmins />} />
+        <Route path="ApproveFeedback" element={<SiteAdminFeedbackApproval />} />
+        <Route path="Edit" element={<div className="p-6">Coming soon</div>} />
+        <Route path="Export" element={<div className="p-6">Coming soon</div>} />
+
+        {/* Backwards-compatible routes */}
+        <Route path="CreateSite" element={<Navigate to="/SiteAdmin/Sites" replace />} />
+        <Route
+          path="CreateSiteAdministrators"
+          element={<Navigate to="/SiteAdmin/SiteAdmins" replace />}
+        />
+        <Route path="Menu" element={<SiteAdminMenu />} />
+      </Route>
 
       {/* Protected */}
       <Route
@@ -64,6 +119,7 @@ export default function App() {
         <Route path="/Equipment&Locations" element={<EquipmentLocations />} />
         <Route path="/PerformanceReview" element={<PerformanceReview />} />
         <Route path="/Settings" element={<Settings />} />
+        <Route path="/Feedback" element={<Feedback />} />
 
         <Route path="/ClearShifts" element={<ClearShifts />} />
         <Route path="/AddConnection" element={<AddConnection />} />

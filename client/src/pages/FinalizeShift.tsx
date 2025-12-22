@@ -17,6 +17,25 @@ function formatYmd(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+function isLastDayOfMonth(ymd: string): boolean {
+  try {
+    const d = parseYmd(ymd);
+    const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    return d.getDate() === last.getDate();
+  } catch {
+    return false;
+  }
+}
+
+function isFirstDayOfMonth(ymd: string): boolean {
+  try {
+    const d = parseYmd(ymd);
+    return d.getDate() === 1;
+  } catch {
+    return false;
+  }
+}
+
 function ShiftDateCalendar({
   value,
   onChange,
@@ -137,6 +156,8 @@ export default function FinalizeShift() {
   const [shift, setShift] = useState<{ date?: string; dn?: 'DS' | 'NS' } | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [changeOpen, setChangeOpen] = useState(false);
+  const [milestoneOpen, setMilestoneOpen] = useState(false);
+  const [milestoneHits, setMilestoneHits] = useState<{ metric: string; kinds: string[] }[]>([]);
   const [tmpDate, setTmpDate] = useState('');
   const [tmpDn, setTmpDn] = useState<'DS' | 'NS'>('DS');
 
@@ -208,8 +229,32 @@ export default function FinalizeShift() {
         totals[activity][subActivity]['TKMs'] = (totals[activity][subActivity]['TKMs'] || 0) + tkms;
       }
     }
-    return totals;
-  }, [items]);
+  // Special derived totals: Hauling ore/waste truck counts
+  if (totals['Hauling']) {
+    let ore = 0;
+    let waste = 0;
+    for (const it of items) {
+      const p: any = it.payload || {};
+      if (p.activity !== 'Hauling') continue;
+      const subA = p.sub || '';
+      const vals: any = p.values || {};
+      const trucks = parseFloat(String(vals?.Trucks ?? '0'));
+      const material = String(vals?.Material ?? '');
+      if (!Number.isFinite(trucks)) continue;
+      if (String(subA) === 'Production') ore += trucks;
+      else if (String(subA) === 'Development') {
+        if (material === 'Ore') ore += trucks;
+        if (material === 'Waste') waste += trucks;
+      }
+    }
+    totals['Hauling']['Shift Totals'] ||= {};
+    totals['Hauling']['Shift Totals']['Ore'] = ore;
+    totals['Hauling']['Shift Totals']['Waste'] = waste;
+  }
+
+  return totals;
+}, [items]);
+
 
   const activityKeys = Object.keys(grouped);
 
@@ -242,6 +287,17 @@ export default function FinalizeShift() {
       return;
     }
     setBusy(true);
+
+    // Milestones are computed from the user's own finalized shift data (NOT validated edits)
+    // We capture "before" so we can detect new records created by this finalize.
+    let beforeByMetric: Record<string, any> = {};
+    try {
+      const before = await api('/api/reports/summary?from=0001-01-01&to=9999-12-31');
+      beforeByMetric = before?.milestones?.byMetric || {};
+    } catch {
+      beforeByMetric = {};
+    }
+
     try {
       const payload = {
         date: shift.date,
@@ -258,8 +314,59 @@ export default function FinalizeShift() {
       await db.clear('activities');
       await db.delete('shift', 'current');
 
-      setMsg('Shift synced successfully');
-      setTimeout(() => nav('/Main'), 800);
+      // Detect new milestone records created by this shift
+      let afterByMetric: Record<string, any> = {};
+      try {
+        const after = await api('/api/reports/summary?from=0001-01-01&to=9999-12-31');
+        afterByMetric = after?.milestones?.byMetric || {};
+      } catch {
+        afterByMetric = {};
+      }
+
+      const hits: { metric: string; kinds: string[] }[] = [];
+      const shiftDate = shift.date;
+      const shiftMonth = shift.date.slice(0, 7);
+      const metrics = new Set<string>([...Object.keys(beforeByMetric || {}), ...Object.keys(afterByMetric || {})]);
+      for (const metric of metrics) {
+        const b = beforeByMetric?.[metric] || {};
+        const a = afterByMetric?.[metric] || {};
+
+        const kinds: string[] = [];
+
+        // Record shift (best day)
+        const bDay = Number(b?.bestDay?.total ?? 0);
+        const aDay = Number(a?.bestDay?.total ?? 0);
+        const aDayDate = String(a?.bestDay?.date || '');
+        if (aDayDate === shiftDate && aDay > bDay) kinds.push('Record shift');
+
+        // Record week (best rolling 7-day window) — anchor on this shift date as the window end
+        const bWeek = Number(b?.bestWeek?.total ?? 0);
+        const aWeek = Number(a?.bestWeek?.total ?? 0);
+        const aWeekEnd = String(a?.bestWeek?.end || '');
+        if (aWeekEnd === shiftDate && aWeek > bWeek) kinds.push('Record week');
+        // Record month (best month total)
+        // Only show this milestone when finalizing on the LAST day of the month
+        // OR the FIRST day of the subsequent month (i.e. month-end closeout).
+        const isLast = isLastDayOfMonth(shiftDate);
+        const isFirst = isFirstDayOfMonth(shiftDate);
+        const canShowMonth = isLast || isFirst;
+        const monthKeyForDisplay = isFirst ? formatYmd(new Date(parseYmd(shiftDate).getTime() - 24 * 60 * 60 * 1000)).slice(0, 7) : shiftMonth;
+        const bMonth = Number(b?.bestMonth?.total ?? 0);
+        const aMonth = Number(a?.bestMonth?.total ?? 0);
+        const aMonthKey = String(a?.bestMonth?.month || '');
+        if (canShowMonth && aMonthKey === monthKeyForDisplay && aMonth > bMonth) kinds.push('Record month');
+
+        if (kinds.length) hits.push({ metric, kinds });
+      }
+
+      if (hits.length) {
+        setMilestoneHits(hits.sort((x, y) => x.metric.localeCompare(y.metric)).slice(0, 12));
+        setMilestoneOpen(true);
+        setMsg('Shift synced successfully');
+      } else {
+        setMsg('Shift synced successfully');
+        setTimeout(() => nav('/Main'), 800);
+      }
     } catch (e: any) {
       setMsg(e?.message || 'Failed to sync');
     } finally {
@@ -414,6 +521,69 @@ export default function FinalizeShift() {
                   Cancel
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Milestone Congrats Modal */}
+      {milestoneOpen && (
+        <div className="fixed inset-0 bg-black/30 overflow-y-auto">
+          <div className="min-h-full flex items-start justify-center p-4 sm:items-center">
+            <div className="card w-full max-w-lg max-h-[calc(100vh-2rem)] flex flex-col">
+            <h3 className="text-lg font-semibold">Milestone unlocked 🏁</h3>
+            <div className="text-sm text-slate-600 mt-1">
+              Nice work — you just set a new record on one or more metrics.
+            </div>
+
+            {/*
+              Scrollable list:
+              - The overlay is overflow-y-auto so the modal never gets clipped on short screens.
+              - The card is a flex column with a max-height.
+              - This list area flexes and scrolls, so ALL milestones are shown.
+            */}
+            <div className="mt-4 space-y-2 overflow-y-auto pr-1 flex-1">
+              {milestoneHits.map((m) => (
+                <div key={m.metric} className="border border-slate-200 rounded-xl p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="font-semibold">{m.metric}</div>
+                    <div className="flex flex-wrap gap-2 justify-end">
+                      {m.kinds.map((k) => (
+                        <span
+                          key={k}
+                          className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200"
+                        >
+                          {k}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-5">
+              <button
+                type="button"
+                className="btn btn-secondary w-full"
+                onClick={() => {
+                  setMilestoneOpen(false);
+                  nav('/Main');
+                }}
+              >
+                Continue
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary w-full"
+                onClick={() => {
+                  setMilestoneOpen(false);
+                  nav('/PerformanceReview');
+                }}
+              >
+                View Performance
+              </button>
+            </div>
             </div>
           </div>
         </div>
