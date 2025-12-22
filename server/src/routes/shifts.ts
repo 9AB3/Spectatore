@@ -91,6 +91,7 @@ router.post('/delete-finalized', authMiddleware, async (req: any, res: any) => {
   try {
     await client.query('BEGIN');
 
+    // Identify finalized shift ids that match these dates
     const r = await client.query(
       `SELECT id FROM shifts
         WHERE user_id=$1 AND finalized_at IS NOT NULL AND date = ANY($2::date[])`,
@@ -99,41 +100,38 @@ router.post('/delete-finalized', authMiddleware, async (req: any, res: any) => {
     const ids = r.rows.map((x) => x.id);
 
     if (ids.length === 0) {
-
-      // --- mirror finalized data into validation layer (default validated=0) ---
-      const user_email = await getUserEmail(client, user_id);
-
-      // Replace any prior validated rows for this user/date/dn (latest finalized snapshot wins)
-      await client.query(
-        `DELETE FROM validated_shift_activities
-          WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
-        [site, date, dn, user_email],
-      );
-      await client.query(
-        `DELETE FROM validated_shifts
-          WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
-        [site, date, dn, user_email],
-      );
-
-      await client.query(
-        `INSERT INTO validated_shifts (site, date, dn, user_email, validated, totals_json)
-         VALUES ($1,$2::date,$3,$4,0,$5::jsonb)`,
-        [site, date, dn, user_email, JSON.stringify(totals || {})],
-      );
-
-      for (const it of activities) {
-        const activity = String(it?.activity || '');
-        const sub = String(it?.sub_activity || '');
-        const p = it?.payload || {};
-        await client.query(
-          `INSERT INTO validated_shift_activities (site, date, dn, user_email, activity, sub_activity, payload_json)
-           VALUES ($1,$2::date,$3,$4,$5,$6,$7::jsonb)`,
-          [site, date, dn, user_email, activity, sub, JSON.stringify(p)],
-        );
-      }
-
+      // Nothing to delete — do not reference undefined vars here.
       await client.query('COMMIT');
       return res.json({ ok: true, deleted: 0 });
+    }
+
+    // Optional: also delete the corresponding validated snapshot rows for those dates
+    // (only if your product logic wants delete-finalized to wipe validation copies too)
+    try {
+      const site = await getUserSite(client, user_id);
+      const user_email = await getUserEmail(client, user_id);
+
+      // dn is not provided to delete-finalized, so remove both DS + NS for the date list.
+      await client.query(
+        `DELETE FROM validated_shift_activities
+          WHERE site=$1
+            AND COALESCE(user_email,'')=COALESCE($2,'')
+            AND date = ANY($3::date[])
+            AND dn IN ('DS','NS')`,
+        [site, user_email, dates],
+      );
+
+      await client.query(
+        `DELETE FROM validated_shifts
+          WHERE site=$1
+            AND COALESCE(user_email,'')=COALESCE($2,'')
+            AND date = ANY($3::date[])
+            AND dn IN ('DS','NS')`,
+        [site, user_email, dates],
+      );
+    } catch (e) {
+      // Don't fail the delete if validation layer isn't present / schema differs
+      console.warn('delete-finalized: validated layer cleanup skipped/failed', e);
     }
 
     // shift_activities cascade via FK, but be explicit just in case
@@ -252,7 +250,6 @@ router.post('/finalize', authMiddleware, async (req: any, res: any) => {
           [shift_id, user_email, user_name, site, activity, sub, JSON.stringify(p)],
         );
       }
-
 
       // --- mirror finalized data into validation layer (default validated=0) ---
 
