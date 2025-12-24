@@ -76,23 +76,24 @@ function allowedLocationTypes(
   // Hauling
   if (a === 'Hauling') {
     if (s === 'Development') {
-      // Source is the heading; From/To are stockpiles
+      // Development hauling: Source is the heading. From can be Heading or Stockpile (per request). To remains Stockpile.
       if (f === 'Source') return ['Heading'];
-      if (f === 'From' || f === 'To') return ['Stockpile'];
-      return ['Stockpile'];
+      if (f === 'From') return ['Heading', 'Stockpile'];
+      if (f === 'To') return ['Stockpile'];
+      return ['Heading', 'Stockpile'];
     }
     if (s === 'Production') {
-      // Treat production hauling as stope → stockpile
-      // Source must be stope only; stockpiles are only valid for From/To.
+      // Production hauling: Source is the stope. From can be Stope or Stockpile (per request). To remains Stockpile.
       if (f === 'Source') return ['Stope'];
-      if (f === 'From' || f === 'To') return ['Stockpile'];
-      return ['Stockpile'];
+      if (f === 'From') return ['Stope', 'Stockpile'];
+      if (f === 'To') return ['Stockpile'];
+      return ['Stope', 'Stockpile'];
     }
   }
-
   // Default: allow any (so we don't block other future forms)
   return ['Heading', 'Stope', 'Stockpile'];
 }
+
 
 export default function Activity() {
   const nav = useNavigate();

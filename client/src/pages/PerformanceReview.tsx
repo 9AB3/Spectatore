@@ -55,15 +55,23 @@ const allowedByActivity: Record<string, string[]> = {
 
   // Loading buckets
   loading: [
-    'Primary Dev Buckets',
-    'Rehandle Dev Buckets',
-    'Primary Stope Buckets',
-    'Rehandle Stope Buckets',
+    'Stope buckets',
+    'Dev buckets',
   ],
 
-  charging: ['No holes charged', 'Chargem', 'Charge kg', 'Cut Length'],
+  // Charging is filtered by sub-activity (Production vs Development) in isAllowedMetric()
+
+  // Charging is filtered by sub-activity (Production vs Development) in isAllowedMetric()
+  charging: ['No of Holes', 'Charge Metres', 'Charge kg', 'Tonnes Fired', 'Cut Length'],
   hoisting: ['Ore Tonnes', 'Waste Tonnes'],
 };
+
+// Charging metrics depend on sub-activity
+const chargingAllowedBySub: Record<string, string[]> = {
+  production: ['No of Holes', 'Charge Metres', 'Charge kg', 'Tonnes Fired'],
+  development: ['No of Holes', 'Charge Metres', 'Charge kg', 'Cut Length'],
+};
+
 
 // Aliases to canonical activity keys
 const activityAliases: Record<string, string> = {
@@ -87,6 +95,31 @@ function canonAct(name: string) {
   return activityAliases[k] || k;
 }
 
+function addDerivedLoadingToRollup(rollup: Rollup) {
+  const out: Rollup = JSON.parse(JSON.stringify(rollup || {}));
+  const actKey = Object.keys(out).find((k) => lc(k) === 'loading') || 'Loading';
+  if (!out[actKey]) out[actKey] = {};
+  // Production -> Stope buckets
+  const prodKey = Object.keys(out[actKey]).find((k) => lc(k) === 'production') || 'Production';
+  const devKey = Object.keys(out[actKey]).find((k) => lc(k) === 'development') || 'Development';
+  out[actKey][prodKey] = out[actKey][prodKey] || {};
+  out[actKey][devKey] = out[actKey][devKey] || {};
+
+  const p = out[actKey][prodKey] || {};
+  const d = out[actKey][devKey] || {};
+
+  const stopeBuckets =
+    Number(p['Stope to Truck'] || 0) + Number(p['Stope to SP'] || 0);
+  const devBuckets =
+    Number(d['Heading to Truck'] || 0) + Number(d['Heading to SP'] || 0);
+
+  out[actKey][prodKey]['Stope buckets'] = stopeBuckets;
+  out[actKey][devKey]['Dev buckets'] = devBuckets;
+
+  return out;
+}
+
+
 // Display-name normalization
 const keyDisplayMap: Record<string, string> = {
   // Hauling
@@ -101,18 +134,18 @@ const keyDisplayMap: Record<string, string> = {
 
   // Development
   'gs drillm': 'GS Drillm',
-  'no of bolts': 'No. of bolts',
-  'no. of bolts': 'No. of bolts',
+  'no of bolts': 'No. of Bolts',
+  'no. of bolts': 'No. of Bolts',
   'agi volume': 'Agi Volume',
   'spray volume': 'Spray Volume',
   'no of holes': 'No of Holes',
-  'no of reamers': 'No of reamers',
+  'no of reamers': 'No of Reamers',
   'dev drillm': 'Dev Drillm',
   'cut length': 'Cut Length',
 
   // Production drilling
-  'metres drilled': 'Metres drilled',
-  'cleanouts drilled': 'Cleanouts drilled',
+  'metres drilled': 'Metres Drilled',
+  'cleanouts drilled': 'Cleanouts Drilled',
   redrills: 'Redrills',
 
   // Loading buckets
@@ -122,21 +155,43 @@ const keyDisplayMap: Record<string, string> = {
   'rehandle stope buckets': 'Rehandle Stope Buckets',
 
   // Charging
-  'no holes charged': 'No holes charged',
-  chargem: 'Chargem',
+  'no holes charged': 'No of Holes',
+  chargem: 'Charge Metres',
   'charge kg': 'Charge kg',
+  'charge metres': 'Charge Metres',
+  'tonnes fired': 'Tonnes Fired',
 
   // Hoisting
   'ore tonnes': 'Ore Tonnes',
   'waste tonnes': 'Waste Tonnes',
 };
 
-function displayNameFor(raw: string) {
-  return keyDisplayMap[lc(raw)] || raw;
+function displayNameFor(raw: string, activityCanonical?: string, sub?: string) {
+  const act = lc(activityCanonical || '');
+  const s = lc(sub || '');
+  const rk = lc(raw);
+
+  // Charging wants consistent labels by sub-activity
+  if (act === 'charging') {
+    if (rk === 'no of holes' || rk === 'no holes charged' || rk === 'no. of holes') return 'No of Holes';
+    if (rk === 'chargem' || rk === 'charge metres') return 'Charge Metres';
+    if (rk === 'charge kg') return 'Charge kg';
+    if (rk === 'tonnes fired') return 'Tonnes Fired';
+    if (rk === 'cut length') return 'Cut Length';
+  }
+
+  return keyDisplayMap[rk] || raw;
 }
 
-function isAllowedMetric(activityCanonical: string, metricDisplayName: string) {
-  const list = allowedByActivity[lc(activityCanonical)];
+function isAllowedMetric(activityCanonical: string, sub: string, metricDisplayName: string) {
+  const act = lc(activityCanonical);
+
+  if (act === 'charging') {
+    const list = chargingAllowedBySub[lc(sub || '')];
+    return !!(list && list.some((m) => lc(m) === lc(metricDisplayName)));
+  }
+
+  const list = allowedByActivity[act];
   return !!(list && list.some((m) => lc(m) === lc(metricDisplayName)));
 }
 
@@ -303,7 +358,37 @@ async function fetchCrewGraphData(
 }
 
 export default function PerformanceReview() {
+  const [online, setOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  useEffect(() => {
+    function on() { setOnline(true); }
+    function off() { setOnline(false); }
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => {
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
+    };
+  }, []);
+
   const nav = useNavigate();
+
+  if (!online) {
+    return (
+      <div>
+        <Header />
+        <div className="p-6 max-w-xl mx-auto">
+          <div className="card">
+            <h2 className="text-xl font-semibold mb-2">Performance Review</h2>
+            <div className="text-sm text-slate-600">Connection required. Please connect to the network and try again.</div>
+            <div className="mt-4">
+              <button className="btn" onClick={() => nav('/Main')}>Back</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
   // separate date ranges
   const [fromTable, setFromTable] = useState(formatDate(startOfMonth(new Date())));
   const [toTable, setToTable] = useState(formatDate(new Date()));
@@ -367,7 +452,7 @@ export default function PerformanceReview() {
       setError(undefined);
       const res = await api(`/api/reports/summary?from=${f}&to=${t}`);
       setRowsGraph(res.rows || []);
-      setRollupGraph(res.rollup || {});
+      setRollupGraph(addDerivedLoadingToRollup(res.rollup || {}));
     } catch (e: any) {
       setError(e?.message || 'Failed to load');
     } finally {
@@ -448,7 +533,7 @@ export default function PerformanceReview() {
     (async () => {
       try {
         const res = await api(`/api/reports/summary?from=0001-01-01&to=9999-12-31`);
-        if (!cancelled) setRollupGraphOptions(res.rollup || {});
+        if (!cancelled) setRollupGraphOptions(addDerivedLoadingToRollup(res.rollup || {}));
       } catch (e) {
         console.error('Failed to load graph options rollup', e);
         if (!cancelled) setRollupGraphOptions({});
@@ -536,8 +621,8 @@ export default function PerformanceReview() {
               if (rk === 'trucks' || rk === 'weight' || rk === 'distance') continue;
               if (!ALLOWED_HAUL.has(rawK)) continue;
             }
-            const disp = displayNameFor(rawK);
-            if (!isAllowedMetric(canAct, disp)) continue;
+            const disp = displayNameFor(rawK, canAct, sub);
+            if (!isAllowedMetric(canAct, sub, disp)) continue;
             const v = Number(t[rawAct][sub][rawK] ?? 0);
             if (v > 0) {
               counts[canAct] ||= {};
@@ -564,8 +649,8 @@ export default function PerformanceReview() {
             const rk = lc(rawK);
             if (rk === 'trucks' || rk === 'weight' || rk === 'distance') continue;
           }
-          const disp = displayNameFor(rawK);
-          if (!isAllowedMetric(canAct, disp)) continue;
+          const disp = displayNameFor(rawK, canAct, sub);
+          if (!isAllowedMetric(canAct, sub, disp)) continue;
           const v = Number(rollupTable[rawAct][sub][rawK] ?? 0);
 
           out[canAct] ||= {};
@@ -592,8 +677,8 @@ export default function PerformanceReview() {
             const rk = lc(rawK);
             if (rk === 'trucks' || rk === 'weight' || rk === 'distance') continue;
           }
-          const disp = displayNameFor(rawK);
-          if (!isAllowedMetric(canAct, disp)) continue;
+          const disp = displayNameFor(rawK, canAct, sub);
+          if (!isAllowedMetric(canAct, sub, disp)) continue;
           const v = Number(rollupGraphOptions[rawAct][sub][rawK] ?? 0);
 
           out[canAct] ||= {};
@@ -620,7 +705,12 @@ export default function PerformanceReview() {
 
   const metricOptionsGraph = useMemo(() => {
     if (!graphActivity || !graphSub) return [];
-    return Object.keys(filteredRollupGraph[graphActivity]?.[graphSub] || {});
+    const rawKeys = Object.keys(filteredRollupGraph[graphActivity]?.[graphSub] || {});
+    const disp = rawKeys
+      .map((k) => displayNameFor(k, graphActivity, graphSub))
+      .filter((d) => !!d && isAllowedMetric(graphActivity, graphSub, d));
+    // unique
+    return Array.from(new Set(disp));
   }, [filteredRollupGraph, graphActivity, graphSub]);
 
   // -------------------- ✅ Your rule: changing Activity blanks everything else --------------------
@@ -674,9 +764,9 @@ export default function PerformanceReview() {
             const rk = lc(rawK);
             if (rk === 'trucks' || rk === 'weight' || rk === 'distance') continue;
           }
-          const disp = displayNameFor(rawK);
+          const disp = displayNameFor(rawK, canAct, sub);
           if (disp !== graphMetric) continue;
-          if (!isAllowedMetric(canAct, disp)) continue;
+          if (!isAllowedMetric(canAct, sub, disp)) continue;
 
           const v = Number(t[rawAct][sub][rawK] ?? 0);
           if (!v) continue;
@@ -888,6 +978,8 @@ export default function PerformanceReview() {
     if (!graphActivity || !graphSub || !graphMetric) return [];
     const acc: Record<string, number> = {};
 
+    const isDerivedLoading = lc(graphActivity) === 'loading' && (graphMetric === 'Stope buckets' || graphMetric === 'Dev buckets');
+
     for (const r of rows) {
       const date = r.date;
       if (date < fromGraph || date > toGraph) continue;
@@ -905,9 +997,9 @@ export default function PerformanceReview() {
               const rk = lc(rawK);
               if (rk === 'trucks' || rk === 'weight' || rk === 'distance') continue;
             }
-            const disp = displayNameFor(rawK);
+            const disp = displayNameFor(rawK, canAct, sub);
             if (disp !== graphMetric) continue;
-            if (!isAllowedMetric(canAct, disp)) continue;
+            if (!isAllowedMetric(canAct, sub, disp)) continue;
 
             const v = Number(t[rawAct][sub][rawK] ?? 0);
             if (!v) continue;

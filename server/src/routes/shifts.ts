@@ -1,8 +1,62 @@
 import { Router } from 'express';
 import { pool } from '../lib/pg.js';
+import { notify } from '../lib/notify.js';
 import { authMiddleware } from '../lib/auth.js';
 
 const router = Router();
+
+// Limited set of metrics used for milestone notifications (must match reports.ts)
+const MILESTONE_METRICS = [
+  'GS Drillm',
+  'Face Drillm',
+  'Headings supported',
+  'Headings bored',
+  'Truck Loads',
+  "TKM's",
+  'Tonnes Hauled',
+  'Production drillm',
+  'Primary Production buckets',
+  'Primary Development buckets',
+  'Tonnes charged',
+  'Headings Fired',
+  'Tonnes Fired',
+  'Ore tonnes hoisted',
+  'Waste tonnes hoisted',
+  'Total tonnes hoisted',
+] as const;
+
+function n(v: any) {
+  const x = typeof v === 'string' ? parseFloat(v) : Number(v);
+  return Number.isFinite(x) ? x : 0;
+}
+
+function asObj(v: any) {
+  if (!v) return {};
+  if (typeof v === 'object') return v;
+  try {
+    return JSON.parse(v);
+  } catch {
+    return {};
+  }
+}
+
+function flattenTotalsToMetricMap(t: any): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!t || typeof t !== 'object') return out;
+  for (const act of Object.keys(t)) {
+    const actObj = t[act];
+    if (!actObj || typeof actObj !== 'object') continue;
+    for (const sub of Object.keys(actObj)) {
+      const subObj = actObj[sub];
+      if (!subObj || typeof subObj !== 'object') continue;
+      for (const k of Object.keys(subObj)) {
+        out[k] = (out[k] || 0) + n(subObj[k]);
+      }
+    }
+  }
+  return out;
+}
+
 
 /**
  * Authoritative equipment → activity mapping
@@ -205,63 +259,117 @@ router.post('/finalize', authMiddleware, async (req: any, res: any) => {
   if (!isYmd(date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
   if (!Array.isArray(activities)) return res.status(400).json({ error: 'activities must be an array' });
 
+  // Normalise activity payloads to the canonical shape we persist in Postgres.
+  function normaliseItem(it: any) {
+    const rawP = it?.payload ?? it ?? {};
+    const activity = String(rawP.activity ?? rawP.payload?.activity ?? '').trim();
+    const sub = String(rawP.sub ?? rawP.sub_activity ?? rawP.payload?.sub ?? '').trim() || '(No Sub Activity)';
+
+    let values: any = rawP.values ?? rawP.payload?.values ?? rawP.payload_json?.values;
+    if (!values || typeof values !== 'object') {
+      const v: any = {};
+      for (const [k, v0] of Object.entries(rawP)) {
+        if (k === 'activity' || k === 'sub' || k === 'sub_activity' || k === 'values' || k === 'payload') continue;
+        v[k] = v0 as any;
+      }
+      values = v;
+    }
+
+    // Ensure important meta fields are kept (forms rely on these).
+    for (const k of ['Source', 'Location', 'From', 'To', 'Material', 'Equipment']) {
+      if (rawP?.[k] != null && values?.[k] == null) values[k] = rawP[k];
+    }
+
+    return { activity, sub, values };
+  }
+
   try {
     const valErr = await validateActivities(user_id, activities);
     if (valErr) return res.status(400).json({ error: valErr });
+
+
+function buildMetaJson(items: any[]) {
+  const meta: any = {};
+  const add = (act: string, sub: string, key: string, val: any) => {
+    if (val == null) return;
+    const s = String(val).trim();
+    if (!s || s === '-') return;
+    if (!meta[act]) meta[act] = {};
+    if (!meta[act][sub]) meta[act][sub] = {};
+    if (!meta[act][sub][key]) meta[act][sub][key] = [];
+    if (!meta[act][sub][key].includes(s)) meta[act][sub][key].push(s);
+  };
+
+  for (const it of items || []) {
+    const p = normaliseItem(it);
+    if (!p?.activity) continue;
+    const act = p.activity;
+    const sub = p.sub || '(No Sub Activity)';
+    const v = p.values || {};
+    add(act, sub, 'Sources', v.Source ?? v.source);
+    add(act, sub, 'Locations', v.Location ?? v.location);
+    add(act, sub, 'From', v.From ?? v.from);
+    add(act, sub, 'To', v.To ?? v.to);
+    add(act, sub, 'Materials', v.Material ?? v.material);
+    add(act, sub, 'Equipment', v.Equipment ?? v.equipment ?? v.equipment_id);
+  }
+  return meta;
+}
+
+
+    const meta_json = buildMetaJson(activities);
+
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // ✅ get user's profile info for not-null constraints, filtering, and denormalized columns
+      // Denormalised user info for filtering + display
       const site = await getUserSite(client, user_id);
       const user_email = await getUserEmail(client, user_id);
       const user_name = await getUserName(client, user_id);
 
-      // Upsert shift row (INCLUDES site)
+      // Upsert the shift row and mark finalized
       const up = await client.query(
-        `INSERT INTO shifts (user_id, user_email, user_name, site, date, dn, totals_json, finalized_at)
-         VALUES ($1,$2,$3,$4,$5::date,$6,$7::jsonb,NOW())
+        `INSERT INTO shifts (user_id, site, date, dn, totals_json, meta_json, finalized_at, user_email, user_name)
+         VALUES ($1,$2,$3::date,$4,$5::jsonb,$6::jsonb,NOW(),$7,$8)
          ON CONFLICT (user_id, date, dn)
-         DO UPDATE SET
-           user_email = EXCLUDED.user_email,
-           user_name = EXCLUDED.user_name,
-           site = EXCLUDED.site,
-           totals_json = EXCLUDED.totals_json,
-           finalized_at = NOW()
+         DO UPDATE SET site=EXCLUDED.site,
+                       totals_json=EXCLUDED.totals_json,
+                       meta_json=EXCLUDED.meta_json,
+                       finalized_at=NOW(),
+                       user_email=EXCLUDED.user_email,
+                       user_name=EXCLUDED.user_name
          RETURNING id`,
-        [user_id, user_email, user_name, site, date, dn, JSON.stringify(totals || {})],
+        [user_id, site, date, dn, JSON.stringify(totals || {}), JSON.stringify(meta_json || {}), user_email, user_name],
       );
+      const shift_id = up.rows?.[0]?.id;
+      if (!shift_id) throw new Error('shift upsert failed');
 
-      const shift_id = up.rows[0].id;
-
-      // Replace activities for that shift
+      // Replace activities snapshot for this shift
       await client.query('DELETE FROM shift_activities WHERE shift_id=$1', [shift_id]);
 
-      for (const it of activities as any[]) {
-        const p = it?.payload || {};
-        const activity = String(p.activity || '');
-        const sub = String(p.sub || '');
+      for (const it of activities) {
+        const p = normaliseItem(it);
+        if (!p.activity) continue;
 
-        // ✅ store site so admin/site filtering is easy
         await client.query(
           `INSERT INTO shift_activities (shift_id, user_email, user_name, site, activity, sub_activity, payload_json)
            VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
-          [shift_id, user_email, user_name, site, activity, sub, JSON.stringify(p)],
+          [shift_id, user_email, user_name, site, p.activity, p.sub, JSON.stringify(p)],
         );
       }
 
-      // --- mirror finalized data into validation layer (default validated=0) ---
-
-      // Replace any prior validated rows for this user/date/dn (latest finalized snapshot wins)
+      // Mirror the finalized snapshot into validation layer (unvalidated by default).
+      // (validated_* tables are keyed by site/date/dn/user_email in this project.)
       await client.query(
         `DELETE FROM validated_shift_activities
-          WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
+         WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
         [site, date, dn, user_email],
       );
       await client.query(
         `DELETE FROM validated_shifts
-          WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
+         WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
         [site, date, dn, user_email],
       );
 
@@ -272,17 +380,74 @@ router.post('/finalize', authMiddleware, async (req: any, res: any) => {
       );
 
       for (const it of activities) {
-        const activity = String(it?.activity || '');
-        const sub = String(it?.sub_activity || '');
-        const p = it?.payload || {};
+        const p = normaliseItem(it);
+        if (!p.activity) continue;
+
         await client.query(
           `INSERT INTO validated_shift_activities (site, date, dn, user_email, user_name, activity, sub_activity, payload_json)
            VALUES ($1,$2::date,$3,$4,$5,$6,$7,$8::jsonb)`,
-          [site, date, dn, user_email, user_name, activity, sub, JSON.stringify(p)],
+          [site, date, dn, user_email, user_name, p.activity, p.sub, JSON.stringify(p)],
         );
       }
 
       await client.query('COMMIT');
+
+      // --- Notifications (best-effort; do not fail finalize) ---
+      try {
+        const actorId = Number(user_id);
+        const actorName = user_name || 'A crew mate';
+        const metricMap = flattenTotalsToMetricMap(totals || {});
+
+        // Find accepted connections
+        const cr = await pool.query(
+          `SELECT CASE WHEN requester_id=$1 THEN addressee_id ELSE requester_id END as other_id
+             FROM connections
+            WHERE (requester_id=$1 OR addressee_id=$1) AND status='accepted'`,
+          [actorId],
+        );
+        const others = (cr.rows || []).map((r: any) => Number(r.other_id)).filter((x: any) => Number.isFinite(x) && x > 0);
+
+        // Build list of exceeded milestones per other user, then notify (cap to avoid spam)
+        for (const otherId of others) {
+          // Compute recipient bests over last 365 days using totals_json only
+          const sr = await pool.query(
+            `SELECT date::text as date, totals_json
+               FROM shifts
+              WHERE user_id=$1 AND date >= (CURRENT_DATE - INTERVAL '365 days')`,
+            [otherId],
+          );
+
+          const best: Record<string, number> = {};
+          for (const m of MILESTONE_METRICS as any) best[m] = 0;
+          for (const row of sr.rows || []) {
+            const mm = flattenTotalsToMetricMap(asObj(row.totals_json));
+            for (const m of MILESTONE_METRICS as any) {
+              const v = n(mm[m] || 0);
+              if (v > best[m]) best[m] = v;
+            }
+          }
+
+          const exceeded: Array<{ metric: string; value: number; diff: number }> = [];
+          for (const m of MILESTONE_METRICS as any) {
+            const v = n(metricMap[m] || 0);
+            if (v > 0 && v > (best[m] || 0)) exceeded.push({ metric: m, value: v, diff: v - (best[m] || 0) });
+          }
+          exceeded.sort((a, b) => b.diff - a.diff);
+          const top = exceeded.slice(0, 4);
+          for (const ex of top) {
+            await notify(
+              otherId,
+              'milestone_broken',
+              'Milestone broken',
+              `${actorName} just beat your personal best for ${ex.metric}: ${ex.value.toFixed(1)} on ${date}.`,
+              { actor_id: actorId, actor_name: actorName, metric: ex.metric, value: ex.value, date },
+            );
+          }
+        }
+      } catch (e) {
+        console.warn('finalize notifications skipped', e);
+      }
+
       return res.json({ ok: true, shift_id });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => undefined);
@@ -296,5 +461,6 @@ router.post('/finalize', authMiddleware, async (req: any, res: any) => {
     return res.status(500).json({ error: 'db failed' });
   }
 });
+
 
 export default router;

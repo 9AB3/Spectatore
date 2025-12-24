@@ -195,112 +195,150 @@ export default function EquipmentLocations() {
       <Toast />
       <Header />
 
-      <div className="p-6 max-w-xl mx-auto card space-y-4">
-        <div>
-          <label className="block text-sm font-medium mb-1">Equipment</label>
-          <div className="grid grid-cols-3 gap-2">
-            <select className="input" value={type} onChange={(e) => setType(e.target.value)}>
-              {EQUIP_TYPES.map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </select>
-            <input
-              className="input col-span-2"
-              placeholder="Equipment ID (e.g. UJ01)"
-              value={equipId}
-              onChange={(e) => setEquipId(e.target.value.toUpperCase())}
-            />
-          </div>
-          <div className="text-xs text-slate-500 mt-1">
-            Activity: <strong>{activityForType(type)}</strong>
+      <div className="p-6 max-w-4xl mx-auto space-y-4">
+        <div className="card p-5">
+          <div className="text-lg font-semibold">Equipment &amp; Locations</div>
+          <div className="text-sm text-slate-600 mt-1">
+            Maintain your local equipment IDs and location list. These lists power drop-downs and validation tools.
           </div>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Location</label>
-          <div className="grid grid-cols-3 gap-2">
-            <select
-              className="input"
-              value={locationType}
-              onChange={(e) => setLocationType(e.target.value as any)}
-            >
-              <option value="Heading">Heading</option>
-              <option value="Stope">Stope</option>
-              <option value="Stockpile">Stockpile</option>
-            </select>
-            <input
-              className="input col-span-2"
-              placeholder="Enter alphanumeric location"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-            />
-          </div>
-        </div>
+        <div className="grid lg:grid-cols-2 gap-4">
+          {/* Forms */}
+          <div className="card p-5 space-y-4">
+            <div className="text-sm font-semibold text-slate-800">Add / Update</div>
 
-        {!online && (
-          <div className="text-red-600 text-sm">
-            Not online on SUBMIT — please ensure network connection
-          </div>
-        )}
+            <div className="rounded-xl border border-slate-200 p-4">
+              <div className="font-medium">Equipment</div>
+              <div className="text-xs text-slate-500 mt-1">
+                Activity mapping is automatic based on type.
+              </div>
 
-        <div className="flex gap-2">
-          <button className="btn btn-primary flex-1" onClick={submit}>
-            SUBMIT
-          </button>
-          <a className="btn btn-secondary flex-1 text-center" href="/Main">
-            BACK
-          </a>
-        </div>
-      </div>
+              <div className="grid grid-cols-3 gap-2 mt-3">
+                <select className="input" value={type} onChange={(e) => setType(e.target.value)}>
+                  {EQUIP_TYPES.map((t) => (
+                    <option key={t}>{t}</option>
+                  ))}
+                </select>
+                <input
+                  className="input col-span-2"
+                  placeholder="Equipment ID (e.g. UJ01)"
+                  value={equipId}
+                  onChange={(e) => setEquipId(e.target.value.toUpperCase())}
+                />
+              </div>
 
-      <div className="p-6 max-w-xl mx-auto card mt-4">
-        <h3 className="font-semibold mb-2">Your equipment and locations</h3>
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <div className="font-medium mb-1">Equipment</div>
-            <ul className="space-y-1">
-              {equipListSorted.map((e) => (
-                <li key={e.equipment_id} className="flex items-center justify-between">
-                  <span>
-                    {e.equipment_id}{' '}
-                    <span className="text-xs text-slate-500">
-                      ({e.type} → {activityForType(e.type)})
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    className="text-xs text-red-500 hover:text-red-700"
-                    onClick={() => deleteEquipment(e.equipment_id)}
-                  >
-                    ✕
-                  </button>
-                </li>
-              ))}
-              {equipListSorted.length === 0 && (
-                <div className="text-slate-500">No equipment yet</div>
-              )}
-            </ul>
+              <div className="text-xs text-slate-500 mt-2">
+                Activity: <strong>{activityForType(type)}</strong>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 p-4">
+              <div className="font-medium">Location</div>
+              <div className="grid grid-cols-3 gap-2 mt-3">
+                <select
+                  className="input"
+                  value={locationType}
+                  onChange={(e) => setLocationType(e.target.value as any)}
+                >
+                  <option value="Heading">Heading</option>
+                  <option value="Stope">Stope</option>
+                  <option value="Stockpile">Stockpile</option>
+                </select>
+                <input
+                  className="input col-span-2"
+                  placeholder="Enter alphanumeric location"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {!online && (
+              <div className="rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm p-3">
+                You are currently offline. Changes will be saved locally and synced when you&apos;re back online.
+              </div>
+            )}
+
+            <button className="btn btn-primary w-full" onClick={submit} type="button">
+              Save
+            </button>
           </div>
 
-          <div>
-            <div className="font-medium mb-1">Locations</div>
-            <ul className="space-y-1">
-              {locList.map((l) => (
-                <li key={l.id || l.name} className="flex items-center justify-between">
-                  <span>
-                    {l.name} <span className="text-xs text-slate-500">({l.type})</span>
-                  </span>
-                  <button
-                    type="button"
-                    className="text-xs text-red-500 hover:text-red-700"
-                    onClick={() => deleteLocation(l.name)}
-                  >
-                    ✕
-                  </button>
-                </li>
-              ))}
-              {locList.length === 0 && <div className="text-slate-500">No locations yet</div>}
-            </ul>
+          {/* Lists */}
+          <div className="card p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-semibold text-slate-800">Saved lists</div>
+                <div className="text-xs text-slate-500 mt-1">
+                  Tap ✕ to remove an item. Lists update immediately.
+                </div>
+              </div>
+              <div className="text-xs text-slate-500">
+                {equipListSorted.length} equipment • {locList.length} locations
+              </div>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-4 mt-4">
+              <div className="rounded-xl border border-slate-200 p-4">
+                <div className="font-medium mb-2">Equipment</div>
+                <ul className="space-y-1">
+                  {equipListSorted.map((e) => (
+                    <li
+                      key={`${e.type}-${e.equipment_id}`}
+                      className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-slate-50"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium">
+                          {e.equipment_id}{' '}
+                          <span className="text-xs font-normal text-slate-500">({e.type})</span>
+                        </div>
+                        <div className="text-xs text-slate-500 truncate">Activity: {activityForType(e.type)}</div>
+                      </div>
+                      <button
+                        className="w-9 h-9 rounded-full border flex items-center justify-center hover:bg-white"
+                        style={{ borderColor: 'rgba(148, 163, 184, 0.6)' }}
+                        onClick={() => deleteEquipment(e.equipment_id)}
+                        type="button"
+                        aria-label={`Delete ${e.equipment_id}`}
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                  {equipListSorted.length === 0 && <div className="text-slate-500 text-sm">No equipment yet</div>}
+                </ul>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 p-4">
+                <div className="font-medium mb-2">Locations</div>
+                <ul className="space-y-1">
+                  {locList.map((l) => (
+                    <li
+                      key={`${l.type}-${l.name}`}
+                      className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-slate-50"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium">
+                          {l.name}{' '}
+                          <span className="text-xs font-normal text-slate-500">({l.type})</span>
+                        </div>
+                      </div>
+                      <button
+                        className="w-9 h-9 rounded-full border flex items-center justify-center hover:bg-white"
+                        style={{ borderColor: 'rgba(148, 163, 184, 0.6)' }}
+                        onClick={() => deleteLocation(l.name)}
+                        type="button"
+                        aria-label={`Delete ${l.name}`}
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                  {locList.length === 0 && <div className="text-slate-500 text-sm">No locations yet</div>}
+                </ul>
+              </div>
+            </div>
           </div>
         </div>
       </div>

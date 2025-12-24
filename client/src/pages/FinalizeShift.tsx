@@ -281,6 +281,11 @@ export default function FinalizeShift() {
   }
 
   async function finalize() {
+    if (!navigator.onLine) {
+      setMsg('Offline - please connect to network and try again');
+      setConfirmOpen(false);
+      return;
+    }
     if (!shift?.date || !shift?.dn) {
       setMsg('No active shift to finalize');
       setConfirmOpen(false);

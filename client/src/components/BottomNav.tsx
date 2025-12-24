@@ -50,7 +50,12 @@ export default function BottomNav() {
   return (
     <nav
       className="fixed bottom-0 left-0 right-0 z-40 border-t"
-      style={{ background: 'var(--card)', borderColor: '#e9d9c3' }}
+      style={{
+        background: 'var(--card)',
+        borderColor: '#e9d9c3',
+        // Prevent the bar from floating above the bottom on phones with a home indicator.
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}
     >
       <div className="max-w-2xl mx-auto px-2 py-1 grid grid-cols-5 text-[var(--text)]">
         <Item to="/Main" label="Home" icon={<IconHome className="h-6 w-6" />} />
@@ -71,7 +76,7 @@ export default function BottomNav() {
           icon={<img src={crewIcon} className="h-6 w-6 filter brightness-0" alt="Crew" />}
         />
         <Item
-          to="/PerformanceReview"
+          to="/YouVsYou"
           label="You"
           icon={<img src={youIcon} className="h-6 w-6 filter brightness-0" alt="You" />}
         />

@@ -70,6 +70,19 @@ function IconCheck(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
+function IconSeed(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
+      <path d="M12 3v6" />
+      <path d="M9 6h6" />
+      <path d="M4 13h16" />
+      <path d="M6 21h12" />
+      <path d="M6 13v8" />
+      <path d="M18 13v8" />
+    </svg>
+  );
+}
+
 function IconTool(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
@@ -78,8 +91,11 @@ function IconTool(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
+const IS_DEV = import.meta.env.MODE !== 'production';
+
 export default function SiteAdminBottomNav() {
   const [superAdmin, setSuperAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -93,16 +109,37 @@ export default function SiteAdminBottomNav() {
     })();
   }, []);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const db = await getDB();
+        const u: any = await db.get('session', 'user');
+        const sa: any = await db.get('session', 'site_admin');
+        // Treat any site_admin session as admin; also honor user.is_admin from normal login.
+        setIsAdmin(!!u?.is_admin || !!u?.isAdmin || !!sa);
+      } catch {
+        setIsAdmin(false);
+      }
+    })();
+  }, []);
+
+
   return (
     <nav
       className="fixed bottom-0 left-0 right-0 z-40 border-t"
-      style={{ background: 'var(--card)', borderColor: '#e9d9c3' }}
+      style={{
+        background: 'var(--card)',
+        borderColor: '#e9d9c3',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}
     >
       <div
-        className={cx(
-          'max-w-2xl mx-auto px-2 py-1 grid text-[var(--text)]',
-          superAdmin ? 'grid-cols-5' : 'grid-cols-4',
-        )}
+        className={cx('max-w-2xl mx-auto px-2 py-1 grid text-[var(--text)]')}
+        style={{
+          gridTemplateColumns: `repeat(${
+            4 + (superAdmin ? 1 : 0) + (IS_DEV && isAdmin ? 1 : 0)
+          }, minmax(0, 1fr))`,
+        }}
       >
         <Item to="/SiteAdmin" label="Home" icon={<IconHome className="h-6 w-6" />} />
         {superAdmin && (
@@ -110,6 +147,9 @@ export default function SiteAdminBottomNav() {
         )}
         <Item to="/SiteAdmin/SiteAdmins" label={'Site\nAdmins'} icon={<IconUsers className="h-6 w-6" />} />
         <Item to="/SiteAdmin/Validate" label="Validate" icon={<IconCheck className="h-6 w-6" />} />
+        {IS_DEV && isAdmin && (
+          <Item to="/SiteAdmin/Seed" label="Seed" icon={<IconSeed className="h-6 w-6" />} />
+        )}
         <Item
           to="/SiteAdmin/Equipment&Locations"
           label={'Equipment\nLocations'}

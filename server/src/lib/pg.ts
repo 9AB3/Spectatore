@@ -1,13 +1,23 @@
 import pg from 'pg';
 const { Pool } = pg;
 
-console.log('[pg] DATABASE_URL =', process.env.DATABASE_URL);
+/**
+ * Local-friendly behaviour:
+ * - In production (Render), DATABASE_URL must be set.
+ * - For local development, default to a common local Postgres URL.
+ */
+const DEFAULT_LOCAL_URL = 'postgres://postgres:postgres@localhost:5432/spectatore';
+const url = (process.env.DATABASE_URL || '').trim() || DEFAULT_LOCAL_URL;
 
-
-const url = process.env.DATABASE_URL || '';
-if (!url) {
-  // Fail fast with a helpful message
-  throw new Error('DATABASE_URL is not set');
+// Log only the hostname to avoid leaking credentials into terminal logs.
+try {
+  const u = new URL(url);
+  console.log('[pg] host =', u.hostname, 'db =', (u.pathname || '').replace('/', '') || '(none)');
+  if (!process.env.DATABASE_URL) {
+    console.log('[pg] DATABASE_URL not set - using default local URL');
+  }
+} catch {
+  console.log('[pg] using DATABASE_URL');
 }
 
 // Decide SSL based on hostname. Render Postgres requires SSL; local usually does not.

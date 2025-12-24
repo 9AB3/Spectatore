@@ -21,6 +21,15 @@
   --bad: #dc2626;
 }
 
+html,
+body {
+  height: 100%;
+}
+
+#root {
+  min-height: 100%;
+}
+
 body {
   background: var(--bg);
   color: var(--text);

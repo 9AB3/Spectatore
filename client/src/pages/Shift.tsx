@@ -22,6 +22,15 @@ export default function Shift() {
     })();
   }, []);
 
+
+  function handleFinalize() {
+    if (!navigator.onLine) {
+      setMsg('Offline - please connect to network and try again');
+      return;
+    }
+    nav('/FinalizeShift');
+  }
+
   async function cancelShift() {
     // UI modal confirmation (matches the Start Shift modal pattern)
     setAbortOpen(true);
@@ -61,19 +70,31 @@ export default function Shift() {
     <div>
       <Toast />
       <Header />
-      <div className="p-6 grid gap-4 max-w-xl mx-auto">
-        <button className="btn btn-primary" onClick={() => nav('/Activity')}>
-          NEW ACTIVITY
-        </button>
-        <button className="btn btn-primary" onClick={() => nav('/ViewActivities')}>
-          VIEW ACTIVITY
-        </button>
-        <button className="btn btn-primary" onClick={() => nav('/FinalizeShift')}>
-          FINALIZE SHIFT
-        </button>
-        <button className="btn btn-secondary" onClick={cancelShift}>
-          CANCEL SHIFT
-        </button>
+      <div className="p-4 max-w-2xl mx-auto space-y-4">
+        <div className="card">
+          <div className="text-xs opacity-70">Shift</div>
+          <div className="text-2xl font-bold">Log activities</div>
+          <div className="text-sm opacity-70 mt-1">Create, review, and finalize your shift data.</div>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-4">
+          <button className="btn btn-primary" onClick={() => nav('/Activity')} style={{ paddingTop: 18, paddingBottom: 18 }}>
+            NEW ACTIVITY
+            <div className="text-xs opacity-70 mt-1">Add a task for this shift</div>
+          </button>
+          <button className="btn btn-primary" onClick={() => nav('/ViewActivities')} style={{ paddingTop: 18, paddingBottom: 18 }}>
+            VIEW ACTIVITY
+            <div className="text-xs opacity-70 mt-1">Review and edit entries</div>
+          </button>
+          <button className="btn btn-primary" onClick={handleFinalize} style={{ paddingTop: 18, paddingBottom: 18 }}>
+            FINALIZE SHIFT
+            <div className="text-xs opacity-70 mt-1">Save to backend &amp; lock in totals</div>
+          </button>
+          <button className="btn btn-secondary" onClick={cancelShift} style={{ paddingTop: 18, paddingBottom: 18 }}>
+            CANCEL SHIFT
+            <div className="text-xs opacity-70 mt-1">Discard local data</div>
+          </button>
+        </div>
       </div>
 
       {abortOpen && (

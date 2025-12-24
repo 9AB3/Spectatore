@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS shifts (
   date DATE NOT NULL,
   dn TEXT NOT NULL,
   totals_json JSONB DEFAULT '{}'::jsonb,
+  meta_json JSONB DEFAULT '{}'::jsonb,
   finalized_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE (user_id, date, dn)
@@ -193,3 +194,31 @@ CREATE TABLE IF NOT EXISTS user_feedback_votes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_feedback_votes_feedback ON user_feedback_votes(feedback_id);
+
+-- NOTIFICATIONS
+CREATE TABLE IF NOT EXISTS notifications (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  payload_json JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  read_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id) WHERE read_at IS NULL;
+
+
+-- PUSH SUBSCRIPTIONS (Web Push)
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id);

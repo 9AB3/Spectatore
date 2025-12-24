@@ -1,8 +1,10 @@
 import Header from '../components/Header';
 import { useEffect, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { getDB } from '../lib/idb';
 
 export default function ViewActivities() {
+  const nav = useNavigate();
   async function handleDelete(id: number) {
     const db = await getDB();
     await db.delete('activities', id);
@@ -195,9 +197,7 @@ export default function ViewActivities() {
           </div>
 
           <div className="mt-4 flex gap-2">
-            <a href="/Shift" className="btn flex-1 text-center">
-              BACK
-            </a>
+            <button className="btn flex-1 text-center" onClick={() => nav('/Shift')}>BACK</button>
           </div>
         </div>
       </div>

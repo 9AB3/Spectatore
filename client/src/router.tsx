@@ -12,6 +12,8 @@ import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import EquipmentLocations from './pages/EquipmentLocations';
 import PerformanceReview from './pages/PerformanceReview';
+import YouVsYou from './pages/YouVsYou';
+import YouVsNetwork from './pages/YouVsNetwork';
 import ClearShifts from './pages/ClearShifts';
 import ClearData from './pages/ClearData';
 import AddConnection from './pages/AddConnection';
@@ -19,6 +21,7 @@ import ViewConnections from './pages/ViewConnections';
 import AdminUsers from './pages/AdminUsers';
 import Settings from './pages/Settings';
 import Feedback from './pages/Feedback';
+import Notifications from './pages/Notifications';
 import SiteAdminLogin from './pages/SiteAdminLogin';
 import SiteAdmin from './pages/SiteAdmin';
 import SiteAdminValidate from './pages/SiteAdminValidate';
@@ -30,6 +33,7 @@ import SiteAdminLayout from './components/SiteAdminLayout';
 import SiteAdminSites from './pages/SiteAdminSites';
 import SiteAdminSiteAdmins from './pages/SiteAdminSiteAdmins';
 import SiteAdminFeedbackApproval from './pages/SiteAdminFeedbackApproval';
+import SiteAdminSeed from './pages/SiteAdminSeed';
 import { useEffect, useState } from 'react';
 import { getDB } from './lib/idb';
 import ProtectedLayout from './components/ProtectedLayout';
@@ -89,6 +93,7 @@ export default function App() {
         <Route path="Sites" element={<SiteAdminSites />} />
         <Route path="SiteAdmins" element={<SiteAdminSiteAdmins />} />
         <Route path="ApproveFeedback" element={<SiteAdminFeedbackApproval />} />
+        <Route path="Seed" element={<SiteAdminSeed />} />
         <Route path="Edit" element={<div className="p-6">Coming soon</div>} />
         <Route path="Export" element={<div className="p-6">Coming soon</div>} />
 
@@ -118,8 +123,11 @@ export default function App() {
         <Route path="/Connections" element={<Connections />} />
         <Route path="/Equipment&Locations" element={<EquipmentLocations />} />
         <Route path="/PerformanceReview" element={<PerformanceReview />} />
+        <Route path="/YouVsYou" element={<YouVsYou />} />
+        <Route path="/YouVsNetwork" element={<YouVsNetwork />} />
         <Route path="/Settings" element={<Settings />} />
         <Route path="/Feedback" element={<Feedback />} />
+        <Route path="/Notifications" element={<Notifications />} />
 
         <Route path="/ClearShifts" element={<ClearShifts />} />
         <Route path="/AddConnection" element={<AddConnection />} />

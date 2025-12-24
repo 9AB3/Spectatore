@@ -2,6 +2,7 @@ import Header from '../components/Header';
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import useToast from '../hooks/useToast';
+import { disablePush, enablePush, getExistingSubscription, isPushSupported } from '../lib/push';
 import { getDB } from '../lib/idb';
 
 type Me = { email: string; site: string | null };
@@ -10,6 +11,11 @@ export default function Settings() {
   const { Toast, setMsg } = useToast();
   const [loading, setLoading] = useState(true);
   const [me, setMe] = useState<Me | null>(null);
+
+  // push notifications
+  const [pushSupported, setPushSupported] = useState<boolean>(false);
+  const [pushEnabled, setPushEnabled] = useState<boolean>(false);
+  const [pushBusy, setPushBusy] = useState<boolean>(false);
 
   // form state
   const [email, setEmail] = useState('');
@@ -38,6 +44,22 @@ export default function Settings() {
       cancelled = true;
     };
   }, []);
+
+
+useEffect(() => {
+  (async () => {
+    try {
+      const sup = await isPushSupported();
+      setPushSupported(!!sup);
+      if (!sup) return;
+      const sub = await getExistingSubscription();
+      setPushEnabled(!!sub);
+    } catch {
+      setPushSupported(false);
+      setPushEnabled(false);
+    }
+  })();
+}, []);
 
   async function saveProfile(e: React.FormEvent) {
     e.preventDefault();
@@ -95,6 +117,60 @@ export default function Settings() {
       <Header />
       <div className="p-6 max-w-xl mx-auto">
         <h2 className="text-xl font-semibold mb-4">Settings</h2>
+
+        <div className="card" style={{ marginBottom: 12 }}>
+          <h3 style={{ margin: 0 }}>Push notifications</h3>
+          <p style={{ marginTop: 6, opacity: 0.85 }}>
+            Get a phone/desktop notification for crew requests and milestones.
+          </p>
+
+          {!pushSupported ? (
+            <p style={{ margin: 0, color: '#999' }}>Not supported on this browser/device.</p>
+          ) : (
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ opacity: 0.9 }}>
+                Status: <b>{pushEnabled ? 'Enabled' : 'Off'}</b>
+              </span>
+              <span style={{ opacity: 0.65, fontSize: 12 }}>
+                (You may need to install the PWA for reliable push.)
+              </span>
+
+              {!pushEnabled ? (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={pushBusy}
+                  onClick={async () => {
+                    setPushBusy(true);
+                    const r = await enablePush();
+                    if (!r.ok) setMsg(r.error);
+                    setPushBusy(false);
+                    const sub = await getExistingSubscription();
+                    setPushEnabled(!!sub);
+                  }}
+                >
+                  Enable
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={pushBusy}
+                  onClick={async () => {
+                    setPushBusy(true);
+                    const r = await disablePush();
+                    if (!r.ok) setMsg(r.error);
+                    setPushBusy(false);
+                    const sub = await getExistingSubscription();
+                    setPushEnabled(!!sub);
+                  }}
+                >
+                  Disable
+                </button>
+              )}
+            </div>
+          )}
+        </div>
 
         {loading ? (
           <div className="opacity-70">Loading...</div>
@@ -168,6 +244,7 @@ export default function Settings() {
             )}
           </form>
         )}
+
       </div>
     </div>
   );

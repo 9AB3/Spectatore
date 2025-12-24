@@ -8,7 +8,13 @@ import SiteAdminBottomNav from './SiteAdminBottomNav';
  */
 export default function SiteAdminLayout() {
   return (
-    <div className="min-h-screen pb-20">
+    <div
+      className="w-full"
+      style={{
+        minHeight: '100dvh',
+        paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))',
+      }}
+    >
       <Outlet />
       <SiteAdminBottomNav />
     </div>

@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import { pool } from '../lib/pg.js';
+import { notify } from '../lib/notify.js';
+import { authMiddleware } from '../lib/auth.js';
 
 const router = Router();
+
 
 // -------------------- Equipment --------------------
 router.post('/equipment', async (req, res) => {
@@ -177,16 +180,27 @@ router.post('/activities', async (req, res) => {
 });
 
 // -------------------- Connections (simple invite workflow) --------------------
-router.post('/connections/request', async (req, res) => {
+router.post('/connections/request', authMiddleware, async (req: any, res) => {
   try {
     const { requester_id, addressee_id } = req.body || {};
-    const rid = Number(requester_id);
+    const rid = Number(req.user_id || requester_id);
     const aid = Number(addressee_id);
     if (!rid || !aid) return res.status(400).json({ error: 'missing fields' });
     const r = await pool.query(
       'INSERT INTO connections (requester_id, addressee_id, status) VALUES ($1,$2,$3) RETURNING id',
       [rid, aid, 'pending'],
     );
+
+    // Create a notification for the addressee
+    try {
+      const u = await pool.query('SELECT name, email FROM users WHERE id=$1', [rid]);
+      const nm = String(u.rows?.[0]?.name || 'A crew member');
+      await notify(aid, 'connection_request', 'New crew request', `${nm} sent you a crew request.`, {
+        requester_id: rid,
+        requester_name: nm,
+      });
+    } catch {}
+
     return res.json({ id: r.rows[0].id });
   } catch (err) {
     console.error('connections request failed', err);
@@ -194,17 +208,38 @@ router.post('/connections/request', async (req, res) => {
   }
 });
 
-router.post('/connections/:id/accept', async (req, res) => {
+router.post('/connections/:id/accept', authMiddleware, async (req: any, res) => {
   try {
     const id = Number(req.params.id);
     await pool.query('UPDATE connections SET status=$1 WHERE id=$2', ['accepted', id]);
+
+    // Notify both parties
+    try {
+      const r = await pool.query('SELECT requester_id, addressee_id FROM connections WHERE id=$1', [id]);
+      const rid = Number(r.rows?.[0]?.requester_id || 0);
+      const aid = Number(r.rows?.[0]?.addressee_id || 0);
+      if (rid && aid) {
+        const a = await pool.query('SELECT name FROM users WHERE id=$1', [aid]);
+        const b = await pool.query('SELECT name FROM users WHERE id=$1', [rid]);
+        const an = String(a.rows?.[0]?.name || 'A crew mate');
+        const bn = String(b.rows?.[0]?.name || 'A crew mate');
+        await notify(rid, 'connection_accepted', 'Crew request accepted', `${an} accepted your crew request.`, {
+          other_id: aid,
+          other_name: an,
+        });
+        await notify(aid, 'connection_accepted', 'Crew request accepted', `You and ${bn} are now crew mates.`, {
+          other_id: rid,
+          other_name: bn,
+        });
+      }
+    } catch {}
     return res.json({ ok: true });
   } catch (err) {
     return res.status(400).json({ error: 'update failed' });
   }
 });
 
-router.post('/connections/:id/decline', async (req, res) => {
+router.post('/connections/:id/decline', authMiddleware, async (req: any, res) => {
   try {
     const id = Number(req.params.id);
     await pool.query('UPDATE connections SET status=$1 WHERE id=$2', ['declined', id]);
@@ -214,7 +249,7 @@ router.post('/connections/:id/decline', async (req, res) => {
   }
 });
 
-router.post('/connections/:id/remove', async (req, res) => {
+router.post('/connections/:id/remove', authMiddleware, async (req: any, res) => {
   try {
     const id = Number(req.params.id);
     await pool.query('UPDATE connections SET status=$1 WHERE id=$2', ['declined', id]);
@@ -224,9 +259,9 @@ router.post('/connections/:id/remove', async (req, res) => {
   }
 });
 
-router.get('/connections/incoming', async (req, res) => {
+router.get('/connections/incoming', authMiddleware, async (req: any, res) => {
   try {
-    const uid = Number(req.query.user_id);
+    const uid = Number(req.user_id || req.query.user_id);
     const r = await pool.query(
       `SELECT c.id, c.requester_id, u.name, u.email, c.status, c.created_at
          FROM connections c
@@ -241,9 +276,9 @@ router.get('/connections/incoming', async (req, res) => {
   }
 });
 
-router.get('/connections/outgoing', async (req, res) => {
+router.get('/connections/outgoing', authMiddleware, async (req: any, res) => {
   try {
-    const uid = Number(req.query.user_id);
+    const uid = Number(req.user_id || req.query.user_id);
     const r = await pool.query(
       `SELECT c.id, c.addressee_id, u.name, u.email, c.status, c.created_at
          FROM connections c
@@ -258,9 +293,9 @@ router.get('/connections/outgoing', async (req, res) => {
   }
 });
 
-router.get('/connections/accepted', async (req, res) => {
+router.get('/connections/accepted', authMiddleware, async (req: any, res) => {
   try {
-    const uid = Number(req.query.user_id);
+    const uid = Number(req.user_id || req.query.user_id);
     const r = await pool.query(
       `SELECT c.id,
               CASE WHEN c.requester_id=$1 THEN c.addressee_id ELSE c.requester_id END as other_id,

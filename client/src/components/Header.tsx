@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { getDB } from '../lib/idb';
+import { api } from '../lib/api';
 
 function SyncIndicator() {
   const [online, setOnline] = useState(navigator.onLine);
@@ -71,7 +72,9 @@ return (
 
 export default function Header({ showSync = true }: { showSync?: boolean }) {
   const [shift, setShift] = useState<{ date?: string; dn?: 'DS' | 'NS' }>({});
+  const [unread, setUnread] = useState<number>(0);
   const loc = useLocation();
+  const nav = useNavigate();
   useEffect(() => {
     let alive = true;
     const load = async () => {
@@ -96,6 +99,30 @@ export default function Header({ showSync = true }: { showSync?: boolean }) {
     };
   }, [loc.pathname]);
 
+  // Poll unread notification count while authed
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const r = await api('/api/notifications/unread-count');
+        if (alive) setUnread(Number(r?.count || 0));
+      } catch {
+        if (alive) setUnread(0);
+      }
+    };
+    tick();
+    const t = setInterval(tick, 15000);
+    const on = () => tick();
+    window.addEventListener('focus', on);
+    window.addEventListener('spectatore:notifications', on as any);
+    return () => {
+      alive = false;
+      clearInterval(t);
+      window.removeEventListener('focus', on);
+      window.removeEventListener('spectatore:notifications', on as any);
+    };
+  }, []);
+
   function fmt(dateIso?: string) {
     if (!dateIso) return '';
     const d = new Date(dateIso + 'T00:00:00');
@@ -112,8 +139,35 @@ export default function Header({ showSync = true }: { showSync?: boolean }) {
 
   return (
     <div className="header-bar">
-      <div className="logo-title text-xl">Spectatore</div>
-      <div className="flex items-center gap-3 text-sm text-slate-700">
+      <div className="flex items-center gap-3 min-w-0">
+        <img src="/logo.png" alt="Spectatore" className="w-10 h-10 object-contain flex-shrink-0" />
+        <div className="min-w-0">
+          <div className="logo-title text-xl truncate">Spectatore</div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 text-sm text-slate-700 flex-shrink-0">
+        <button
+          type="button"
+          className="relative w-10 h-10 rounded-full border flex items-center justify-center hover:bg-slate-50"
+          style={{ borderColor: '#e9d9c3' }}
+          onClick={() => nav('/Notifications')}
+          aria-label="Notifications"
+          title="Notifications"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+            <path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 7h18s-3 0-3-7" />
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
+          {unread > 0 ? (
+            <span
+              className="absolute -top-1 -right-1 text-[10px] min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center"
+              style={{ background: '#b00020', color: 'white' }}
+            >
+              {unread > 99 ? '99+' : unread}
+            </span>
+          ) : null}
+        </button>
         {!hideDate && shift?.date && shift?.dn && (
           <div>
             {fmt(shift.date)} • {shift.dn}

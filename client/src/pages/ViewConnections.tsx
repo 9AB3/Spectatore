@@ -2,7 +2,6 @@ import Header from '../components/Header';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { getDB } from '../lib/idb';
 import useToast from '../hooks/useToast';
 
 type TabKey = 'accepted' | 'incoming' | 'outgoing';
@@ -21,13 +20,10 @@ export default function ViewConnections() {
   const [removeName, setRemoveName] = useState<string>('');
 
   async function reloadConnections() {
-    const db = await getDB();
-    const session = await db.get('session', 'auth');
-    const uid = session?.user_id || 0;
-
-    const inc = await api(`/api/connections/incoming?user_id=${uid}`);
-    const out = await api(`/api/connections/outgoing?user_id=${uid}`);
-    const acc = await api(`/api/connections/accepted?user_id=${uid}`);
+    // Server infers the authed user (no query param required)
+    const inc = await api(`/api/connections/incoming`);
+    const out = await api(`/api/connections/outgoing`);
+    const acc = await api(`/api/connections/accepted`);
 
     setIncoming(inc.items || []);
     setOutgoing(out.items || []);

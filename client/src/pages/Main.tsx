@@ -117,58 +117,62 @@ export default function Main() {
     <div>
       <Toast />
       <Header />
-      <div className="p-6 grid gap-4 max-w-xl mx-auto">
-        <button
-          className="btn"
-          onClick={() => setOpen(true)}
-          style={{ paddingTop: 22, paddingBottom: 22 }}
-        >
-          <div className="flex flex-col items-center justify-center gap-2">
-            <span>START SHIFT</span>
-            <img
-              src={portalIcon}
-              alt="Portal"
-              className="h-24 w-24 button-icon"
-            />
-          </div>
-        </button>
-        <button
-          className="btn"
-          onClick={tagOut}
-          style={{ paddingTop: 22, paddingBottom: 22 }}
-        >
-          <div className="flex flex-col items-center justify-center gap-2">
-            <span>TAG OUT</span>
-            <img
-              src={tagoutIcon}
-              alt="Tag"
-              className="h-24 w-24 button-icon"
-            />
-          </div>
-        </button>
+      <div className="p-4 max-w-2xl mx-auto space-y-4">
+        <div className="card">
+          <div className="text-xs opacity-70">Home</div>
+          <div className="text-2xl font-bold">Shift Portal</div>
+          <div className="text-sm opacity-70 mt-1">Start a new shift, tag out, or send feedback.</div>
+        </div>
 
-        {/* Share feedback (separate card below TAG OUT) */}
-        <button
-          type="button"
-          onClick={() => nav('/Feedback')}
-          className="btn feedback-card"
-          style={{ paddingTop: 14, paddingBottom: 14 }}
-        >
-          <div className="flex items-center justify-center gap-2">
-            <FeedbackIcon className="h-5 w-5" />
-            <span>Share your feedback</span>
-          </div>
-        </button>
-
-        {isAdmin && (
+        <div className="grid md:grid-cols-2 gap-4">
           <button
-            type="button"
-            onClick={() => nav('/AdminUsers')}
-            className="text-sm text-slate-600 hover:underline mt-1"
+            className="btn"
+            onClick={() => setOpen(true)}
+            style={{ paddingTop: 20, paddingBottom: 20 }}
           >
-            Admin – Users
+            <div className="flex flex-col items-center justify-center gap-2">
+              <span className="font-semibold">START SHIFT</span>
+              <img src={portalIcon} alt="Portal" className="h-20 w-20 button-icon" />
+              <span className="text-xs opacity-70">Choose date &amp; DS/NS</span>
+            </div>
           </button>
-        )}
+          <button
+            className="btn"
+            onClick={tagOut}
+            style={{ paddingTop: 20, paddingBottom: 20 }}
+          >
+            <div className="flex flex-col items-center justify-center gap-2">
+              <span className="font-semibold">TAG OUT</span>
+              <img src={tagoutIcon} alt="Tag" className="h-20 w-20 button-icon" />
+              <span className="text-xs opacity-70">Sign out of the app</span>
+            </div>
+          </button>
+        </div>
+
+        <div className="card flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <FeedbackIcon className="h-5 w-5" />
+            <div>
+              <div className="font-semibold">Feedback</div>
+              <div className="text-xs opacity-70">Report bugs or suggest improvements.</div>
+            </div>
+          </div>
+          <button type="button" onClick={() => nav('/Feedback')} className="btn">
+            Open
+          </button>
+        </div>
+
+        {isAdmin ? (
+          <div className="card flex items-center justify-between gap-3">
+            <div>
+              <div className="font-semibold">Admin</div>
+              <div className="text-xs opacity-70">Manage users and run seed tools.</div>
+            </div>
+            <button type="button" onClick={() => nav('/AdminUsers')} className="btn">
+              Users
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {open && (

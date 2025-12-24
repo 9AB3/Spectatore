@@ -8,7 +8,16 @@ import BottomNav from './BottomNav';
  */
 export default function ProtectedLayout() {
   return (
-    <div className="min-h-screen pb-20">
+    // Mobile browsers (especially iOS Safari) dynamically resize the visual viewport as the URL bar
+    // hides/shows while scrolling. Using dvh/svh + safe-area padding helps keep the bottom nav
+    // visually pinned to the bottom of the screen.
+    <div
+      className="w-full"
+      style={{
+        minHeight: '100dvh',
+        paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))',
+      }}
+    >
       <Outlet />
       <BottomNav />
     </div>

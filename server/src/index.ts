@@ -17,11 +17,23 @@ import reportsRoutes from './routes/reports.js';
 import adminRoutes from './routes/admin.js';
 import siteAdminRoutes from './routes/siteAdmin.js';
 import feedbackRoutes from './routes/feedback.js';
+import notificationsRoutes from './routes/notifications.js';
+import pushRoutes from './routes/push.js';
 
 const isDev = process.env.NODE_ENV !== 'production';
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
 
 const app = express();
+
+async function ensureDbColumns() {
+  try {
+    await pool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS meta_json JSONB DEFAULT '{}'::jsonb`);
+  } catch (e:any) {
+    console.warn('[db] ensure columns failed:', e?.message || e);
+  }
+}
+ensureDbColumns();
+
 
 app.use(express.json({ limit: '5mb' }));
 
@@ -65,6 +77,8 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/site-admin', siteAdminRoutes);
 app.use('/api/feedback', feedbackRoutes);
+app.use('/api/notifications', notificationsRoutes);
+app.use('/api/push', pushRoutes);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);

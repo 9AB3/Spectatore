@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import Header from '../components/Header';
 import { api } from '../lib/api';
 import { getDB } from '../lib/idb';
 import useToast from '../hooks/useToast';
@@ -358,7 +359,38 @@ function actKeyBase(act: ActKeyBaseInput, userEmail: string, location: string): 
 
 
 export default function SiteAdminValidate() {
+  const [online, setOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  useEffect(() => {
+    function on() { setOnline(true); }
+    function off() { setOnline(false); }
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => {
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
+    };
+  }, []);
+
   const nav = useNavigate();
+
+  if (!online) {
+    return (
+      <div>
+        <Header />
+        <div className="p-6 max-w-xl mx-auto">
+          <div className="card">
+            <h2 className="text-xl font-semibold mb-2">Validation</h2>
+            <div className="text-sm text-slate-600">Connection required. Please connect to the network and try again.</div>
+            <div className="mt-4">
+              <button className="btn" onClick={() => nav('/SiteAdmin')}>Back</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const { setMsg, Toast } = useToast();
   const [year, setYear] = useState<number>(new Date().getFullYear());
   const [sites, setSites] = useState<string[]>([]);

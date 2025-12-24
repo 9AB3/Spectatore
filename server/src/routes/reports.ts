@@ -486,4 +486,201 @@ router.get('/summary', authMiddleware, async (req: any, res: any) => {
   }
 });
 
+
+// You vs You: shift totals + raw shift_activities payloads (for location-based metrics)
+router.get('/you-vs-you', authMiddleware, async (req: any, res: any) => {
+  // authMiddleware in this codebase sets req.user_id (see /summary route)
+  const authUserId = req.user_id;
+  const from = String(req.query.from || '0001-01-01');
+  const to = String(req.query.to || '9999-12-31');
+  if (!authUserId) return res.status(401).json({ error: 'unauthorized' });
+
+  try {
+    const shiftR = await pool.query(
+      `SELECT id, date::text as date, dn, totals_json
+         FROM shifts
+        WHERE user_id=$1 AND date BETWEEN $2::date AND $3::date
+        ORDER BY date ASC`,
+      [authUserId, from, to],
+    );
+
+    const rows = (shiftR.rows || []).map((r: any) => ({
+      id: Number(r.id),
+      date: String(r.date),
+      dn: String(r.dn || ''),
+      totals_json: asObj(r.totals_json),
+      activities: [] as any[],
+    }));
+
+    const ids = rows.map((r: any) => r.id).filter((x: any) => Number.isFinite(x) && x > 0);
+    if (ids.length) {
+      const actR = await pool.query(
+        `SELECT shift_id, activity, sub_activity, payload_json
+           FROM shift_activities
+          WHERE shift_id = ANY($1::int[])
+          ORDER BY shift_id ASC, id ASC`,
+        [ids],
+      );
+
+      const byShift = new Map<number, any[]>();
+      for (const a of actR.rows || []) {
+        const sid = Number(a.shift_id);
+        const list = byShift.get(sid) || [];
+        const pj = asObj(a.payload_json);
+        list.push({
+          activity: String(a.activity || pj.activity || ''),
+          sub_activity: String(a.sub_activity || pj.sub_activity || pj.subActivity || ''),
+          ...pj,
+        });
+        byShift.set(sid, list);
+      }
+
+      for (const r of rows) {
+        r.activities = byShift.get(r.id) || [];
+      }
+    }
+
+    res.json({ rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'query failed' });
+  }
+});
+
+// User vs Network: return a metric timeline for the authed user and their accepted connections
+// GET /api/reports/network?metric=...&from=YYYY-MM-DD&to=YYYY-MM-DD
+router.get('/network', authMiddleware, async (req: any, res: any) => {
+  const authUserId = req.user_id;
+  const from = String(req.query.from || '0001-01-01');
+  const to = String(req.query.to || '9999-12-31');
+  const metric = String(req.query.metric || '').trim();
+  const compareUserId = Number(req.query.compare_user_id || 0);
+
+  if (!authUserId) return res.status(401).json({ error: 'unauthorized' });
+  if (!metric || !(MILESTONE_METRICS as any).includes(metric)) {
+    return res.status(400).json({ error: 'metric must be one of milestone metrics' });
+  }
+
+  try {
+    // Get accepted connection user ids
+    const c = await pool.query(
+      `SELECT CASE WHEN requester_id=$1 THEN addressee_id ELSE requester_id END as other_id
+         FROM connections
+        WHERE (requester_id=$1 OR addressee_id=$1) AND status='accepted'`,
+      [authUserId],
+    );
+    const otherIds = (c.rows || []).map((r: any) => Number(r.other_id)).filter((x: any) => Number.isFinite(x) && x > 0);
+
+    // Fetch members for display
+    let members: any[] = [];
+    if (otherIds.length) {
+      const m = await pool.query('SELECT id, name, email FROM users WHERE id = ANY($1::int[])', [otherIds]);
+      members = m.rows || [];
+    }
+
+    // Helper to load shifts + activities then compute per-day metric totals
+    async function loadDaily(userId: number) {
+      const shiftR = await pool.query(
+        `SELECT id, date::text as date, dn, totals_json
+           FROM shifts
+          WHERE user_id=$1 AND date BETWEEN $2::date AND $3::date
+          ORDER BY date ASC`,
+        [userId, from, to],
+      );
+      const shiftRows = shiftR.rows || [];
+      if (shiftRows.length === 0) return { daily: new Map<string, number>(), best: { total: 0, date: '' } };
+
+      const ids = shiftRows.map((r: any) => r.id);
+      const actR = await pool.query(
+        `SELECT shift_id, activity, sub_activity, payload_json
+           FROM shift_activities
+          WHERE shift_id = ANY($1::bigint[])`,
+        [ids],
+      );
+      const actByShift: Record<string, any[]> = {};
+      for (const a of actR.rows || []) (actByShift[String(a.shift_id)] ||= []).push(a);
+
+      const daily = new Map<string, number>();
+      let best = { total: 0, date: String(shiftRows[0].date || '') };
+      for (const r of shiftRows) {
+        const sid = Number(r.id);
+        const acts = actByShift[String(sid)] || [];
+        const mm = computeMilestoneMetricMapForShift(
+          { id: sid, date: String(r.date), dn: String(r.dn || ''), totals_json: asObj(r.totals_json) },
+          acts as any,
+        );
+        const v = n((mm as any)[metric] || 0);
+        const d = String(r.date);
+        daily.set(d, (daily.get(d) || 0) + v);
+      }
+      for (const [d, v] of daily.entries()) {
+        if (v > best.total) best = { total: v, date: d };
+      }
+      return { daily, best };
+    }
+
+    const user = await loadDaily(authUserId);
+
+    const crewDailyList: Array<{ id: number; name: string; email: string; daily: Map<string, number>; best: any }> = [];
+    for (const m of members) {
+      const uid = Number(m.id);
+      const d = await loadDaily(uid);
+      crewDailyList.push({ id: uid, name: String(m.name || ''), email: String(m.email || ''), daily: d.daily, best: d.best });
+    }
+
+    // Optional: compare against a specific crew mate (must be an accepted connection)
+    const compareMember = compareUserId && otherIds.includes(compareUserId)
+      ? crewDailyList.find((x) => x.id === compareUserId) || null
+      : null;
+
+    // Build timeline across the full date range between from..to, using the user's date span as anchor when possible
+    // If the user has no data, we still build timeline from from..to (clamped to 370 days for safety)
+    const start = isValidYmd(from) ? parseYmd(from) : (isValidYmd(to) ? parseYmd(to) : new Date());
+    const end = isValidYmd(to) ? parseYmd(to) : start;
+    const maxDays = 370;
+
+    const timeline: Array<{ date: string; user: number; network_avg: number; network_best: number; compare: number }> = [];
+    let days = 0;
+    for (let d = new Date(start); d <= end && days < maxDays; d = addDays(d, 1)) {
+      const key = ymd(d);
+      const uVal = user.daily.get(key) || 0;
+
+      let sum = 0;
+      let cnt = 0;
+      let best = 0;
+      for (const cm of crewDailyList) {
+        const v = cm.daily.get(key);
+        if (v == null) continue;
+        sum += v;
+        cnt += 1;
+        if (v > best) best = v;
+      }
+      const avg = cnt ? sum / cnt : 0;
+      const cmp = compareMember ? (compareMember.daily.get(key) || 0) : avg;
+      timeline.push({ date: key, user: uVal, network_avg: avg, network_best: best, compare: cmp });
+      days++;
+    }
+
+    // Determine network best day (across crew) for this metric within the range
+    let networkBest = { total: 0, date: '', user_id: 0, name: '' };
+    for (const cm of crewDailyList) {
+      if (cm.best.total > networkBest.total) {
+        networkBest = { total: cm.best.total, date: cm.best.date, user_id: cm.id, name: cm.name };
+      }
+    }
+
+    return res.json({
+      metric,
+      members: crewDailyList.map((x) => ({ id: x.id, name: x.name, email: x.email })),
+      userBest: user.best,
+      networkBest,
+      compare: compareMember ? { user_id: compareMember.id, name: compareMember.name, email: compareMember.email } : null,
+      timeline,
+    });
+  } catch (err) {
+    console.error('reports network failed', err);
+    return res.status(500).json({ error: 'query failed' });
+  }
+});
+
 export default router;

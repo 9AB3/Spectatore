@@ -6,7 +6,13 @@ import { sendEmail } from '../lib/email.js';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
-const DEV_SKIP = process.env.DEV_SKIP_EMAIL_CONFIRM === '1';
+// In local dev we default to skipping email confirmation when using stub email.
+// You can force the confirm flow by setting DEV_SKIP_EMAIL_CONFIRM=0.
+const DEV_SKIP =
+  process.env.DEV_SKIP_EMAIL_CONFIRM === '1' ||
+  (process.env.DEV_SKIP_EMAIL_CONFIRM !== '0' &&
+    process.env.NODE_ENV !== 'production' &&
+    (process.env.EMAIL_MODE || 'stub') === 'stub');
 
 function normaliseEmail(raw: any): string {
   return String(raw || '').trim().toLowerCase();
@@ -199,7 +205,7 @@ router.post('/reset', async (req, res) => {
 
 // Dev helper: get a token for an existing user
 router.get('/dev-token', async (req, res) => {
-  if (process.env.DEV_SKIP_EMAIL_CONFIRM !== '1') return res.status(404).end();
+  if (!DEV_SKIP) return res.status(404).end();
   const email = req.query.email as string;
   const normEmail = normaliseEmail(email);
   if (!normEmail) return res.status(400).json({ error: 'email required' });
