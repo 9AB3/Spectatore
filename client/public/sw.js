@@ -1,22 +1,62 @@
 // Spectatore PWA service worker
-// - Pre-caches the app shell
+// - Pre-caches app shell (best-effort, won't fail install if a file 404s)
 // - Serves index.html for navigation requests so routes work offline
 // - Runtime-caches same-origin GET requests (JS/CSS/images)
+// - Handles Web Push notifications
 
-const CACHE = 'spectatore-static-v2';
-const CORE = ['/', '/index.html', '/manifest.webmanifest'];
+const CACHE = 'spectatore-static-v3';
+
+// Keep this list SMALL and RELIABLE. If any item 404s, install can fail.
+// We cache best-effort below so even if something is missing the SW still installs.
+const CORE = ['/', '/index.html'];
+
+async function cacheBestEffort(cache, urls) {
+  await Promise.all(
+    urls.map(async (u) => {
+      try {
+        const res = await fetch(u, { cache: 'no-store' });
+        if (res.ok) await cache.put(u, res);
+      } catch {
+        // ignore missing/offline during install
+      }
+    }),
+  );
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(CORE)).then(() => self.skipWaiting()),
+    (async () => {
+      const cache = await caches.open(CACHE);
+
+      // Best-effort cache core + common PWA assets if they exist
+      await cacheBestEffort(cache, [
+        ...CORE,
+
+        // Optional: only cached if they exist (won't break install)
+        '/manifest.webmanifest',
+        '/manifest.json',
+
+        // Optional icons (cache if present)
+        '/icon-192.png',
+        '/icon-512.png',
+        '/pwa-192x192.png',
+        '/pwa-512x512.png',
+        '/apple-touch-icon.png',
+        '/favicon.ico',
+      ]);
+
+      self.skipWaiting();
+    })(),
   );
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))),
-    ).then(() => self.clients.claim()),
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
+      await self.clients.claim();
+    })(),
   );
 });
 
@@ -43,58 +83,72 @@ self.addEventListener('fetch', (event) => {
 
   // Cache-first for same-origin assets
   event.respondWith(
-    caches.match(req).then((cached) =>
-      cached ||
-      fetch(req)
+    caches.match(req).then((cached) => {
+      if (cached) return cached;
+      return fetch(req)
         .then((res) => {
           const copy = res.clone();
           caches.open(CACHE).then((cache) => cache.put(req, copy));
           return res;
         })
-        .catch(() => cached),
-    ),
+        .catch(() => cached);
+    }),
   );
 });
 
-
 // ----- Web Push notifications -----
 self.addEventListener('push', (event) => {
-  try {
-    const data = event.data ? event.data.json() : {};
-    const title = data.title || 'Spectatore';
-    const body = data.body || '';
-    const url = data.url || '/';
-    const tag = data.tag || undefined;
-    const options = {
-      body,
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
-      tag,
-      data: { url, ...(data.data || {}) },
-    };
-    event.waitUntil(self.registration.showNotification(title, options));
-  } catch (e) {
-    // ignore
-  }
+  event.waitUntil(
+    (async () => {
+      let data = {};
+      try {
+        // Some push payloads are text, not JSON
+        data = event.data ? (event.data.json ? event.data.json() : {}) : {};
+      } catch {
+        try {
+          const txt = event.data ? event.data.text() : '';
+          data = txt ? { body: txt } : {};
+        } catch {
+          data = {};
+        }
+      }
+
+      const title = data.title || 'Spectatore';
+      const body = data.body || '';
+      const url = data.url || '/';
+      const tag = data.tag;
+
+      await self.registration.showNotification(title, {
+        body,
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        tag,
+        data: { url, ...(data.data || {}) },
+      });
+    })(),
+  );
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const url = event.notification?.data?.url || '/';
+
   event.waitUntil(
     (async () => {
       const allClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+
       for (const c of allClients) {
         try {
-          const u = new URL((c as any).url);
-          // Focus an existing Spectatore tab
-          if (u.origin === self.location.origin) {
-            (c as any).focus();
-            (c as any).navigate(url);
+          const cu = new URL(c.url);
+          if (cu.origin === self.location.origin) {
+            await c.focus();
+            // navigate() can fail in some browsers; ignore if so
+            try { await c.navigate(url); } catch {}
             return;
           }
         } catch {}
       }
+
       await clients.openWindow(url);
     })(),
   );
