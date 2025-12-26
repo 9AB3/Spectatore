@@ -43,7 +43,8 @@ export async function enablePush(): Promise<{ ok: true } | { ok: false; error: s
         applicationServerKey: urlBase64ToUint8Array(publicKey),
       }));
 
-    await api('/push/subscribe', {
+    // ✅ IMPORTANT: hit backend API route (not frontend)
+    await api('/api/push/subscribe', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(sub),
@@ -65,7 +66,8 @@ export async function disablePush(): Promise<{ ok: true } | { ok: false; error: 
     const sub = await reg.pushManager.getSubscription();
     if (sub) {
       try {
-        await api('/push/unsubscribe', {
+        // ✅ IMPORTANT: hit backend API route (not frontend)
+        await api('/api/push/unsubscribe', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ endpoint: sub.endpoint }),
