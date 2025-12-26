@@ -181,19 +181,94 @@ router.post('/activities', async (req, res) => {
 
 // -------------------- Connections (simple invite workflow) --------------------
 router.post('/connections/request', authMiddleware, async (req: any, res) => {
+  const client = await pool.connect();
   try {
     const { requester_id, addressee_id } = req.body || {};
     const rid = Number(req.user_id || requester_id);
     const aid = Number(addressee_id);
+
     if (!rid || !aid) return res.status(400).json({ error: 'missing fields' });
-    const r = await pool.query(
+    if (rid === aid) return res.status(400).json({ error: 'cannot connect to self' });
+
+    await client.query('BEGIN');
+
+    // 1) Existing request in the same direction?
+    const same = await client.query(
+      'SELECT id, status FROM connections WHERE requester_id=$1 AND addressee_id=$2 LIMIT 1',
+      [rid, aid],
+    );
+
+    if (same.rowCount) {
+      const row = same.rows[0];
+      if (row.status === 'pending' || row.status === 'accepted') {
+        await client.query('COMMIT');
+        return res.json({ id: row.id, status: row.status });
+      }
+      // revive
+      await client.query('UPDATE connections SET status=$1 WHERE id=$2', ['pending', row.id]);
+      await client.query('COMMIT');
+
+      // notify addressee
+      try {
+        const u = await pool.query('SELECT name FROM users WHERE id=$1', [rid]);
+        const nm = String(u.rows?.[0]?.name || 'A crew member');
+        await notify(aid, 'connection_request', 'New crew request', `${nm} sent you a crew request.`, {
+          requester_id: rid,
+          requester_name: nm,
+        });
+      } catch {}
+
+      return res.json({ id: row.id, status: 'pending' });
+    }
+
+    // 2) Existing request in the opposite direction?
+    const opp = await client.query(
+      'SELECT id, status FROM connections WHERE requester_id=$1 AND addressee_id=$2 LIMIT 1',
+      [aid, rid],
+    );
+
+    if (opp.rowCount) {
+      const row = opp.rows[0];
+      if (row.status === 'accepted') {
+        await client.query('COMMIT');
+        return res.json({ id: row.id, status: 'accepted' });
+      }
+      if (row.status === 'pending') {
+        // There's already a pending request from the other user; treat as ok.
+        await client.query('COMMIT');
+        return res.json({ id: row.id, status: 'pending' });
+      }
+      // revive but flip direction to the current requester → addressee
+      await client.query(
+        'UPDATE connections SET requester_id=$1, addressee_id=$2, status=$3 WHERE id=$4',
+        [rid, aid, 'pending', row.id],
+      );
+      await client.query('COMMIT');
+
+      // notify addressee
+      try {
+        const u = await pool.query('SELECT name FROM users WHERE id=$1', [rid]);
+        const nm = String(u.rows?.[0]?.name || 'A crew member');
+        await notify(aid, 'connection_request', 'New crew request', `${nm} sent you a crew request.`, {
+          requester_id: rid,
+          requester_name: nm,
+        });
+      } catch {}
+
+      return res.json({ id: row.id, status: 'pending' });
+    }
+
+    // 3) No existing row in either direction → insert new
+    const r = await client.query(
       'INSERT INTO connections (requester_id, addressee_id, status) VALUES ($1,$2,$3) RETURNING id',
       [rid, aid, 'pending'],
     );
 
-    // Create a notification for the addressee
+    await client.query('COMMIT');
+
+    // notify addressee
     try {
-      const u = await pool.query('SELECT name, email FROM users WHERE id=$1', [rid]);
+      const u = await pool.query('SELECT name FROM users WHERE id=$1', [rid]);
       const nm = String(u.rows?.[0]?.name || 'A crew member');
       await notify(aid, 'connection_request', 'New crew request', `${nm} sent you a crew request.`, {
         requester_id: rid,
@@ -201,10 +276,13 @@ router.post('/connections/request', authMiddleware, async (req: any, res) => {
       });
     } catch {}
 
-    return res.json({ id: r.rows[0].id });
+    return res.json({ id: r.rows[0].id, status: 'pending' });
   } catch (err) {
+    try { await client.query('ROLLBACK'); } catch {}
     console.error('connections request failed', err);
     return res.status(400).json({ error: 'insert failed' });
+  } finally {
+    client.release();
   }
 });
 
