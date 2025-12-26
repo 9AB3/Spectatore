@@ -2,9 +2,9 @@ import { Router } from 'express';
 import { pool } from '../lib/pg.js';
 import { notify } from '../lib/notify.js';
 import { authMiddleware } from '../lib/auth.js';
+import { sendPushToUser } from '../lib/push.js';
 
 const router = Router();
-
 
 // -------------------- Equipment --------------------
 router.post('/equipment', async (req, res) => {
@@ -208,15 +208,25 @@ router.post('/connections/request', authMiddleware, async (req: any, res) => {
       await client.query('UPDATE connections SET status=$1 WHERE id=$2', ['pending', row.id]);
       await client.query('COMMIT');
 
-      // notify addressee
+      // notify + push addressee
       try {
         const u = await pool.query('SELECT name FROM users WHERE id=$1', [rid]);
         const nm = String(u.rows?.[0]?.name || 'A crew member');
+
         await notify(aid, 'connection_request', 'New crew request', `${nm} sent you a crew request.`, {
           requester_id: rid,
           requester_name: nm,
         });
-      } catch {}
+
+        console.log(`[push] connection_request to user=${aid} from=${rid}`);
+        await sendPushToUser(aid, {
+          title: 'Spectatore',
+          body: `${nm} sent you a crew request.`,
+          data: { type: 'connection_request', requester_id: rid, requester_name: nm },
+        });
+      } catch (e) {
+        console.log('[push] connection_request failed (revive same)', e);
+      }
 
       return res.json({ id: row.id, status: 'pending' });
     }
@@ -245,15 +255,25 @@ router.post('/connections/request', authMiddleware, async (req: any, res) => {
       );
       await client.query('COMMIT');
 
-      // notify addressee
+      // notify + push addressee
       try {
         const u = await pool.query('SELECT name FROM users WHERE id=$1', [rid]);
         const nm = String(u.rows?.[0]?.name || 'A crew member');
+
         await notify(aid, 'connection_request', 'New crew request', `${nm} sent you a crew request.`, {
           requester_id: rid,
           requester_name: nm,
         });
-      } catch {}
+
+        console.log(`[push] connection_request to user=${aid} from=${rid} (revive flipped)`);
+        await sendPushToUser(aid, {
+          title: 'Spectatore',
+          body: `${nm} sent you a crew request.`,
+          data: { type: 'connection_request', requester_id: rid, requester_name: nm },
+        });
+      } catch (e) {
+        console.log('[push] connection_request failed (revive opp)', e);
+      }
 
       return res.json({ id: row.id, status: 'pending' });
     }
@@ -266,15 +286,25 @@ router.post('/connections/request', authMiddleware, async (req: any, res) => {
 
     await client.query('COMMIT');
 
-    // notify addressee
+    // notify + push addressee
     try {
       const u = await pool.query('SELECT name FROM users WHERE id=$1', [rid]);
       const nm = String(u.rows?.[0]?.name || 'A crew member');
+
       await notify(aid, 'connection_request', 'New crew request', `${nm} sent you a crew request.`, {
         requester_id: rid,
         requester_name: nm,
       });
-    } catch {}
+
+      console.log(`[push] connection_request to user=${aid} from=${rid}`);
+      await sendPushToUser(aid, {
+        title: 'Spectatore',
+        body: `${nm} sent you a crew request.`,
+        data: { type: 'connection_request', requester_id: rid, requester_name: nm },
+      });
+    } catch (e) {
+      console.log('[push] connection_request failed (new)', e);
+    }
 
     return res.json({ id: r.rows[0].id, status: 'pending' });
   } catch (err) {
@@ -296,11 +326,13 @@ router.post('/connections/:id/accept', authMiddleware, async (req: any, res) => 
       const r = await pool.query('SELECT requester_id, addressee_id FROM connections WHERE id=$1', [id]);
       const rid = Number(r.rows?.[0]?.requester_id || 0);
       const aid = Number(r.rows?.[0]?.addressee_id || 0);
+
       if (rid && aid) {
         const a = await pool.query('SELECT name FROM users WHERE id=$1', [aid]);
         const b = await pool.query('SELECT name FROM users WHERE id=$1', [rid]);
         const an = String(a.rows?.[0]?.name || 'A crew mate');
         const bn = String(b.rows?.[0]?.name || 'A crew mate');
+
         await notify(rid, 'connection_accepted', 'Crew request accepted', `${an} accepted your crew request.`, {
           other_id: aid,
           other_name: an,
@@ -309,8 +341,24 @@ router.post('/connections/:id/accept', authMiddleware, async (req: any, res) => 
           other_id: rid,
           other_name: bn,
         });
+
+        // push both parties
+        console.log(`[push] connection_accepted notify rid=${rid} aid=${aid}`);
+        await sendPushToUser(rid, {
+          title: 'Spectatore',
+          body: `${an} accepted your crew request.`,
+          data: { type: 'connection_accepted', other_id: aid, other_name: an },
+        });
+        await sendPushToUser(aid, {
+          title: 'Spectatore',
+          body: `You and ${bn} are now crew mates.`,
+          data: { type: 'connection_accepted', other_id: rid, other_name: bn },
+        });
       }
-    } catch {}
+    } catch (e) {
+      console.log('[push] connection_accepted failed', e);
+    }
+
     return res.json({ ok: true });
   } catch (err) {
     return res.status(400).json({ error: 'update failed' });
