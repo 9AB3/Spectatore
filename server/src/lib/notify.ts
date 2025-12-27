@@ -27,4 +27,27 @@ export async function notify(
     );
 
     console.log('[notify] db insert ok', { user_id, type });
-  } catch
+  } catch (e: any) {
+    console.warn('[notify] db insert failed', e?.message || e);
+  }
+
+  // Best-effort push
+  try {
+    console.log('[notify] sending push', {
+      user_id,
+      type,
+    });
+
+    await sendPushToUser(user_id, {
+      title,
+      body,
+      url: pushUrl,
+      tag: type,
+      data: payload || {},
+    });
+
+    console.log('[notify] push send attempted', { user_id, type });
+  } catch (e: any) {
+    console.warn('[notify] push failed', e?.message || e);
+  }
+}
