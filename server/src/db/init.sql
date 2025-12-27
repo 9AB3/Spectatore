@@ -10,8 +10,11 @@ CREATE TABLE IF NOT EXISTS users (
   confirm_code TEXT,
   is_admin BOOLEAN NOT NULL DEFAULT FALSE,
   reset_code TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ DEFAULT now(),
+  terms_accepted_at TIMESTAMPTZ,
+  terms_version TEXT
 );
+
 
 CREATE TABLE IF NOT EXISTS connections (
   id SERIAL PRIMARY KEY,
@@ -85,8 +88,11 @@ CREATE TABLE IF NOT EXISTS admin_sites (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   state TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ DEFAULT now(),
+  terms_accepted_at TIMESTAMPTZ,
+  terms_version TEXT
 );
+
 
 
 -- SHIFTS (store site for fast filtering; also keep user_id reference)
@@ -180,8 +186,11 @@ CREATE TABLE IF NOT EXISTS user_feedback (
   declined BOOLEAN NOT NULL DEFAULT FALSE,
   reviewed_by TEXT,
   reviewed_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ DEFAULT now(),
+  terms_accepted_at TIMESTAMPTZ,
+  terms_version TEXT
 );
+
 
 CREATE INDEX IF NOT EXISTS idx_user_feedback_approved ON user_feedback(approved);
 
@@ -218,7 +227,10 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   endpoint TEXT NOT NULL UNIQUE,
   p256dh TEXT NOT NULL,
   auth TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ DEFAULT now(),
+  terms_accepted_at TIMESTAMPTZ,
+  terms_version TEXT
 );
+
 
 CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id);

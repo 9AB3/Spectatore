@@ -4,6 +4,7 @@ import { authMiddleware } from '../lib/auth.js';
 import { sendEmail } from '../lib/email.js';
 
 const router = Router();
+const SUPPORT_EMAIL = (process.env.SUPPORT_EMAIL || 'support@spectatore.com').trim();
 
 // Submit feedback
 router.post('/', authMiddleware, async (req: any, res) => {
@@ -30,7 +31,7 @@ router.post('/', authMiddleware, async (req: any, res) => {
       `Site: ${u.site || ''}\n` +
       `Feedback ID: ${ins.rows?.[0]?.id}\n\n` +
       `${message}\n`;
-    await sendEmail('alan.bermingham93@gmail.com', subject, text);
+    await sendEmail(SUPPORT_EMAIL, subject, text);
 
     return res.json({ ok: true });
   } catch (e: any) {

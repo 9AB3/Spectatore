@@ -1,7 +1,7 @@
 import 'dotenv/config';
 
 import express from 'express';
-import cors from 'cors';
+import cors, { type CorsOptions } from 'cors';
 import fs from 'fs';
 import path from 'path';
 
@@ -21,13 +21,18 @@ import notificationsRoutes from './routes/notifications.js';
 import pushRoutes from './routes/push.js';
 
 const isDev = process.env.NODE_ENV !== 'production';
-const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
+const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 const app = express();
 
 async function ensureDbColumns() {
   try {
     await pool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS meta_json JSONB DEFAULT '{}'::jsonb`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_version TEXT`);
   } catch (e:any) {
     console.warn('[db] ensure columns failed:', e?.message || e);
   }
@@ -37,22 +42,20 @@ ensureDbColumns();
 
 app.use(express.json({ limit: '5mb' }));
 
-app.use(
-  cors(
-    isDev
-      ? { origin: true, credentials: true }
-      : { origin: CORS_ORIGIN, credentials: true },
-  ),
-);
+const corsOptions: CorsOptions = isDev
+  ? { origin: true, credentials: true }
+  : {
+      origin: (origin, cb) => {
+        // allow non-browser / same-origin requests
+        if (!origin) return cb(null, true);
+        if (CORS_ORIGINS.includes(origin)) return cb(null, true);
+        return cb(new Error('CORS blocked: ' + origin), false);
+      },
+      credentials: true,
+    };
 
-app.options(
-  '*',
-  cors(
-    isDev
-      ? { origin: true, credentials: true }
-      : { origin: CORS_ORIGIN, credentials: true },
-  ),
-);
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 async function initDb() {
   const sqlPath = path.join(process.cwd(), 'src', 'db', 'init.sql');
@@ -95,6 +98,20 @@ initDb()
     });
   })
   .catch((err) => {
-    console.error('Startup failed:', err);
+    // Provide a clearer message for the common local dev case where Postgres isn't running.
+    const msg = (err as any)?.message || String(err);
+    if (msg.includes('ECONNREFUSED') || msg.includes('connect ECONNREFUSED')) {
+      console.error('\n[db] Could not connect to Postgres. It looks like Postgres is not running or not reachable.\n');
+      console.error('Fix options:');
+      console.error('  1) Start local Postgres (service/pgAdmin) and ensure it listens on 127.0.0.1:5432');
+      console.error('  2) OR start the provided Docker database from the project root:');
+      console.error('       docker compose up -d');
+      console.error('     Then initialise tables:');
+      console.error('       cd server && npm run db:init');
+      console.error('\nYour current DATABASE_URL is: ' + (process.env.DATABASE_URL || '(not set)'));
+      console.error('\nOriginal error: ' + msg + '\n');
+    } else {
+      console.error('Startup failed:', err);
+    }
     process.exit(1);
   });

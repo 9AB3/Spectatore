@@ -1,6 +1,7 @@
 import Header from '../components/Header';
 import BottomNav from '../components/BottomNav';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useNavigate } from 'react-router-dom';
 
@@ -56,24 +57,42 @@ function fmtYmd(ymdStr: string) {
 function LineChart({
   rows,
   bLabel,
+  yLabel,
 }: {
   rows: Array<{ x: string; a: number; b: number }>;
   bLabel: string;
+  yLabel: string;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [hover, setHover] = useState<{ i: number; x: number; y: number } | null>(null);
 
+    // RESET hover when rows change (dates / metric change)
+  useEffect(() => {
+    setHover(null);
+  }, [rows]);
+
+
   const pts = useMemo(() => {
     const w = 900;
-    const h = 240;
-    const pad = 28;
+    const h = 260;        // <- a bit taller for x labels
+    const pad = 34;       // <- more padding for x labels
+
     const xs = rows.map((_, i) => (rows.length <= 1 ? 0.5 : i / (rows.length - 1)));
     const maxV = Math.max(1, ...rows.flatMap((r) => [r.a, r.b]));
+
     const mapX = (t: number) => pad + t * (w - pad * 2);
     const mapY = (v: number) => h - pad - (v / maxV) * (h - pad * 2);
+
     const a = rows.map((r, i) => ({ x: mapX(xs[i]), y: mapY(r.a), v: r.a, label: r.x }));
     const b = rows.map((r, i) => ({ x: mapX(xs[i]), y: mapY(r.b), v: r.b, label: r.x }));
-    return { w, h, pad, maxV, a, b };
+
+    // tick labels: aim for ~7 labels + always include first/last
+    const tickEvery = rows.length <= 8 ? 1 : Math.ceil(rows.length / 7);
+    const ticks = rows
+      .map((r, i) => ({ i, label: r.x }))
+      .filter((t, idx) => idx === 0 || idx === rows.length - 1 || idx % tickEvery === 0);
+
+    return { w, h, pad, maxV, a, b, ticks };
   }, [rows]);
 
   const path = (arr: Array<{ x: number; y: number }>) => {
@@ -84,34 +103,111 @@ function LineChart({
   const onMove = (e: React.MouseEvent) => {
     const el = ref.current;
     if (!el || rows.length === 0) return;
+
     const r = el.getBoundingClientRect();
     const x = e.clientX - r.left;
+
     const rel = Math.max(0, Math.min(1, (x - pts.pad) / (pts.w - pts.pad * 2)));
     const i = Math.round(rel * (rows.length - 1));
+
     const ax = pts.a[i]?.x ?? x;
     const ay = Math.min(pts.a[i]?.y ?? 0, pts.b[i]?.y ?? 0);
     setHover({ i, x: ax, y: ay });
   };
 
   return (
-    <div ref={ref} className="w-full" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
-      <svg viewBox={`0 0 ${pts.w} ${pts.h}`} className="w-full h-[260px]">
+    <div ref={ref} className="w-full relative" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+      <svg viewBox={`0 0 ${pts.w} ${pts.h}`} className="w-full h-[280px]">
+        {/* Y axis label */}
+        <text
+          x={12}
+          y={pts.pad + (pts.h - pts.pad * 2) / 2}
+          transform={`rotate(-90 12 ${pts.pad + (pts.h - pts.pad * 2) / 2})`}
+          textAnchor="middle"
+          fontSize="12"
+          fontWeight={700}
+          fill="#334155"
+        >
+          {yLabel}
+        </text>
+
         {/* axes */}
-        <path d={`M${pts.pad},${pts.pad} V${pts.h - pts.pad} H${pts.w - pts.pad}`} fill="none" stroke="currentColor" opacity={0.25} />
+        <path
+          d={`M${pts.pad},${pts.pad} V${pts.h - pts.pad} H${pts.w - pts.pad}`}
+          fill="none"
+          stroke="currentColor"
+          opacity={0.25}
+        />
+
+        {/* X axis title */}
+        <text
+          x={(pts.w + pts.pad) / 2}
+          y={pts.h - 8}
+          textAnchor="middle"
+          fontSize="12"
+          fontWeight={700}
+          fill="#334155"
+        >
+          Date
+        </text>
+
+        {/* X ticks + labels */}
+        {pts.ticks.map((t) => {
+          const x = pts.a[t.i]?.x ?? pts.pad;
+          return (
+            <g key={t.i}>
+              <line
+                x1={x}
+                y1={pts.h - pts.pad}
+                x2={x}
+                y2={pts.h - pts.pad + 6}
+                stroke="currentColor"
+                opacity={0.25}
+              />
+              <text
+                x={x}
+                y={pts.h - pts.pad + 18}
+                textAnchor="middle"
+                fontSize="10"
+                fill="#334155"
+                opacity={0.85}
+              >
+                {fmtYmd(t.label)}
+              </text>
+            </g>
+          );
+        })}
+
         {/* lines */}
         <path d={path(pts.a)} fill="none" stroke="currentColor" strokeWidth={2} />
         <path d={path(pts.b)} fill="none" stroke="currentColor" strokeWidth={2} strokeDasharray="6 6" opacity={0.85} />
 
-        {/* hover marker */}
-        {hover ? (
-          <>
-            <line x1={pts.a[hover.i].x} y1={pts.pad} x2={pts.a[hover.i].x} y2={pts.h - pts.pad} stroke="currentColor" opacity={0.15} />
-            <circle cx={pts.a[hover.i].x} cy={pts.a[hover.i].y} r={4} fill="currentColor" />
-            <circle cx={pts.b[hover.i].x} cy={pts.b[hover.i].y} r={4} fill="currentColor" opacity={0.6} />
-          </>
-        ) : null}
+       {/* hover marker */}
+{hover ? (() => {
+  const i = Math.max(0, Math.min(rows.length - 1, hover.i));
+  const aPt = pts.a[i];
+  const bPt = pts.b[i];
+  if (!aPt || !bPt) return null;
+
+  return (
+    <>
+      <line
+        x1={aPt.x}
+        y1={pts.pad}
+        x2={aPt.x}
+        y2={pts.h - pts.pad}
+        stroke="currentColor"
+        opacity={0.12}
+      />
+      <circle cx={aPt.x} cy={aPt.y} r={4} fill="currentColor" />
+      <circle cx={bPt.x} cy={bPt.y} r={4} fill="currentColor" opacity={0.6} />
+    </>
+  );
+})() : null}
+
       </svg>
 
+      {/* hover tooltip */}
       {hover ? (
         <div
           className="absolute pointer-events-none text-xs px-2 py-1 rounded-xl border"
@@ -125,14 +221,18 @@ function LineChart({
         >
           <div className="font-semibold">{fmtYmd(rows[hover.i].x)}</div>
           <div>You: {rows[hover.i].a.toFixed(1)}</div>
-          <div>{bLabel}: {rows[hover.i].b.toFixed(1)}</div>
+          <div>
+            {bLabel}: {rows[hover.i].b.toFixed(1)}
+          </div>
         </div>
       ) : null}
     </div>
   );
 }
 
+
 export default function YouVsNetwork() {
+  const location = useLocation();
   const nav = useNavigate();
   const [from, setFrom] = useState(() => {
     // Default: start of current month
@@ -142,6 +242,19 @@ export default function YouVsNetwork() {
   });
   const [to, setTo] = useState(() => ymd(new Date()));
   const [metric, setMetric] = useState<Metric>('Tonnes Hauled');
+  // Allow deep-linking from push notifications, e.g. /YouVsNetwork?metric=Tonnes%20Hauled
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(location.search);
+      const m = (sp.get('metric') || '').trim();
+      if (!m) return;
+      // match ignoring case against known metrics
+      const hit = (MILESTONE_METRICS as any[]).find((x) => String(x).toLowerCase() === m.toLowerCase());
+      if (hit) setMetric(hit as any);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
+
   const [compareUserId, setCompareUserId] = useState<number>(0); // 0 = network avg
   const [mode, setMode] = useState<'daily' | 'cumulative'>('cumulative');
   const [data, setData] = useState<NetworkResp | null>(null);
@@ -294,7 +407,8 @@ export default function YouVsNetwork() {
               <div className="text-xs opacity-70 mb-2">
                 Solid = you, dashed = {bLabel} • {mode === 'cumulative' ? 'cumulative total' : 'daily total'}
               </div>
-              <LineChart rows={rows} bLabel={bLabel} />
+              <LineChart rows={rows} bLabel={bLabel} yLabel={metric} />
+
 
               {/* cumulative summary */}
               <div className="grid md:grid-cols-3 gap-3 mt-3">

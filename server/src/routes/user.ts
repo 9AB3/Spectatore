@@ -22,10 +22,22 @@ function tokenFor(user: any) {
 router.get('/me', authMiddleware, async (req: any, res) => {
   try {
     const user_id = req.user_id;
-    const r = await pool.query('SELECT id, email, site FROM users WHERE id=$1', [user_id]);
+    const r = await pool.query(
+      'SELECT id, email, site, is_admin, name, terms_accepted_at, terms_version FROM users WHERE id=$1',
+      [user_id],
+    );
     const row = r.rows[0];
     if (!row) return res.status(404).json({ error: 'user not found' });
-    return res.json({ email: row.email, site: row.site || null });
+    return res.json({
+      id: row.id,
+      email: row.email,
+      site: row.site || null,
+      name: row.name || null,
+      is_admin: !!row.is_admin,
+      termsAccepted: !!row.terms_accepted_at,
+      termsAcceptedAt: row.terms_accepted_at || null,
+      termsVersion: row.terms_version || null,
+    });
   } catch (err) {
     console.error('GET /user/me failed', err);
     return res.status(500).json({ error: 'Internal server error' });
@@ -134,6 +146,22 @@ router.get('/search', async (req, res) => {
   } catch (err) {
     console.error('user search failed', err);
     return res.status(500).json({ error: 'query failed' });
+  }
+});
+
+
+router.post('/terms/accept', authMiddleware, async (req: any, res) => {
+  try {
+    const user_id = req.user_id;
+    const version = String(req.body?.version || 'v1').trim() || 'v1';
+    await pool.query(
+      'UPDATE users SET terms_accepted_at=now(), terms_version=$2 WHERE id=$1',
+      [user_id, version],
+    );
+    return res.json({ ok: true, termsAccepted: true, termsVersion: version });
+  } catch (err) {
+    console.error('POST /user/terms/accept failed', err);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 

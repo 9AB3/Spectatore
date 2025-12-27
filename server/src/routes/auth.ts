@@ -6,6 +6,7 @@ import { sendEmail } from '../lib/email.js';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
+const SUPPORT_EMAIL = (process.env.SUPPORT_EMAIL || 'support@spectatore.com').trim();
 // In local dev we default to skipping email confirmation when using stub email.
 // You can force the confirm flow by setting DEV_SKIP_EMAIL_CONFIRM=0.
 const DEV_SKIP =
@@ -65,6 +66,19 @@ router.post('/register', async (req, res) => {
     );
 
     const user = inserted.rows[0];
+
+    // Notify support of every new signup (best-effort; never block registration)
+    // NOTE: this email goes to your support inbox; the sign-up code still goes to the user.
+    sendEmail(
+      SUPPORT_EMAIL,
+      'Spectatore – New sign up',
+      `A new user signed up.\n\n` +
+        `Name: ${name || ''}\n` +
+        `Email: ${normEmail}\n` +
+        `Site: ${site || ''}\n` +
+        `State: ${state || ''}\n` +
+        `Time: ${new Date().toISOString()}\n`,
+    ).catch(() => {});
 
     if (DEV_SKIP) {
       await pool.query(

@@ -1,8 +1,8 @@
+version: "3.9"
 services:
-  db:
+  postgres:
     image: postgres:16
-    container_name: spectatore_pg
-    restart: unless-stopped
+    container_name: spectatore-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -10,7 +10,6 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
-
+      - spectatore_pgdata:/var/lib/postgresql/data
 volumes:
-  pgdata:
+  spectatore_pgdata:

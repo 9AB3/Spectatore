@@ -13,6 +13,19 @@ function addDays(d: Date, days: number) {
   x.setDate(x.getDate() + days);
   return x;
 }
+
+function formatShortDate(ymdStr: string) {
+  try {
+    const [y, m, d] = ymdStr.split('-').map((v) => parseInt(v, 10));
+    const dt = new Date(y, (m || 1) - 1, d || 1);
+    const dd = String(dt.getDate()).padStart(2, '0');
+    const mon = dt.toLocaleString('en-AU', { month: 'short' });
+    return `${dd}/${mon}`;
+  } catch {
+    return ymdStr;
+  }
+}
+
 function lc(s: any) {
   return String(s || '').toLowerCase().trim();
 }
@@ -298,9 +311,11 @@ function Sparkline({ values }: { values: number[] }) {
 function LineChart({
   points,
   unit,
+  yLabel,
 }: {
   points: { label: string; date: string; value: number }[];
   unit: string;
+  yLabel: string;
 }) {
   // Defensive: when data hasn't loaded (or API errored), avoid crashing the whole page.
   if (!points || points.length === 0) {
@@ -379,6 +394,19 @@ function LineChart({
           {/* axes */}
           <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke="#94a3b8" />
           <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke="#94a3b8" />
+
+          {/* y axis title */}
+          <text
+            x={12}
+            y={padT + (h - padT - padB) / 2}
+            transform={`rotate(-90 12 ${padT + (h - padT - padB) / 2})`}
+            textAnchor="middle"
+            fontSize="12"
+            fontWeight={700}
+            fill="#334155"
+          >
+            {yLabel}
+          </text>
 
           {/* y labels */}
           {[min, (min + max) / 2, max].map((v, i) => {
@@ -799,7 +827,7 @@ export default function YouVsYou() {
   const series = useMemo(() => {
     const pts = windowRows.map((r) => {
       const v = selected.id === 'shifts' ? 1 : selected.get(r);
-      const label = r.dn || '';
+      const label = formatShortDate(r.date);
       return { date: r.date, label, value: Number(v || 0) || 0 };
     });
     return pts;

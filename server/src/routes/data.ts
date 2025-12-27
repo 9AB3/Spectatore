@@ -212,10 +212,17 @@ router.post('/connections/request', authMiddleware, async (req: any, res) => {
         const u = await pool.query('SELECT name FROM users WHERE id=$1', [rid]);
         const nm = String(u.rows?.[0]?.name || 'A crew member');
 
-        await notify(aid, 'connection_request', 'New crew request', `${nm} sent you a crew request.`, {
-          requester_id: rid,
-          requester_name: nm,
-        });
+        await notify(
+          aid,
+          'connection_request',
+          'New crew request',
+          `${nm} sent you a crew request.`,
+          {
+            requester_id: rid,
+            requester_name: nm,
+          },
+          '/ViewConnections?tab=incoming',
+        );
 
       } catch (e) {
         console.log('[push] connection_request failed (revive same)', e);
@@ -253,10 +260,17 @@ router.post('/connections/request', authMiddleware, async (req: any, res) => {
         const u = await pool.query('SELECT name FROM users WHERE id=$1', [rid]);
         const nm = String(u.rows?.[0]?.name || 'A crew member');
 
-        await notify(aid, 'connection_request', 'New crew request', `${nm} sent you a crew request.`, {
-          requester_id: rid,
-          requester_name: nm,
-        });
+        await notify(
+          aid,
+          'connection_request',
+          'New crew request',
+          `${nm} sent you a crew request.`,
+          {
+            requester_id: rid,
+            requester_name: nm,
+          },
+          '/ViewConnections?tab=incoming',
+        );
 
       } catch (e) {
         console.log('[push] connection_request failed (revive opp)', e);
@@ -278,10 +292,17 @@ router.post('/connections/request', authMiddleware, async (req: any, res) => {
       const u = await pool.query('SELECT name FROM users WHERE id=$1', [rid]);
       const nm = String(u.rows?.[0]?.name || 'A crew member');
 
-      await notify(aid, 'connection_request', 'New crew request', `${nm} sent you a crew request.`, {
-        requester_id: rid,
-        requester_name: nm,
-      });
+      await notify(
+        aid,
+        'connection_request',
+        'New crew request',
+        `${nm} sent you a crew request.`,
+        {
+          requester_id: rid,
+          requester_name: nm,
+        },
+        '/ViewConnections?tab=incoming',
+      );
 
     } catch (e) {
       console.log('[push] connection_request failed (new)', e);
@@ -314,14 +335,28 @@ router.post('/connections/:id/accept', authMiddleware, async (req: any, res) => 
         const an = String(a.rows?.[0]?.name || 'A crew mate');
         const bn = String(b.rows?.[0]?.name || 'A crew mate');
 
-        await notify(rid, 'connection_accepted', 'Crew request accepted', `${an} accepted your crew request.`, {
-          other_id: aid,
-          other_name: an,
-        });
-        await notify(aid, 'connection_accepted', 'Crew request accepted', `You and ${bn} are now crew mates.`, {
-          other_id: rid,
-          other_name: bn,
-        });
+        await notify(
+          rid,
+          'connection_accepted',
+          'Crew request accepted',
+          `${an} accepted your crew request.`,
+          {
+            other_id: aid,
+            other_name: an,
+          },
+          '/ViewConnections?tab=accepted',
+        );
+        await notify(
+          aid,
+          'connection_accepted',
+          'Crew request accepted',
+          `You and ${bn} are now crew mates.`,
+          {
+            other_id: rid,
+            other_name: bn,
+          },
+          '/ViewConnections?tab=accepted',
+        );
 
         // push both parties
       }

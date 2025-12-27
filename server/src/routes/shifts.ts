@@ -441,6 +441,7 @@ function buildMetaJson(items: any[]) {
               'Milestone broken',
               `${actorName} just beat your personal best for ${ex.metric}: ${ex.value.toFixed(1)} on ${date}.`,
               { actor_id: actorId, actor_name: actorName, metric: ex.metric, value: ex.value, date },
+                         `/YouVsNetwork?metric=${encodeURIComponent(String(ex.metric))}`,
             );
           }
         }

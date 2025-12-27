@@ -1,12 +1,13 @@
 import Header from '../components/Header';
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
 import useToast from '../hooks/useToast';
 
 type TabKey = 'accepted' | 'incoming' | 'outgoing';
 
 export default function ViewConnections() {
+  const location = useLocation();
   const nav = useNavigate();
   const { setMsg, Toast } = useToast();
 
@@ -14,7 +15,17 @@ export default function ViewConnections() {
   const [outgoing, setOutgoing] = useState<any[]>([]);
   const [accepted, setAccepted] = useState<any[]>([]);
 
-  const [tab, setTab] = useState<TabKey>('accepted');
+  const [tab, setTab] = useState<TabKey>(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const t = (sp.get('tab') || '').toLowerCase();
+      if (t === 'incoming') return 'incoming';
+      if (t === 'outgoing') return 'outgoing';
+      return 'accepted';
+    } catch {
+      return 'accepted';
+    }
+  });
 
   const [removeId, setRemoveId] = useState<number | null>(null);
   const [removeName, setRemoveName] = useState<string>('');
@@ -57,6 +68,18 @@ export default function ViewConnections() {
     await reloadConnections();
   }
 
+
+  // Sync tab from URL (?tab=incoming|outgoing|accepted)
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(location.search);
+      const t = (sp.get('tab') || '').toLowerCase();
+      const next: TabKey = t === 'incoming' ? 'incoming' : t === 'outgoing' ? 'outgoing' : 'accepted';
+      setTab(next);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
+
   const tabTitle = useMemo(() => {
     if (tab === 'accepted') return 'Crew Mates';
     if (tab === 'incoming') return 'Crew Requests';
@@ -73,7 +96,7 @@ export default function ViewConnections() {
 
           <div className="flex gap-2 border-b border-slate-200">
             <button
-              onClick={() => setTab('accepted')}
+              onClick={() => { setTab('accepted'); nav('/ViewConnections?tab=accepted'); }}
               className={`px-3 py-2 text-sm ${
                 tab === 'accepted' ? 'border-b-2 border-slate-900 font-semibold' : ''
               }`}
@@ -81,7 +104,7 @@ export default function ViewConnections() {
               Crew Mates
             </button>
             <button
-              onClick={() => setTab('incoming')}
+              onClick={() => { setTab('incoming'); nav('/ViewConnections?tab=incoming'); }}
               className={`px-3 py-2 text-sm ${
                 tab === 'incoming' ? 'border-b-2 border-slate-900 font-semibold' : ''
               }`}
@@ -89,7 +112,7 @@ export default function ViewConnections() {
               Crew Requests
             </button>
             <button
-              onClick={() => setTab('outgoing')}
+              onClick={() => { setTab('outgoing'); nav('/ViewConnections?tab=outgoing'); }}
               className={`px-3 py-2 text-sm ${
                 tab === 'outgoing' ? 'border-b-2 border-slate-900 font-semibold' : ''
               }`}

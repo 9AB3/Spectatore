@@ -6,7 +6,7 @@ const { Pool } = pg;
  * - In production (Render), DATABASE_URL must be set.
  * - For local development, default to a common local Postgres URL.
  */
-const DEFAULT_LOCAL_URL = 'postgres://postgres:postgres@localhost:5432/spectatore';
+const DEFAULT_LOCAL_URL = 'postgres://postgres:postgres@127.0.0.1:5432/spectatore';
 const url = (process.env.DATABASE_URL || '').trim() || DEFAULT_LOCAL_URL;
 
 // Log only the hostname to avoid leaking credentials into terminal logs.

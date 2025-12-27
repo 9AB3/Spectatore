@@ -9,7 +9,10 @@
     "clear:data": "tsx src/tools/clearData.ts",
     "db:check": "tsx src/tools/dbCheck.ts",
     "db:init": "tsx src/tools/dbInit.ts",
-    "seed:data": "tsx src/tools/seedDataCli.ts"
+    "seed:data": "tsx src/tools/seedDataCli.ts",
+    "db:up": "docker compose -f ../docker-compose.yml up -d",
+    "db:down": "docker compose -f ../docker-compose.yml down",
+    "db:logs": "docker compose -f ../docker-compose.yml logs -f postgres"
   },
   "dependencies": {
     "@sendgrid/mail": "^8.1.6",
