@@ -1,6 +1,9 @@
 import { pool } from './pg.js';
 import { sendPushToUser } from './push.js';
 
+console.log('[notify]', { user_id, type, title });
+
+
 export async function notify(
   user_id: number,
   type: string,
