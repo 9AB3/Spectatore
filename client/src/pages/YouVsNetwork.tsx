@@ -1,9 +1,8 @@
 import Header from '../components/Header';
 import BottomNav from '../components/BottomNav';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { useNavigate } from 'react-router-dom';
 
 const MILESTONE_METRICS = [
   'GS Drillm',
@@ -66,16 +65,15 @@ function LineChart({
   const ref = useRef<HTMLDivElement | null>(null);
   const [hover, setHover] = useState<{ i: number; x: number; y: number } | null>(null);
 
-    // RESET hover when rows change (dates / metric change)
+  // RESET hover when rows change (dates / metric change)
   useEffect(() => {
     setHover(null);
   }, [rows]);
 
-
   const pts = useMemo(() => {
     const w = 900;
-    const h = 260;        // <- a bit taller for x labels
-    const pad = 34;       // <- more padding for x labels
+    const h = 260; // <- a bit taller for x labels
+    const pad = 34; // <- more padding for x labels
 
     const xs = rows.map((_, i) => (rows.length <= 1 ? 0.5 : i / (rows.length - 1)));
     const maxV = Math.max(1, ...rows.flatMap((r) => [r.a, r.b]));
@@ -180,31 +178,39 @@ function LineChart({
 
         {/* lines */}
         <path d={path(pts.a)} fill="none" stroke="currentColor" strokeWidth={2} />
-        <path d={path(pts.b)} fill="none" stroke="currentColor" strokeWidth={2} strokeDasharray="6 6" opacity={0.85} />
+        <path
+          d={path(pts.b)}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeDasharray="6 6"
+          opacity={0.85}
+        />
 
-       {/* hover marker */}
-{hover ? (() => {
-  const i = Math.max(0, Math.min(rows.length - 1, hover.i));
-  const aPt = pts.a[i];
-  const bPt = pts.b[i];
-  if (!aPt || !bPt) return null;
+        {/* hover marker */}
+        {hover
+          ? (() => {
+              const i = Math.max(0, Math.min(rows.length - 1, hover.i));
+              const aPt = pts.a[i];
+              const bPt = pts.b[i];
+              if (!aPt || !bPt) return null;
 
-  return (
-    <>
-      <line
-        x1={aPt.x}
-        y1={pts.pad}
-        x2={aPt.x}
-        y2={pts.h - pts.pad}
-        stroke="currentColor"
-        opacity={0.12}
-      />
-      <circle cx={aPt.x} cy={aPt.y} r={4} fill="currentColor" />
-      <circle cx={bPt.x} cy={bPt.y} r={4} fill="currentColor" opacity={0.6} />
-    </>
-  );
-})() : null}
-
+              return (
+                <>
+                  <line
+                    x1={aPt.x}
+                    y1={pts.pad}
+                    x2={aPt.x}
+                    y2={pts.h - pts.pad}
+                    stroke="currentColor"
+                    opacity={0.12}
+                  />
+                  <circle cx={aPt.x} cy={aPt.y} r={4} fill="currentColor" />
+                  <circle cx={bPt.x} cy={bPt.y} r={4} fill="currentColor" opacity={0.6} />
+                </>
+              );
+            })()
+          : null}
       </svg>
 
       {/* hover tooltip */}
@@ -230,7 +236,6 @@ function LineChart({
   );
 }
 
-
 export default function YouVsNetwork() {
   const location = useLocation();
   const nav = useNavigate();
@@ -242,15 +247,17 @@ export default function YouVsNetwork() {
   });
   const [to, setTo] = useState(() => ymd(new Date()));
   const [metric, setMetric] = useState<Metric>('Tonnes Hauled');
+
   // Allow deep-linking from push notifications, e.g. /YouVsNetwork?metric=Tonnes%20Hauled
   useEffect(() => {
     try {
       const sp = new URLSearchParams(location.search);
       const m = (sp.get('metric') || '').trim();
       if (!m) return;
-      // match ignoring case against known metrics
-      const hit = (MILESTONE_METRICS as any[]).find((x) => String(x).toLowerCase() === m.toLowerCase());
-      if (hit) setMetric(hit as any);
+
+      // match ignoring case against known metrics (no readonly->mutable cast)
+      const hit = MILESTONE_METRICS.find((x) => x.toLowerCase() === m.toLowerCase());
+      if (hit) setMetric(hit);
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search]);
@@ -266,7 +273,9 @@ export default function YouVsNetwork() {
     setErr('');
     try {
       const cmp = compareUserId ? `&compare_user_id=${encodeURIComponent(String(compareUserId))}` : '';
-      const r = (await api(`/api/reports/network?metric=${encodeURIComponent(metric)}&from=${from}&to=${to}${cmp}`)) as NetworkResp;
+      const r = (await api(
+        `/api/reports/network?metric=${encodeURIComponent(metric)}&from=${from}&to=${to}${cmp}`
+      )) as NetworkResp;
       setData(r);
     } catch (e: any) {
       setErr(e?.message || 'Failed to load');
@@ -366,9 +375,7 @@ export default function YouVsNetwork() {
                   </option>
                 ))}
               </select>
-              <div className="text-[11px] opacity-70 mt-1">
-                Choose a crew mate to compare one-on-one, or leave on Network avg.
-              </div>
+              <div className="text-[11px] opacity-70 mt-1">Choose a crew mate to compare one-on-one, or leave on Network avg.</div>
             </div>
           </div>
 
@@ -400,20 +407,26 @@ export default function YouVsNetwork() {
             </div>
           </div>
 
-          {err ? <div className="text-sm" style={{ color: '#b00020' }}>{err}</div> : null}
+          {err ? (
+            <div className="text-sm" style={{ color: '#b00020' }}>
+              {err}
+            </div>
+          ) : null}
 
           {rows.length ? (
             <div className="relative">
               <div className="text-xs opacity-70 mb-2">
                 Solid = you, dashed = {bLabel} • {mode === 'cumulative' ? 'cumulative total' : 'daily total'}
               </div>
-              <LineChart rows={rows} bLabel={bLabel} yLabel={metric} />
 
+              <LineChart rows={rows} bLabel={bLabel} yLabel={metric} />
 
               {/* cumulative summary */}
               <div className="grid md:grid-cols-3 gap-3 mt-3">
                 <div className="p-3 rounded-2xl border" style={{ borderColor: '#e9d9c3' }}>
-                  <div className="text-xs opacity-70">Your cumulative ({from} → {to})</div>
+                  <div className="text-xs opacity-70">
+                    Your cumulative ({from} → {to})
+                  </div>
                   <div className="text-lg font-semibold">{cumSummary.a.toFixed(1)}</div>
                 </div>
                 <div className="p-3 rounded-2xl border" style={{ borderColor: '#e9d9c3' }}>
@@ -426,9 +439,7 @@ export default function YouVsNetwork() {
                     {cumSummary.pct >= 0 ? '+' : ''}
                     {cumSummary.pct.toFixed(1)}%
                   </div>
-                  <div className="text-sm opacity-70">
-                    {cumSummary.pct >= 0 ? 'Above' : 'Below'} for selected period
-                  </div>
+                  <div className="text-sm opacity-70">{cumSummary.pct >= 0 ? 'Above' : 'Below'} for selected period</div>
                 </div>
               </div>
 
@@ -442,7 +453,8 @@ export default function YouVsNetwork() {
                   <div className="text-xs opacity-70">Network best day</div>
                   <div className="text-lg font-semibold">{(data?.networkBest?.total || 0).toFixed(1)}</div>
                   <div className="text-sm opacity-70">
-                    {data?.networkBest?.date || '-'}{data?.networkBest?.name ? ` • ${data.networkBest.name}` : ''}
+                    {data?.networkBest?.date || '-'}
+                    {data?.networkBest?.name ? ` • ${data.networkBest.name}` : ''}
                   </div>
                 </div>
               </div>

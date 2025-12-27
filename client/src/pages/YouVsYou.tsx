@@ -1036,12 +1036,14 @@ export default function YouVsYou() {
             </div>
           </div>
 
-          <div className="mt-3">
-            <LineChart
-              points={series.map((p) => ({ ...p, label: p.label }))}
-              unit={selected.unit}
-            />
-          </div>
+         <div className="mt-3">
+  <LineChart
+    points={series}
+    unit={selected.unit}
+    yLabel={selected.title}
+  />
+</div>
+
 
           <div className="mt-3 text-xs text-slate-600">
             Dashed line = your average for the selected window. Hover a point to see the value.
