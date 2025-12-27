@@ -2,7 +2,6 @@ import { Router } from 'express';
 import { pool } from '../lib/pg.js';
 import { notify } from '../lib/notify.js';
 import { authMiddleware } from '../lib/auth.js';
-import { sendPushToUser } from '../lib/push.js';
 
 const router = Router();
 
@@ -218,12 +217,6 @@ router.post('/connections/request', authMiddleware, async (req: any, res) => {
           requester_name: nm,
         });
 
-        console.log(`[push] connection_request to user=${aid} from=${rid}`);
-        await sendPushToUser(aid, {
-          title: 'Spectatore',
-          body: `${nm} sent you a crew request.`,
-          data: { type: 'connection_request', requester_id: rid, requester_name: nm },
-        });
       } catch (e) {
         console.log('[push] connection_request failed (revive same)', e);
       }
@@ -265,12 +258,6 @@ router.post('/connections/request', authMiddleware, async (req: any, res) => {
           requester_name: nm,
         });
 
-        console.log(`[push] connection_request to user=${aid} from=${rid} (revive flipped)`);
-        await sendPushToUser(aid, {
-          title: 'Spectatore',
-          body: `${nm} sent you a crew request.`,
-          data: { type: 'connection_request', requester_id: rid, requester_name: nm },
-        });
       } catch (e) {
         console.log('[push] connection_request failed (revive opp)', e);
       }
@@ -296,12 +283,6 @@ router.post('/connections/request', authMiddleware, async (req: any, res) => {
         requester_name: nm,
       });
 
-      console.log(`[push] connection_request to user=${aid} from=${rid}`);
-      await sendPushToUser(aid, {
-        title: 'Spectatore',
-        body: `${nm} sent you a crew request.`,
-        data: { type: 'connection_request', requester_id: rid, requester_name: nm },
-      });
     } catch (e) {
       console.log('[push] connection_request failed (new)', e);
     }
@@ -343,17 +324,6 @@ router.post('/connections/:id/accept', authMiddleware, async (req: any, res) => 
         });
 
         // push both parties
-        console.log(`[push] connection_accepted notify rid=${rid} aid=${aid}`);
-        await sendPushToUser(rid, {
-          title: 'Spectatore',
-          body: `${an} accepted your crew request.`,
-          data: { type: 'connection_accepted', other_id: aid, other_name: an },
-        });
-        await sendPushToUser(aid, {
-          title: 'Spectatore',
-          body: `You and ${bn} are now crew mates.`,
-          data: { type: 'connection_accepted', other_id: rid, other_name: bn },
-        });
       }
     } catch (e) {
       console.log('[push] connection_accepted failed', e);
