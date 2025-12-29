@@ -174,7 +174,8 @@ router.get('/site-invites', authMiddleware, async (req: any, res) => {
     const r = await pool.query(
       `SELECT
          m.id,
-         COALESCE(s.name, m.site_name, m.site, '') as site,
+        COALESCE(s.name, m.site_name, '') as site,
+
          COALESCE(m.role,'member') as role,
          COALESCE(m.status,'') as status,
          m.requested_at
