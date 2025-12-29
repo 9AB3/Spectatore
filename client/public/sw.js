@@ -67,6 +67,23 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
+  // Never cache API responses. Caching /api in dev makes the UI appear stale
+  // and in prod it can serve incorrect permissioned data.
+  if (url.pathname.startsWith('/api/')) {
+    event.respondWith(fetch(req));
+    return;
+  }
+
+  // In local dev, avoid all caching so Vite HMR and live testing behave normally.
+  if (
+    self.location.hostname === 'localhost' ||
+    self.location.hostname === '127.0.0.1' ||
+    self.location.hostname.endsWith('.localhost')
+  ) {
+    event.respondWith(fetch(req));
+    return;
+  }
+
   // SPA navigation fallback
   if (req.mode === 'navigate') {
     event.respondWith(

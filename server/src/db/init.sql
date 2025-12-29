@@ -94,132 +94,129 @@ CREATE TABLE IF NOT EXISTS admin_sites (
 );
 
 
-
--- SHIFTS (store site for fast filtering; also keep user_id reference)
-CREATE TABLE IF NOT EXISTS shifts (
-  id SERIAL PRIMARY KEY,
-  user_id INT REFERENCES users(id) ON DELETE CASCADE,
-  user_email TEXT,
-  user_name TEXT,
-  site TEXT NOT NULL,
-  date DATE NOT NULL,
-  dn TEXT NOT NULL,
-  totals_json JSONB DEFAULT '{}'::jsonb,
-  meta_json JSONB DEFAULT '{}'::jsonb,
-  finalized_at TIMESTAMPTZ,
-  updated_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE (user_id, date, dn)
-);
-
-
-CREATE INDEX IF NOT EXISTS idx_shifts_site_date ON shifts(site, date);
-CREATE INDEX IF NOT EXISTS idx_shifts_user ON shifts(user_id);
-
--- ACTIVITIES
-CREATE TABLE IF NOT EXISTS shift_activities (
-  id SERIAL PRIMARY KEY,
-  shift_id INT REFERENCES shifts(id) ON DELETE CASCADE,
-  user_email TEXT,
-  user_name TEXT,
-  site TEXT NOT NULL,
-  activity TEXT NOT NULL,
-  sub_activity TEXT NOT NULL,
-  payload_json JSONB DEFAULT '{}'::jsonb,
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_acts_shift ON shift_activities(shift_id);
-CREATE INDEX IF NOT EXISTS idx_acts_site ON shift_activities(site);
-CREATE INDEX IF NOT EXISTS idx_acts_activity ON shift_activities(activity, sub_activity);
-
--- VALIDATION LAYER
--- NOTE: validated_days was unused and always empty in the UI; removing it.
-DROP TABLE IF EXISTS validated_days;
-
-CREATE TABLE IF NOT EXISTS validated_shifts (
-  id SERIAL PRIMARY KEY,
-  site TEXT NOT NULL,
-  date DATE NOT NULL,
-  dn TEXT NOT NULL,
-  user_email TEXT,
-  user_name TEXT,
-  validated INTEGER NOT NULL DEFAULT 0,
-  totals_json JSONB DEFAULT '{}'::jsonb
-);
-
-
-CREATE INDEX IF NOT EXISTS idx_vshifts_site_date ON validated_shifts(site, date);
-
-ALTER TABLE IF EXISTS validated_shifts ADD COLUMN IF NOT EXISTS validated INTEGER NOT NULL DEFAULT 0;
-
-CREATE TABLE IF NOT EXISTS validated_shift_activities (
-  id SERIAL PRIMARY KEY,
-  site TEXT NOT NULL,
-  date DATE NOT NULL,
-  dn TEXT NOT NULL,
-  user_email TEXT,
-  user_name TEXT,
-  activity TEXT NOT NULL,
-  sub_activity TEXT NOT NULL,
-  payload_json JSONB DEFAULT '{}'::jsonb
-);
-
--- Backfill columns if DB already exists
-ALTER TABLE IF EXISTS shifts ADD COLUMN IF NOT EXISTS user_email TEXT;
-ALTER TABLE IF EXISTS shifts ADD COLUMN IF NOT EXISTS user_name TEXT;
-ALTER TABLE IF EXISTS shift_activities ADD COLUMN IF NOT EXISTS user_email TEXT;
-ALTER TABLE IF EXISTS shift_activities ADD COLUMN IF NOT EXISTS user_name TEXT;
-ALTER TABLE IF EXISTS validated_shifts ADD COLUMN IF NOT EXISTS user_name TEXT;
-ALTER TABLE IF EXISTS validated_shift_activities ADD COLUMN IF NOT EXISTS user_name TEXT;
-
-CREATE INDEX IF NOT EXISTS idx_vacts_site_date ON validated_shift_activities(site, date);
-
--- USER FEEDBACK
-CREATE TABLE IF NOT EXISTS user_feedback (
-  id SERIAL PRIMARY KEY,
-  user_id INT REFERENCES users(id) ON DELETE SET NULL,
-  user_email TEXT,
-  user_name TEXT,
-  site TEXT,
-  message TEXT NOT NULL,
-  approved BOOLEAN NOT NULL DEFAULT FALSE,
-  declined BOOLEAN NOT NULL DEFAULT FALSE,
-  reviewed_by TEXT,
-  reviewed_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  terms_accepted_at TIMESTAMPTZ,
-  terms_version TEXT
-);
-
-
-CREATE INDEX IF NOT EXISTS idx_user_feedback_approved ON user_feedback(approved);
-
-CREATE TABLE IF NOT EXISTS user_feedback_votes (
-  id SERIAL PRIMARY KEY,
-  feedback_id INT NOT NULL REFERENCES user_feedback(id) ON DELETE CASCADE,
-  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE(feedback_id, user_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_feedback_votes_feedback ON user_feedback_votes(feedback_id);
-
--- NOTIFICATIONS
-CREATE TABLE IF NOT EXISTS notifications (
+-- SITE MEMBERSHIPS (approval + roles)
+-- Authoritative membership + roles per site.
+-- role: member | validator | admin
+-- status: requested | active | revoked
+--
+-- NOTE: site_name is deprecated (legacy/backfill only). site_id is authoritative.
+CREATE TABLE IF NOT EXISTS site_memberships (
   id SERIAL PRIMARY KEY,
   user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  type TEXT NOT NULL,
-  title TEXT NOT NULL,
-  body TEXT NOT NULL,
-  payload_json JSONB DEFAULT '{}'::jsonb,
+  site_id INT REFERENCES admin_sites(id) ON DELETE CASCADE,
+  site_name TEXT, -- legacy / snapshot
+  role TEXT NOT NULL DEFAULT 'member',
+  status TEXT NOT NULL DEFAULT 'requested',
+  requested_at TIMESTAMPTZ DEFAULT now(),
+  approved_at TIMESTAMPTZ,
+  approved_by INT REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT now(),
-  read_at TIMESTAMPTZ
+  UNIQUE(user_id, site_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
-CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id) WHERE read_at IS NULL;
 
+-- ---- Schema migrations / backfill (safe to run repeatedly) ----
+DO $$
+BEGIN
+  -- users.primary_site_id
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name='users' AND column_name='primary_site_id'
+  ) THEN
+    ALTER TABLE users ADD COLUMN primary_site_id INT;
+    ALTER TABLE users ADD CONSTRAINT users_primary_site_fk FOREIGN KEY (primary_site_id)
+      REFERENCES admin_sites(id) ON DELETE SET NULL;
+  END IF;
 
+  -- site_memberships.site_id + site_name (if upgrading from legacy schema)
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name='site_memberships' AND column_name='site_id'
+  ) THEN
+    ALTER TABLE site_memberships ADD COLUMN site_id INT;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name='site_memberships' AND column_name='site_name'
+  ) THEN
+    ALTER TABLE site_memberships ADD COLUMN site_name TEXT;
+  END IF;
+
+  -- If legacy column `site` exists, copy to site_name.
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name='site_memberships' AND column_name='site'
+  ) THEN
+    EXECUTE 'UPDATE site_memberships SET site_name = COALESCE(site_name, site) WHERE site_name IS NULL OR site_name=''''';
+  END IF;
+
+  -- Ensure every referenced site_name exists in admin_sites, then backfill site_id.
+  INSERT INTO admin_sites (name)
+  SELECT DISTINCT TRIM(COALESCE(site_name, '')) AS name
+  FROM site_memberships
+  WHERE TRIM(COALESCE(site_name, '')) <> ''
+  ON CONFLICT (name) DO NOTHING;
+
+  UPDATE site_memberships m
+     SET site_id = s.id
+    FROM admin_sites s
+   WHERE m.site_id IS NULL
+     AND TRIM(COALESCE(m.site_name,'')) <> ''
+     AND s.name = TRIM(m.site_name);
+
+  -- Backfill users.primary_site_id from users.site (legacy) where possible.
+  INSERT INTO admin_sites (name)
+  SELECT DISTINCT TRIM(COALESCE(site,'')) AS name
+  FROM users
+  WHERE TRIM(COALESCE(site,'')) <> ''
+  ON CONFLICT (name) DO NOTHING;
+
+  UPDATE users u
+     SET primary_site_id = s.id
+    FROM admin_sites s
+   WHERE u.primary_site_id IS NULL
+     AND TRIM(COALESCE(u.site,'')) <> ''
+     AND s.name = TRIM(u.site);
+
+  -- Ensure membership rows exist for legacy users.site
+  INSERT INTO site_memberships (user_id, site_id, site_name, role, status, approved_at)
+  SELECT u.id, s.id, s.name, 'member', 'requested', NULL
+  FROM users u
+  JOIN admin_sites s ON s.name = TRIM(u.site)
+  LEFT JOIN site_memberships m ON m.user_id=u.id AND m.site_id=s.id
+  WHERE m.id IS NULL;
+
+  -- De-dupe any historical rows before adding a unique index.
+  -- Keep the lowest id for each (user_id, site_id).
+  DELETE FROM site_memberships a
+  USING site_memberships b
+  WHERE a.id > b.id
+    AND a.user_id = b.user_id
+    AND COALESCE(a.site_id, 0) = COALESCE(b.site_id, 0);
+
+  -- Ensure ON CONFLICT(user_id, site_id) is valid even if the table existed before.
+  EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS ux_site_memberships_user_site ON site_memberships(user_id, site_id)';
+
+  -- Indexes for site_memberships (created after migrations/backfill)
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name='site_memberships' AND column_name='site_id'
+  ) THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_site_memberships_site_id ON site_memberships(site_id)';
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_site_memberships_site_status ON site_memberships(site_id, status)';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name='site_memberships' AND column_name='user_id'
+  ) THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_site_memberships_user ON site_memberships(user_id)';
+  END IF;
+
+EXCEPTION WHEN others THEN
+  -- no-op (allows dev DBs in weird states to still boot)
+END$$;
 -- PUSH SUBSCRIPTIONS (Web Push)
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   id SERIAL PRIMARY KEY,
@@ -234,3 +231,17 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 
 
 CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id);
+
+
+-- CONTACT / DEMO REQUESTS (Marketing landing page)
+CREATE TABLE IF NOT EXISTS contact_requests (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  company TEXT,
+  site TEXT,
+  message TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_contact_requests_created_at ON contact_requests(created_at);

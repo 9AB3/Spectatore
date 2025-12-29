@@ -38,22 +38,57 @@ export function siteAdminMiddleware(req: any, res: any, next: any) {
       return next();
     }
 
-    // Allow normal auth tokens for users flagged as is_admin=true.
-    // These users are scoped to their own site in all Site Admin tools.
-    if (payload?.is_admin && payload?.id) {
-      // Look up the user's site so we can enforce site-scoping server-side.
+    // Allow normal auth tokens for users who are:
+    //  - is_admin=true (site admins)
+    //  - OR have an active membership with role validator/admin (site validators)
+    //
+    // We attach a unified `req.site_admin` object for both cases.
+    if (payload?.id) {
       pool
-        .query('SELECT id, name, email, site FROM users WHERE id=$1', [payload.id])
-        .then((r) => {
+        .query(
+          `SELECT id, name, email, site, is_admin
+             FROM users
+            WHERE id=$1`,
+          [payload.id],
+        )
+        .then(async (r) => {
           const u = r.rows?.[0];
-          if (!u?.site) {
+          if (!u?.id) return res.status(403).json({ error: 'forbidden' });
+
+          // Spectatore super-admin (users.is_admin=true)
+          // Can manage/validate across all sites.
+          if (u.is_admin) {
+            req.site_admin = {
+              username: u.name || u.email || 'Admin',
+              sites: ['*'],
+              can_manage: true,
+              is_validator: true,
+            };
+            return next();
+          }
+
+          // Validators via membership
+          try {
+            const mr = await pool.query(
+              `SELECT COALESCE(s.name, m.site, m.site_name) as site, m.role
+                 FROM site_memberships m
+                 LEFT JOIN admin_sites s ON s.id=m.site_id
+                WHERE m.user_id=$1 AND LOWER(COALESCE(m.status,'')) IN ('active','approved') AND LOWER(COALESCE(m.role,'')) IN ('validator','admin','site_admin','site_validator')`,
+              [u.id],
+            );
+                        const sites = (mr.rows || []).map((x: any) => String(x.site)).filter(Boolean);
+            if (!sites.length) return res.status(403).json({ error: 'forbidden' });
+            const can_manage = (mr.rows || []).some((x: any) => ['admin','site_admin'].includes(String(x.role).toLowerCase()));
+            req.site_admin = {
+              username: u.name || u.email || 'Validator',
+              sites,
+              can_manage,
+              is_validator: true,
+            };
+            return next();
+          } catch {
             return res.status(403).json({ error: 'forbidden' });
           }
-          req.site_admin = {
-            username: u.name || u.email || 'Admin',
-            sites: [String(u.site)],
-          };
-          return next();
         })
         .catch(() => res.status(401).json({ error: 'invalid token' }));
       return;

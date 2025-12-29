@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { getDB } from '../lib/idb';
+import { api } from '../lib/api';
 
 function cx(...xs: Array<string | false | undefined | null>) {
   return xs.filter(Boolean).join(' ');
@@ -41,12 +41,12 @@ function IconHome(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-function IconMap(props: React.SVGProps<SVGSVGElement>) {
+function IconSites(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
-      <path d="M3 6l6-2 6 2 6-2v16l-6 2-6-2-6 2V6z" />
-      <path d="M9 4v16" />
-      <path d="M15 6v16" />
+      <path d="M3 21V7l9-4 9 4v14" />
+      <path d="M9 21V12h6v9" />
+      <path d="M6 10h.01M6 14h.01M18 10h.01M18 14h.01" />
     </svg>
   );
 }
@@ -94,31 +94,22 @@ function IconTool(props: React.SVGProps<SVGSVGElement>) {
 const IS_DEV = import.meta.env.MODE !== 'production';
 
 export default function SiteAdminBottomNav() {
-  const [superAdmin, setSuperAdmin] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [canManageMembers, setCanManageMembers] = useState(false);
+  const [canManageSites, setCanManageSites] = useState(false);
+  const [canUseTools, setCanUseTools] = useState(false);
 
   useEffect(() => {
     (async () => {
+      // Single source of truth: server-scoped SiteAdmin permissions.
       try {
-        const db = await getDB();
-        const sa: any = await db.get('session', 'site_admin');
-        setSuperAdmin(!!sa?.super_admin || (Array.isArray(sa?.sites) && sa.sites.includes('*')));
+        const me: any = await api('/api/site-admin/me');
+        setCanUseTools(!!me?.ok);
+        setCanManageMembers(!!me?.is_super || !!me?.can_manage);
+        setCanManageSites(!!me?.is_super);
       } catch {
-        setSuperAdmin(false);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const db = await getDB();
-        const u: any = await db.get('session', 'user');
-        const sa: any = await db.get('session', 'site_admin');
-        // Treat any site_admin session as admin; also honor user.is_admin from normal login.
-        setIsAdmin(!!u?.is_admin || !!u?.isAdmin || !!sa);
-      } catch {
-        setIsAdmin(false);
+        setCanManageMembers(false);
+        setCanManageSites(false);
+        setCanUseTools(false);
       }
     })();
   }, []);
@@ -136,25 +127,25 @@ export default function SiteAdminBottomNav() {
       <div
         className={cx('max-w-2xl mx-auto px-2 py-1 grid text-[var(--text)]')}
         style={{
-          gridTemplateColumns: `repeat(${
-            4 + (superAdmin ? 1 : 0) + (IS_DEV && isAdmin ? 1 : 0)
-          }, minmax(0, 1fr))`,
+          gridTemplateColumns: `repeat(${2 + (canManageSites ? 1 : 0) + (canManageMembers ? 1 : 0) + (canUseTools ? 1 : 0) + (IS_DEV && canManageSites ? 1 : 0)}, minmax(0, 1fr))`,
         }}
       >
         <Item to="/SiteAdmin" label="Home" icon={<IconHome className="h-6 w-6" />} />
-        {superAdmin && (
-          <Item to="/SiteAdmin/Sites" label="Sites" icon={<IconMap className="h-6 w-6" />} />
+        {canManageSites && (
+          <Item to="/SiteAdmin/Sites" label="Sites" icon={<IconSites className="h-6 w-6" />} />
         )}
-        <Item to="/SiteAdmin/SiteAdmins" label={'Site\nAdmins'} icon={<IconUsers className="h-6 w-6" />} />
+        {canManageMembers && (<Item to="/SiteAdmin/People" label={'People'} icon={<IconUsers className="h-6 w-6" />} />)}
         <Item to="/SiteAdmin/Validate" label="Validate" icon={<IconCheck className="h-6 w-6" />} />
-        {IS_DEV && isAdmin && (
+        {IS_DEV && canManageSites && (
           <Item to="/SiteAdmin/Seed" label="Seed" icon={<IconSeed className="h-6 w-6" />} />
         )}
-        <Item
-          to="/SiteAdmin/Equipment&Locations"
-          label={'Equipment\nLocations'}
-          icon={<IconTool className="h-6 w-6" />}
-        />
+        {canUseTools && (
+          <Item
+            to="/SiteAdmin/Equipment&Locations"
+            label={'Equipment\nLocations'}
+            icon={<IconTool className="h-6 w-6" />}
+          />
+        )}
       </div>
     </nav>
   );

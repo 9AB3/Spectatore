@@ -60,20 +60,10 @@ export async function api(path: string, init: RequestInit = {}) {
   try {
     const db = await getDB();
     if (!headers.has('Authorization')) {
-      if (path.startsWith('/api/site-admin')) {
-        // Prefer the dedicated site-admin token, but fall back to normal auth token
-        // when the logged-in user is an admin (is_admin=true).
-        const sa = await db.get('session', 'site_admin');
-        if (sa?.token) {
-          headers.set('Authorization', `Bearer ${sa.token}`);
-        } else {
-          const auth = await db.get('session', 'auth');
-          if (auth?.token) headers.set('Authorization', `Bearer ${auth.token}`);
-        }
-      } else {
-        const session = await db.get('session', 'auth');
-        if (session?.token) headers.set('Authorization', `Bearer ${session.token}`);
-      }
+      // Single source of truth: the normal user JWT.
+      // SiteAdmin authorization is enforced server-side via /api/site-admin/* middleware.
+      const session = await db.get('session', 'auth');
+      if (session?.token) headers.set('Authorization', `Bearer ${session.token}`);
     }
   } catch {
     // ignore – offline or no session yet
@@ -83,10 +73,29 @@ export async function api(path: string, init: RequestInit = {}) {
     headers.set('Content-Type', 'application/json');
   }
 
+  // If caller passed a plain object as body, ensure we JSON.stringify it.
+  // Otherwise fetch() will send "[object Object]" which breaks express.json().
+  let finalBody: any = init.body as any;
+  const reqCt = headers.get('Content-Type') || '';
+  if (finalBody && reqCt.includes('application/json')) {
+    const isString = typeof finalBody === 'string';
+    const isBodyLike =
+      (typeof FormData !== 'undefined' && finalBody instanceof FormData) ||
+      (typeof Blob !== 'undefined' && finalBody instanceof Blob) ||
+      (typeof URLSearchParams !== 'undefined' && finalBody instanceof URLSearchParams) ||
+      (typeof ArrayBuffer !== 'undefined' && finalBody instanceof ArrayBuffer) ||
+      (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView && ArrayBuffer.isView(finalBody));
+
+    if (!isString && !isBodyLike && typeof finalBody === 'object') {
+      finalBody = JSON.stringify(finalBody);
+    }
+  }
+
   try {
     const res = await fetch(url, {
       ...init,
       headers,
+      body: finalBody,
       credentials: init.credentials ?? 'same-origin',
     });
 

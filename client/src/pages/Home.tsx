@@ -154,7 +154,7 @@ export default function Home() {
             className="text-xs text-sky-600 cursor-pointer mt-1"
             onClick={() => nav('/SiteAdminLogin')}
           >
-            Site Admin Login
+            Site Admin
           </div>
         </div>
       </div>

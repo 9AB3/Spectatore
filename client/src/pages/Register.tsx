@@ -1,5 +1,5 @@
 import Header from '../components/Header';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getDB } from '../lib/idb';
@@ -12,9 +12,24 @@ export default function Register() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [name, setName] = useState('');
-  const [siteSelect, setSiteSelect] = useState<'CSA' | 'Endeavor' | 'Peak' | 'Not in List'>('CSA');
+  const [siteOptions, setSiteOptions] = useState<string[]>(['CSA', 'Endeavor', 'Peak']);
+  const [siteSelect, setSiteSelect] = useState<string>('CSA');
   const [siteManual, setSiteManual] = useState('');
   const [state, setState] = useState('NSW');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r: any = await api('/api/meta/sites');
+        if (Array.isArray(r?.sites) && r.sites.length) {
+          setSiteOptions(r.sites);
+          if (!r.sites.includes(siteSelect)) setSiteSelect(r.sites[0]);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function submit() {
     if (!name || !email || !password || !confirm) {
@@ -100,9 +115,11 @@ export default function Register() {
               if (v !== 'Not in List') setSiteManual('');
             }}
           >
-            <option>CSA</option>
-            <option>Endeavor</option>
-            <option>Peak</option>
+            {siteOptions.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
             <option>Not in List</option>
           </select>
 
@@ -117,9 +134,9 @@ export default function Register() {
               />
               {/* Dropdown suggestions + allows free typing (saved as the site) */}
               <datalist id="site-suggestions">
-                <option value="CSA" />
-                <option value="Endeavor" />
-                <option value="Peak" />
+                {siteOptions.map((s) => (
+                  <option key={s} value={s} />
+                ))}
               </datalist>
               <div className="text-xs text-slate-500 mt-1">This will be saved as your site.</div>
             </div>

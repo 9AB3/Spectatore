@@ -8,6 +8,20 @@ import { siteAdminMiddleware } from '../lib/auth.js';
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
+function isManager(req: any) {
+  const sites = allowedSites(req);
+  if (sites.includes('*')) return true;
+  return !!req.site_admin?.can_manage;
+}
+
+function assertManager(req: any) {
+  if (!isManager(req)) {
+    const e: any = new Error('forbidden');
+    e.status = 403;
+    throw e;
+  }
+}
+
 
 // ---- admin sites management ----
 router.get('/admin-sites', siteAdminMiddleware, async (_req, res) => {
@@ -114,8 +128,134 @@ router.delete('/admin-sites', siteAdminMiddleware, async (req: any, res) => {
 
 // Convenience endpoint for the SiteAdmin UI to understand current scope
 router.get('/me', siteAdminMiddleware, async (req: any, res) => {
-  const sites = allowedSites(req);
-  return res.json({ ok: true, sites, is_super: sites.includes('*') });
+  try {
+    const sites = allowedSites(req);
+    let site_rows: Array<{ id: number; name: string; state?: string | null }> = [];
+    if (sites.includes('*')) {
+      const r = await pool.query(`SELECT id, name, state FROM admin_sites ORDER BY name ASC`);
+      site_rows = r.rows || [];
+    } else if (sites.length) {
+      const r = await pool.query(
+        `SELECT id, name, state FROM admin_sites WHERE name = ANY($1::text[]) ORDER BY name ASC`,
+        [sites],
+      );
+      site_rows = r.rows || [];
+    }
+    return res.json({ ok: true, sites, site_rows, is_super: sites.includes('*'), can_manage: !!req.site_admin?.can_manage });
+  } catch {
+    const sites = allowedSites(req);
+    return res.json({ ok: true, sites, site_rows: [], is_super: sites.includes('*'), can_manage: !!req.site_admin?.can_manage });
+  }
+});
+// ---- site admin accounts (legacy: users.is_admin=true) ----
+// These endpoints power the "Site Admins" page in the SiteAdmin UI.
+// Note: validators/memberships are managed separately via /members/* endpoints.
+
+// List site admin user accounts
+router.get('/site-admins', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const sites = allowedSites(req);
+    if (sites.includes('*')) {
+      const r = await pool.query(
+        `SELECT id, name, email, site
+           FROM users
+          WHERE is_admin=TRUE
+          ORDER BY site ASC, name ASC, email ASC`,
+      );
+      return res.json({ ok: true, admins: r.rows || [] });
+    }
+
+    const r = await pool.query(
+      `SELECT id, name, email, site
+         FROM users
+        WHERE is_admin=TRUE AND site = ANY($1)
+        ORDER BY site ASC, name ASC, email ASC`,
+      [sites],
+    );
+    return res.json({ ok: true, admins: r.rows || [] });
+  } catch (e: any) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'Failed to load admins' });
+  }
+});
+
+// Create a new site admin user account
+router.post('/create-site-admin', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const name = String(req.body?.name || '').trim();
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const password = String(req.body?.password || '');
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    if (!name || !email || !password || !site) return res.status(400).json({ ok: false, error: 'Missing fields' });
+
+    // Scope check: non-super admins can only create admins for their scoped site
+    assertSiteAccess(req, site);
+
+    const hash = bcrypt.hashSync(password, 10);
+
+    const r = await pool.query(
+      `INSERT INTO users (email, password_hash, name, site, is_admin, email_confirmed)
+       VALUES ($1,$2,$3,$4,TRUE,TRUE)
+       ON CONFLICT (email) DO UPDATE
+         SET password_hash=EXCLUDED.password_hash,
+             name=EXCLUDED.name,
+             site=EXCLUDED.site,
+             is_admin=TRUE,
+             email_confirmed=TRUE
+       RETURNING id, name, email, site`,
+      [email, hash, name, site],
+    );
+
+    const userId = Number(r.rows?.[0]?.id || 0);
+
+    // Also ensure membership exists for auditing / future role unification.
+    if (userId) {
+      await pool.query(
+        `INSERT INTO site_memberships (user_id, site_id, site_name, role, status, approved_at, approved_by)
+         VALUES ($1,(SELECT id FROM admin_sites WHERE name=$2),$2,'admin','active',NOW(),$3)
+         ON CONFLICT (user_id, site_id)
+         DO UPDATE SET role='admin', status='active', approved_at=NOW(), approved_by=EXCLUDED.approved_by`,
+        [userId, site, req.user_id || null],
+      );
+    }
+
+    return res.json({ ok: true, admin: r.rows?.[0] });
+  } catch (e: any) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'Failed to create admin' });
+  }
+});
+
+// Delete a site admin user account (and their data)
+router.delete('/site-admins', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const id = Number(req.body?.id || 0);
+    if (!id) return res.status(400).json({ ok: false, error: 'Missing id' });
+
+    // Load user to enforce scope
+    const ur = await pool.query('SELECT id, site, is_admin FROM users WHERE id=$1', [id]);
+    const u = ur.rows?.[0];
+    if (!u?.id) return res.status(404).json({ ok: false, error: 'not found' });
+    if (!u.is_admin) return res.status(400).json({ ok: false, error: 'not a site admin' });
+
+    assertSiteAccess(req, String(u.site));
+
+    await pool.query('BEGIN');
+    // Cascade will remove shifts/activities etc due to FK, but be explicit about memberships.
+    await pool.query('DELETE FROM site_memberships WHERE user_id=$1', [id]);
+    await pool.query('DELETE FROM users WHERE id=$1', [id]);
+    await pool.query('COMMIT');
+
+    return res.json({ ok: true });
+  } catch (e: any) {
+    try {
+      await pool.query('ROLLBACK');
+    } catch {
+      // ignore
+    }
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'Failed to delete admin' });
+  }
 });
 
 // ---- feedback moderation (super-admin only) ----
@@ -160,88 +300,250 @@ router.post('/feedback/decision', siteAdminMiddleware, async (req: any, res) => 
   }
 });
 
-router.post('/create-site-admin', siteAdminMiddleware, async (req, res) => {
-  const email = String(req.body?.email || '').trim().toLowerCase();
-  const password = String(req.body?.password || '');
-  const name = String(req.body?.name || '').trim();
-  const siteInput = String(req.body?.site || '').trim();
-
-  if (!email || !password || !name) {
-    return res.status(400).json({ ok: false, error: 'Missing required fields' });
-  }
-
+// ---- site memberships (members / validators / site admins) ----
+// List memberships for a site
+router.get('/members', siteAdminMiddleware, async (req: any, res) => {
   try {
-    const sites = allowedSites(req as any);
-    const isSuper = sites.includes('*');
+    // Validators can view the validate UI; member management should be manager-only.
+    assertManager(req);
+    const site = String(req.query.site || '').trim() || normalizeSiteParam(req);
+    if (!site || site === '*') return res.status(400).json({ ok: false, error: 'missing site' });
+    assertSiteAccess(req, site);
 
-    // Super-admin can assign any site; regular admins can only assign within their site
-    const site = isSuper ? siteInput : (sites[0] || '');
-    if (!site) return res.status(400).json({ ok: false, error: 'Missing site' });
-
-    // Ensure site exists in admin_sites (and fetch state)
-    // NOTE: state may legitimately be NULL (optional), so do NOT treat NULL state as non-existent.
-    const s = await pool.query('SELECT state FROM admin_sites WHERE name = $1', [site]);
-    const state = s.rows?.[0]?.state ?? null;
-    if ((s.rowCount || 0) === 0 && !isSuper) {
-      // If a regular admin has a site set but it isn't in admin_sites, block creation
-      return res.status(403).json({ ok: false, error: 'forbidden' });
-    }
-
-    const hash = await bcrypt.hash(password, 10);
-
-    // Create user as site admin (is_admin = true, email_confirmed = true)
-    const ins = await pool.query(
-      `INSERT INTO users(email, password_hash, name, site, state, email_confirmed, confirm_code, is_admin)
-       VALUES ($1,$2,$3,$4,$5,TRUE,NULL,TRUE)
-       RETURNING id, email, name, site, is_admin`,
-      [email, hash, name, site, state],
+    // NOTE: Avoid UNION + ORDER BY inside compound selects.
+    // SQLite is strict about ORDER BY with UNION, and some local/dev setups still use SQLite.
+    // We do 2 simple queries and merge/sort in JS (portable across SQLite/Postgres).
+    const memberships = await pool.query(
+      `SELECT
+         m.id,
+         m.user_id,
+         COALESCE(u.name,'') as name,
+         COALESCE(u.email,'') as email,
+         s.name as site,
+         m.role,
+         m.status,
+         m.requested_at as requested_at,
+         m.approved_at as approved_at
+       FROM site_memberships m
+       JOIN users u ON u.id = m.user_id
+       JOIN admin_sites s ON s.id = m.site_id
+       WHERE s.name=$1`,
+      [site],
     );
-    res.json({ ok: true, user: ins.rows[0] });
+
+    // Include legacy users who have users.site set but do not yet have a membership row.
+    // These should appear as "requested" so the admin can approve/assign roles.
+    const legacy = await pool.query(
+      `SELECT
+         -u.id as id,
+         u.id as user_id,
+         COALESCE(u.name,'') as name,
+         COALESCE(u.email,'') as email,
+         $1 as site,
+         'member' as role,
+         'requested' as status,
+         NULL as requested_at,
+         NULL as approved_at
+       FROM users u
+       LEFT JOIN site_memberships m ON m.user_id=u.id AND m.site_id=(SELECT id FROM admin_sites WHERE name=$1)
+       WHERE u.site=$1 AND m.id IS NULL`,
+      [site],
+    );
+
+    const rows = [...(memberships.rows || []), ...(legacy.rows || [])];
+    const statusRank = (s: any) => (s === 'requested' || s === 'invited' ? 0 : s === 'active' ? 1 : 2);
+    const roleRank = (r: any) => (r === 'admin' ? 0 : r === 'validator' ? 1 : 2);
+    rows.sort((a: any, b: any) => {
+      const ds = statusRank(a.status) - statusRank(b.status);
+      if (ds) return ds;
+      const dr = roleRank(a.role) - roleRank(b.role);
+      if (dr) return dr;
+      const an = String(a.name || '');
+      const bn = String(b.name || '');
+      const dn = an.localeCompare(bn);
+      if (dn) return dn;
+      return String(a.email || '').localeCompare(String(b.email || ''));
+    });
+
+    return res.json({ ok: true, rows });
   } catch (e: any) {
-    // unique violation (email)
-    const msg = String(e?.message || '');
-    if (msg.includes('users_email_key') || msg.toLowerCase().includes('duplicate')) {
-      return res.status(409).json({ ok: false, error: 'Email already exists' });
-    }
-    res.status(500).json({ ok: false, error: e?.message || 'Failed to create site admin' });
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'Failed to load members' });
   }
 });
 
-// ---- site admins management (list + delete) ----
-router.get('/site-admins', siteAdminMiddleware, async (req: any, res) => {
+// Approve / change role for a membership request
+router.post('/members/approve', siteAdminMiddleware, async (req: any, res) => {
   try {
-    const sites = allowedSites(req);
-    let q = `SELECT id, name, email, site FROM users WHERE is_admin=TRUE ORDER BY site, name`;
-    const params: any[] = [];
-    if (!sites.includes('*')) {
-      q = `SELECT id, name, email, site FROM users WHERE is_admin=TRUE AND site = ANY($1) ORDER BY site, name`;
-      params.push(sites);
+    assertManager(req);
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    if (!site || site === '*') return res.status(400).json({ ok: false, error: 'missing site' });
+    assertSiteAccess(req, site);
+
+    const user_id = Number(req.body?.user_id || 0);
+    const role = String(req.body?.role || 'member').trim();
+    if (!user_id) return res.status(400).json({ ok: false, error: 'missing user_id' });
+    if (!['member', 'validator', 'admin'].includes(role)) {
+      return res.status(400).json({ ok: false, error: 'invalid role' });
     }
-    const r = await pool.query(q, params);
-    res.json({ ok: true, admins: r.rows || [] });
-  } catch (e: any) {
-    res.status(500).json({ ok: false, error: e?.message || 'Failed to load admins' });
-  }
-});
 
-router.delete('/site-admins', siteAdminMiddleware, async (req: any, res) => {
-  try {
-    const id = Number(req.body?.id);
-    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ ok: false, error: 'Missing id' });
+    // Ensure site exists, then resolve site_id
+    await pool.query(`INSERT INTO admin_sites (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`, [site]);
+    const sid = await pool.query(`SELECT id FROM admin_sites WHERE name=$1`, [site]);
+    const site_id = Number(sid.rows?.[0]?.id || 0);
+    if (!site_id) return res.status(500).json({ ok: false, error: 'failed to resolve site_id' });
 
-    const sites = allowedSites(req);
-    if (!sites.includes('*')) {
-      const r = await pool.query('SELECT site FROM users WHERE id=$1 AND is_admin=TRUE', [id]);
-      const site = r.rows?.[0]?.site;
-      if (!site || !sites.includes(String(site))) {
-        return res.status(403).json({ ok: false, error: 'forbidden' });
+    // Guardrail: "invited" memberships must only transition via the user's accept/deny (or revoke).
+    // Admins should NOT be able to approve an invited row (that would bypass user acceptance).
+    try {
+      const cur = await pool.query(
+        `SELECT LOWER(COALESCE(status,'')) as status
+           FROM site_memberships
+          WHERE user_id=$1 AND site_id=$2
+          LIMIT 1`,
+        [user_id, site_id],
+      );
+      const curStatus = String(cur.rows?.[0]?.status || '');
+      if (curStatus === 'invited') {
+        return res.status(400).json({ ok: false, error: 'cannot approve invited membership (awaiting user response)' });
       }
+    } catch {
+      // If lookup fails, continue; update/insert will still be the source of truth.
     }
 
-    await pool.query('DELETE FROM users WHERE id=$1 AND is_admin=TRUE', [id]);
-    res.json({ ok: true });
+
+    // Update first (works even if there is no UNIQUE constraint for ON CONFLICT)
+    const upd = await pool.query(
+      `UPDATE site_memberships
+          SET role=$3, status='active', approved_at=NOW(), approved_by=$4, site=COALESCE(site,$2), site_name=COALESCE(site_name,$2)
+        WHERE user_id=$1 AND site_id=$5`,
+      [user_id, site, role, req.user_id || null, site_id],
+    );
+
+    if ((upd.rowCount || 0) === 0) {
+      await pool.query(
+        `INSERT INTO site_memberships (user_id, site_id, site, site_name, role, status, approved_at, approved_by)
+         VALUES ($1,$2,$3,$3,$4,'active',NOW(),$5)`,
+        [user_id, site_id, site, role, req.user_id || null],
+      );
+    }
+
+    return res.json({ ok: true });
   } catch (e: any) {
-    res.status(500).json({ ok: false, error: e?.message || 'Failed to delete admin' });
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
+// Search users by name/email for manual add/move
+router.get('/members/search', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const site = String(req.query.site || '').trim() || normalizeSiteParam(req);
+    if (!site || site === '*') return res.status(400).json({ ok: false, error: 'missing site' });
+    assertSiteAccess(req, site);
+
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) return res.json({ ok: true, rows: [] });
+    const like = `%${q.toLowerCase()}%`;
+
+    // Resolve site_id (create if missing)
+    await pool.query(`INSERT INTO admin_sites (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`, [site]);
+    const sid = await pool.query(`SELECT id FROM admin_sites WHERE name=$1`, [site]);
+    const site_id = Number(sid.rows?.[0]?.id || 0);
+    if (!site_id) return res.status(500).json({ ok: false, error: 'failed to resolve site_id' });
+
+    const r = await pool.query(
+      `SELECT u.id, COALESCE(u.name,'') as name, COALESCE(u.email,'') as email
+         FROM users u
+        WHERE (LOWER(COALESCE(u.name,'')) LIKE $1 OR LOWER(COALESCE(u.email,'')) LIKE $1)
+          AND NOT EXISTS (
+            SELECT 1
+              FROM site_memberships m
+             WHERE m.user_id=u.id
+               AND m.site_id=$2
+               AND m.status='active'
+          )
+        ORDER BY COALESCE(u.name,''), COALESCE(u.email,'')
+        LIMIT 20`,
+      [like, site_id],
+    );
+    return res.json({ ok: true, rows: r.rows || [] });
+  } catch (e: any) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
+router.post('/members/add', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+    await pool.query(`INSERT INTO admin_sites (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`, [site]);
+
+    const user_id_raw = Number(req.body?.user_id || 0);
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const role = String(req.body?.role || 'member').trim();
+
+    if (!['member', 'validator', 'admin'].includes(role)) {
+      return res.status(400).json({ ok: false, error: 'invalid role' });
+    }
+
+    let user_id = user_id_raw;
+    if (!user_id) {
+      if (!email) return res.status(400).json({ ok: false, error: 'missing user' });
+      const ur = await pool.query('SELECT id FROM users WHERE LOWER(email)=$1', [email.toLowerCase()]);
+      user_id = Number(ur.rows?.[0]?.id || 0);
+    }
+
+    if (!user_id) return res.status(404).json({ ok: false, error: 'user not found' });
+
+    // Manual add is now an INVITE that requires the user to accept.
+    // We avoid ON CONFLICT here so it also works on older DBs that don't yet have a unique constraint.
+    const sid = await pool.query(`SELECT id FROM admin_sites WHERE name=$1`, [site]);
+    const site_id = Number(sid.rows?.[0]?.id || 0);
+    if (!site_id) return res.status(500).json({ ok: false, error: 'failed to resolve site_id' });
+
+    const upd = await pool.query(
+      `UPDATE site_memberships
+          SET role=$3,
+              status='invited',
+              requested_at=NOW(),
+              approved_at=NULL,
+              approved_by=NULL,
+              site=COALESCE(site,$2),
+              site_name=COALESCE(site_name,$2)
+        WHERE user_id=$1 AND site_id=$4 AND status <> 'active'`,
+      [user_id, site, role, site_id],
+    );
+    if ((upd.rowCount || 0) === 0) {
+      await pool.query(
+        `INSERT INTO site_memberships (user_id, site_id, site, site_name, role, status, requested_at)
+         VALUES ($1,$2,$3,$3,$4,'invited',NOW())`,
+        [user_id, site_id, site, role],
+      );
+    }
+
+    return res.json({ ok: true, user_id });
+  } catch (e: any) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
+router.post('/members/revoke', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+    const user_id = Number(req.body?.user_id);
+    if (!user_id) return res.status(400).json({ ok: false, error: 'missing user_id' });
+    await pool.query(
+      `UPDATE site_memberships
+          SET status='revoked'
+        WHERE user_id=$1 AND site_id=(SELECT id FROM admin_sites WHERE name=$2)`,
+      [user_id, site],
+    );
+    return res.json({ ok: true });
+  } catch (e: any) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
   }
 });
 

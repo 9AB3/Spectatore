@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import useToast from '../hooks/useToast';
-import { getDB } from '../lib/idb';
 
 type AdminSite = { id: number; name: string; state?: string | null };
 
@@ -43,16 +42,26 @@ export default function SiteAdminSites() {
 
   useEffect(() => {
     (async () => {
-      const db = await getDB();
-      const sa: any = await db.get('session', 'site_admin');
-      const isSuper = !!sa?.super_admin || (Array.isArray(sa?.sites) && sa.sites.includes('*'));
-      setSuperAdmin(isSuper);
-      if (!isSuper) {
-        // Regular site admins are not allowed to manage sites
-        nav('/SiteAdmin');
+      // Determine super-admin capability from server (supports both:
+      //  - dedicated Admin/Password site_admin token
+      //  - normal user token where users.is_admin=true)
+      try {
+        const me: any = await api('/api/site-admin/me');
+        const isSuper = !!me?.is_super || (Array.isArray(me?.sites) && me.sites.includes('*'));
+        setSuperAdmin(isSuper);
+        if (!isSuper) {
+          // Regular site admins/validators are not allowed to manage the global site list
+          nav('/SiteAdmin');
+          return;
+        }
+        loadSites();
         return;
+      } catch {
+        // fall through
       }
-      loadSites();
+
+      // If we can't confirm super-admin, bounce to menu
+      nav('/SiteAdmin');
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

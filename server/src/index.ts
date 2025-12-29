@@ -19,6 +19,7 @@ import siteAdminRoutes from './routes/siteAdmin.js';
 import feedbackRoutes from './routes/feedback.js';
 import notificationsRoutes from './routes/notifications.js';
 import pushRoutes from './routes/push.js';
+import publicRoutes from './routes/public.js';
 
 const isDev = process.env.NODE_ENV !== 'production';
 const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173')
@@ -27,6 +28,12 @@ const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173')
   .filter(Boolean);
 
 const app = express();
+
+// In dev, disable etag + caching for API responses to ensure the UI updates live
+// without needing hard refreshes.
+if (isDev) {
+  app.set('etag', false);
+}
 
 async function ensureDbColumns() {
   try {
@@ -57,6 +64,15 @@ const corsOptions: CorsOptions = isDev
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
+// Prevent any intermediate caching of API responses
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Pragma', 'no-cache');
+  }
+  next();
+});
+
 async function initDb() {
   const sqlPath = path.join(process.cwd(), 'src', 'db', 'init.sql');
   const sql = fs.readFileSync(sqlPath, 'utf8');
@@ -82,6 +98,9 @@ app.use('/api/site-admin', siteAdminRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/push', pushRoutes);
+
+// Public, unauthenticated endpoints (marketing site)
+app.use('/api/public', publicRoutes);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);

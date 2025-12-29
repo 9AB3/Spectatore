@@ -67,6 +67,24 @@ router.post('/register', async (req, res) => {
 
     const user = inserted.rows[0];
 
+    // Create a membership request for the nominated site (best-effort).
+    // Membership status/role is what controls access to site-level validation tools.
+    try {
+      const siteName = String(site || '').trim();
+      if (siteName) {
+        await pool.query(
+          `INSERT INTO admin_sites (name) VALUES ($2) ON CONFLICT (name) DO NOTHING;
+           INSERT INTO site_memberships (user_id, site_id, site_name, role, status)
+           VALUES ($1,(SELECT id FROM admin_sites WHERE name=$2),$2,'member','requested')
+           ON CONFLICT (user_id, site_id) DO NOTHING;
+           UPDATE users SET primary_site_id = COALESCE(primary_site_id, (SELECT id FROM admin_sites WHERE name=$2)) WHERE id=$1`,
+          [user.id, siteName],
+        );
+      }
+    } catch {
+      // ignore
+    }
+
     // Notify support of every new signup (best-effort; never block registration)
     // NOTE: this email goes to your support inbox; the sign-up code still goes to the user.
     sendEmail(

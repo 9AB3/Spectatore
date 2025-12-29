@@ -18,6 +18,8 @@ export default function ProtectedLayout() {
   const [needsTerms, setNeedsTerms] = useState(false);
   const [termsTick, setTermsTick] = useState(false);
   const [pushPrompt, setPushPrompt] = useState(false);
+  const [invites, setInvites] = useState<Array<{ id: number; site: string; role: string }>>([]);
+  const [invitesPrompt, setInvitesPrompt] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -32,6 +34,18 @@ export default function ProtectedLayout() {
         const me = await api('/api/user/me');
         const accepted = !!(me as any)?.termsAccepted;
         setNeedsTerms(!accepted);
+
+        // Site invites prompt (only if terms accepted)
+        if (accepted) {
+          try {
+            const inv: any = await api('/api/user/site-invites');
+            const list = Array.isArray(inv?.invites) ? inv.invites : [];
+            setInvites(list);
+            setInvitesPrompt(list.length > 0);
+          } catch {
+            // ignore
+          }
+        }
 
         // Push prompt (only if terms accepted)
         if (accepted) {
@@ -106,6 +120,30 @@ export default function ProtectedLayout() {
     localStorage.setItem('spectatore-push-prompted', '1');
   }
 
+  async function respondInvite(membership_id: number, accept: boolean) {
+    setBusy(true);
+    setErr('');
+    try {
+      await api('/api/user/site-invites/respond', {
+        method: 'POST',
+        body: JSON.stringify({ membership_id, accept }),
+      });
+      const inv: any = await api('/api/user/site-invites');
+      const list = Array.isArray(inv?.invites) ? inv.invites : [];
+      setInvites(list);
+      setInvitesPrompt(list.length > 0);
+    } catch (e: any) {
+      try {
+        const msg = JSON.parse(e.message).error;
+        setErr(msg || 'Failed');
+      } catch {
+        setErr('Failed');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!checked) return null;
 
   return (
@@ -117,7 +155,38 @@ export default function ProtectedLayout() {
       }}
     >
       <Outlet />
-      <BottomNav />
+      {!location.pathname.toLowerCase().startsWith('/siteadmin') && <BottomNav />}
+
+      {/* Site invites (2-way consent) */}
+      {!needsTerms && invitesPrompt && invites.length > 0 && (
+        <div className="fixed inset-0 z-[9997] flex items-end sm:items-center justify-center bg-black/40 p-3">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+            <div className="text-lg font-semibold">Site invitation</div>
+            <div className="text-sm text-slate-600 mt-2">
+              A site admin has added you. You need to accept before you become an active member.
+            </div>
+
+            {err && <div className="text-sm text-red-600 mt-3">{err}</div>}
+
+            <div className="mt-4 space-y-3">
+              {invites.map((inv) => (
+                <div key={inv.id} className="border rounded-2xl p-4">
+                  <div className="font-semibold text-slate-900">{inv.site || 'Site'}</div>
+                  <div className="text-sm text-slate-600">Role: {String(inv.role || 'member')}</div>
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    <button type="button" className="btn" disabled={busy} onClick={() => respondInvite(inv.id, false)}>
+                      Decline
+                    </button>
+                    <button type="button" className="btn btn-primary" disabled={busy} onClick={() => respondInvite(inv.id, true)}>
+                      {busy ? 'Working…' : 'Accept'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Terms gate */}
       {needsTerms && (

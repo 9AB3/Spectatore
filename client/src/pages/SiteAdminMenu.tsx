@@ -13,15 +13,15 @@ export default function SiteAdminMenu() {
   useEffect(() => {
     (async () => {
       const db = await getDB();
-      const session = await db.get('session', 'site_admin');
-      setUsername(session?.name || session?.email || '');
+      const session = await db.get('session', 'auth');
+      setUsername(session?.email || '');
     })();
   }, []);
 
   async function logout() {
     const db = await getDB();
-    await db.delete('session', 'site_admin');
-    nav('/SiteAdminLogin');
+    await db.delete('session', 'auth');
+    nav('/Home');
   }
 
   return (

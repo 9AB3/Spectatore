@@ -717,14 +717,12 @@ export default function YouVsYou() {
           id: 'stope_buckets',
           title: 'Stope buckets',
           unit: 'ea',
-          isZeroOk: true,
           get: (r: ShiftRow) => sumMetric(r.totals_json, 'loading', 'Stope to Truck') + sumMetric(r.totals_json, 'loading', 'Stope to SP'),
         },
         {
           id: 'dev_buckets',
           title: 'Dev buckets',
           unit: 'ea',
-          isZeroOk: true,
           get: (r: ShiftRow) => sumMetric(r.totals_json, 'loading', 'Heading to Truck') + sumMetric(r.totals_json, 'loading', 'Heading to SP'),
         },
         {

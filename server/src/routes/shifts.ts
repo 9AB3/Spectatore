@@ -57,6 +57,42 @@ function flattenTotalsToMetricMap(t: any): Record<string, number> {
   return out;
 }
 
+// Compute only the milestone metrics for a single shift.
+// Prefer activity payloads if provided, otherwise fall back to totals_json.
+function computeMilestoneMetricMapForShift(
+  shiftRow: any,
+  acts: Array<{ activity: string; sub_activity: string; payload_json: any }> | undefined,
+): Record<string, number> {
+  const out: any = {};
+  for (const m of MILESTONE_METRICS as any) out[m] = 0;
+
+  if (!acts || acts.length === 0) {
+    const flat = flattenTotalsToMetricMap(shiftRow?.totals_json);
+    out['GS Drillm'] = n(flat['GS Drillm'] || 0);
+    out['Face Drillm'] = n(flat['Face Drillm'] || flat['Dev Drillm'] || 0);
+    out['Headings supported'] = n(flat['Headings supported'] || 0);
+    out['Headings bored'] = n(flat['Headings bored'] || 0);
+    out['Truck Loads'] = n(flat['Trucks'] || 0);
+    out["TKM's"] = n(flat['TKMs'] || 0);
+    out['Tonnes Hauled'] = n(flat['Total Weight'] || flat['Weight'] || 0);
+    out['Production drillm'] = n(flat['Metres Drilled'] || 0) + n(flat['Cleanouts Drilled'] || 0) + n(flat['Redrills'] || 0);
+    out['Primary Production buckets'] = n(flat['Stope to Truck'] || 0) + n(flat['Stope to SP'] || 0);
+    out['Primary Development buckets'] = n(flat['Heading to Truck'] || 0) + n(flat['Heading to SP'] || 0);
+    out['Tonnes charged'] = n(flat['Charge kg'] || 0) / 1000;
+    out['Headings Fired'] = n(flat['Headings Fired'] || 0);
+    out['Tonnes Fired'] = n(flat['Tonnes Fired'] || 0);
+    out['Ore tonnes hoisted'] = n(flat['Ore Tonnes'] || 0);
+    out['Waste tonnes hoisted'] = n(flat['Waste Tonnes'] || 0);
+    out['Total tonnes hoisted'] = n(out['Ore tonnes hoisted']) + n(out['Waste tonnes hoisted']);
+    return out;
+  }
+
+  // With payloads: some metrics are already stored as final totals, so we can still use totals_json for many.
+  // For now, use the same fallback derived from totals_json (keeps behavior stable) and allow payload-driven
+  // totals_json to remain the source of truth.
+  return computeMilestoneMetricMapForShift(shiftRow, undefined);
+}
+
 
 /**
  * Authoritative equipment → activity mapping
@@ -396,7 +432,7 @@ function buildMetaJson(items: any[]) {
       try {
         const actorId = Number(user_id);
         const actorName = user_name || 'A crew mate';
-        const metricMap = flattenTotalsToMetricMap(totals || {});
+        const metricMap = computeMilestoneMetricMapForShift({ totals_json: totals || {} }, activities as any);
 
         // Find accepted connections
         const cr = await pool.query(
@@ -420,7 +456,7 @@ function buildMetaJson(items: any[]) {
           const best: Record<string, number> = {};
           for (const m of MILESTONE_METRICS as any) best[m] = 0;
           for (const row of sr.rows || []) {
-            const mm = flattenTotalsToMetricMap(asObj(row.totals_json));
+            const mm = computeMilestoneMetricMapForShift({ totals_json: asObj(row.totals_json) }, undefined);
             for (const m of MILESTONE_METRICS as any) {
               const v = n(mm[m] || 0);
               if (v > best[m]) best[m] = v;
@@ -441,7 +477,7 @@ function buildMetaJson(items: any[]) {
               'Milestone broken',
               `${actorName} just beat your personal best for ${ex.metric}: ${ex.value.toFixed(1)} on ${date}.`,
               { actor_id: actorId, actor_name: actorName, metric: ex.metric, value: ex.value, date },
-                         `/YouVsNetwork?metric=${encodeURIComponent(String(ex.metric))}`,
+              `/YouVsNetwork?metric=${encodeURIComponent(String(ex.metric))}`,
             );
           }
         }

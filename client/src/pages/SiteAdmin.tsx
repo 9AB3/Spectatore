@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getDB } from '../lib/idb';
+import { api } from '../lib/api';
 
 function Card({ children }: { children: any }) {
   return <div className="card w-full max-w-2xl">{children}</div>;
@@ -9,36 +10,42 @@ function Card({ children }: { children: any }) {
 export default function SiteAdmin() {
   const nav = useNavigate();
   const [label, setLabel] = useState<string>('');
-  const [mode, setMode] = useState<'site_admin' | 'auth'>('site_admin');
   const [superAdmin, setSuperAdmin] = useState(false);
+  const [canManage, setCanManage] = useState(false);
+  const [isSiteAdminUser, setIsSiteAdminUser] = useState(false);
+
+function applyScope(payload: any) {
+  // Support both snake_case and camelCase keys, and both direct and nested payloads.
+  const p = payload?.data ?? payload;
+  const isSuper = !!(p?.is_super ?? p?.isSuper ?? p?.super_admin ?? p?.superAdmin);
+  const canManageVal =
+    !!(p?.can_manage ?? p?.canManage ?? p?.can_manage_members ?? p?.canManageMembers) || isSuper;
+  setSuperAdmin(isSuper);
+  setCanManage(canManageVal);
+  setIsSiteAdminUser(true);
+}
+
 
   useEffect(() => {
     (async () => {
       const db = await getDB();
-      const sa = await db.get('session', 'site_admin');
-      if (sa?.token) {
-        setMode('site_admin');
-        setLabel(sa?.username || 'Site Admin');
-        setSuperAdmin(!!sa?.super_admin || (Array.isArray(sa?.sites) && sa.sites.includes('*')));
-        return;
-      }
       const auth = await db.get('session', 'auth');
-      setMode('auth');
-      setLabel(auth?.user_id ? `Admin` : 'Admin');
-      setSuperAdmin(false);
+      setLabel(auth?.user_id ? 'Site Admin' : 'Site Admin');
+      try {
+        const me: any = await api('/api/site-admin/me');
+        applyScope(me);
+      } catch {
+        setSuperAdmin(false);
+        setCanManage(false);
+        setIsSiteAdminUser(false);
+      }
     })();
   }, []);
 
   async function logout() {
     const db = await getDB();
-    if (mode === 'site_admin') {
-      await db.delete('session', 'site_admin');
-      nav('/SiteAdminLogin');
-    } else {
-      // Auth admins generally want to return to the normal app; logout stays in Home.
-      await db.delete('session', 'auth');
-      nav('/Home');
-    }
+    await db.delete('session', 'auth');
+    nav('/Home');
   }
 
   return (
@@ -66,15 +73,29 @@ export default function SiteAdmin() {
             </button>
           </div>
 
-          <div className="p-4 rounded-2xl border" style={{ borderColor: '#e9d9c3' }}>
-            <div className="font-semibold mb-2">Master lists</div>
-            <div className="text-sm opacity-70 mb-3">
-              Manage site equipment + location lists used in validation dropdowns.
+          {(canManage || superAdmin) && (
+            <div className="p-4 rounded-2xl border" style={{ borderColor: '#e9d9c3' }}>
+              <div className="font-semibold mb-2">People</div>
+              <div className="text-sm opacity-70 mb-3">
+                Review requests, manage memberships, and adjust roles.
+              </div>
+              <button className="btn w-full" onClick={() => nav('/SiteAdmin/People')}>
+                Manage People
+              </button>
             </div>
-            <button className="btn w-full" onClick={() => nav('/SiteAdmin/Equipment&Locations')}>
-              Locations & Equipment
-            </button>
-          </div>
+          )}
+          {isSiteAdminUser && (
+            <div className="p-4 rounded-2xl border" style={{ borderColor: '#e9d9c3' }}>
+              <div className="font-semibold mb-2">Equipment & Locations</div>
+              <div className="text-sm opacity-70 mb-3">
+                Manage equipment and location lists used in validation dropdowns.
+              </div>
+              <button className="btn w-full" onClick={() => nav('/SiteAdmin/Equipment&Locations')}>
+                Equipment & Locations
+              </button>
+            </div>
+          )}
+
 
           {superAdmin && (
             <div className="p-4 rounded-2xl border" style={{ borderColor: '#e9d9c3' }}>
@@ -96,15 +117,7 @@ export default function SiteAdmin() {
             </div>
           )}
 
-          <div className="p-4 rounded-2xl border" style={{ borderColor: '#e9d9c3' }}>
-            <div className="font-semibold mb-2">Site admins</div>
-            <div className="text-sm opacity-70 mb-3">
-              Create and remove site admin accounts{superAdmin ? ' (any site).' : ' (your site only).'}
-            </div>
-            <button className="btn w-full" onClick={() => nav('/SiteAdmin/SiteAdmins')}>
-              Manage Site Admins
-            </button>
-          </div>
+          {/* Legacy duplicate cards removed (People covers membership + roles) */}
         </div>
       </Card>
     </div>

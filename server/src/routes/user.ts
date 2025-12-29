@@ -165,4 +165,73 @@ router.post('/terms/accept', authMiddleware, async (req: any, res) => {
   }
 });
 
+// ---- Site membership invites (2-way consent) ----
+// When a site-admin "adds" a user via /SiteAdmin/People, we create a membership with status='invited'.
+// The invited user must accept before it becomes active.
+router.get('/site-invites', authMiddleware, async (req: any, res) => {
+  try {
+    const user_id = req.user_id;
+    const r = await pool.query(
+      `SELECT
+         m.id,
+         COALESCE(s.name, m.site_name, m.site, '') as site,
+         COALESCE(m.role,'member') as role,
+         COALESCE(m.status,'') as status,
+         m.requested_at
+       FROM site_memberships m
+       LEFT JOIN admin_sites s ON s.id = m.site_id
+       WHERE m.user_id=$1 AND m.status='invited'
+       ORDER BY m.requested_at DESC NULLS LAST, m.id DESC`,
+      [user_id],
+    );
+    return res.json({ ok: true, invites: r.rows || [] });
+  } catch (err) {
+    console.error('GET /user/site-invites failed', err);
+    return res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
+
+router.post('/site-invites/respond', authMiddleware, async (req: any, res) => {
+  try {
+    const user_id = req.user_id;
+    const membership_id = Number(req.body?.membership_id || 0);
+    const accept = !!req.body?.accept;
+    if (!membership_id) return res.status(400).json({ ok: false, error: 'missing membership_id' });
+
+    const m = await pool.query(
+      `SELECT id, status
+         FROM site_memberships
+        WHERE id=$1 AND user_id=$2`,
+      [membership_id, user_id],
+    );
+    if (!m.rows?.[0]) return res.status(404).json({ ok: false, error: 'invite not found' });
+
+    const status = String(m.rows[0].status || '');
+    if (status !== 'invited') {
+      return res.status(400).json({ ok: false, error: 'not_invited' });
+    }
+
+    if (accept) {
+      await pool.query(
+        `UPDATE site_memberships
+            SET status='active', approved_at=NOW(), approved_by=NULL
+          WHERE id=$1 AND user_id=$2`,
+        [membership_id, user_id],
+      );
+      return res.json({ ok: true, status: 'active' });
+    }
+
+    await pool.query(
+      `UPDATE site_memberships
+          SET status='declined'
+        WHERE id=$1 AND user_id=$2`,
+      [membership_id, user_id],
+    );
+    return res.json({ ok: true, status: 'declined' });
+  } catch (err) {
+    console.error('POST /user/site-invites/respond failed', err);
+    return res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
+
 export default router;

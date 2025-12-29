@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate, Link } from 'react-router-dom';
+import Landing from './pages/Landing';
 import Home from './pages/Home';
 import Main from './pages/Main';
 import Shift from './pages/Shift';
@@ -27,17 +28,16 @@ import SiteAdminLogin from './pages/SiteAdminLogin';
 import SiteAdmin from './pages/SiteAdmin';
 import SiteAdminValidate from './pages/SiteAdminValidate';
 import SiteAdminEquipmentLocations from './pages/SiteAdminEquipmentLocations';
-import SiteAdminCreateSite from './pages/SiteAdminCreateSite';
-import SiteAdminCreateSiteAdministrators from './pages/SiteAdminCreateSiteAdministrators';
 import SiteAdminMenu from './pages/SiteAdminMenu';
 import SiteAdminLayout from './components/SiteAdminLayout';
 import SiteAdminSites from './pages/SiteAdminSites';
-import SiteAdminSiteAdmins from './pages/SiteAdminSiteAdmins';
+import SiteAdminPeople from './pages/SiteAdminPeople';
 import SiteAdminFeedbackApproval from './pages/SiteAdminFeedbackApproval';
 import SiteAdminSeed from './pages/SiteAdminSeed';
 import { useEffect, useState } from 'react';
 import { getDB } from './lib/idb';
 import ProtectedLayout from './components/ProtectedLayout';
+import { api } from './lib/api';
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const [ok, setOk] = useState<boolean | null>(null);
@@ -57,27 +57,112 @@ function RequireSiteAdmin({ children }: { children: JSX.Element }) {
   useEffect(() => {
     (async () => {
       const db = await getDB();
-      const sa = await db.get('session', 'site_admin');
-      if (sa?.token) return setOk(true);
       const auth = await db.get('session', 'auth');
-      setOk(!!auth?.token && !!auth?.is_admin);
+      if (!auth?.token) return setOk(false);
+      // Server is the only source of truth for SiteAdmin authorization.
+      try {
+        const r: any = await api('/api/site-admin/me');
+        setOk(!!r?.ok);
+      } catch {
+        setOk(false);
+      }
     })();
   }, []);
   if (ok === null) return null;
   return ok ? children : <Navigate to="/SiteAdminLogin" replace />;
 }
 
+
+function RequireSiteAdminManage({ children }: { children: JSX.Element }) {
+  const [ok, setOk] = useState<boolean | null>(null);
+  useEffect(() => {
+    (async () => {
+      const db = await getDB();
+      const auth = await db.get('session', 'auth');
+      if (!auth?.token) return setOk(false);
+      try {
+        const r: any = await api('/api/site-admin/me');
+        setOk(!!r?.ok && (!!r?.can_manage || !!r?.is_super));
+      } catch {
+        setOk(false);
+      }
+    })();
+  }, []);
+  if (ok === null) return null;
+  return ok ? children : <Navigate to="/SiteAdmin" replace />;
+}
+
+function RequireSiteAdminSuper({ children }: { children: JSX.Element }) {
+  const [ok, setOk] = useState<boolean | null>(null);
+  useEffect(() => {
+    (async () => {
+      const db = await getDB();
+      const auth = await db.get('session', 'auth');
+      if (!auth?.token) return setOk(false);
+      try {
+        const r: any = await api('/api/site-admin/me');
+        setOk(!!r?.ok && !!r?.is_super);
+      } catch {
+        setOk(false);
+      }
+    })();
+  }, []);
+  if (ok === null) return null;
+  return ok ? children : <Navigate to="/SiteAdmin" replace />;
+}
+
+
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/Home" />} />
+      <Route
+        path="/"
+        element={
+          (() => {
+            const host = typeof window !== 'undefined' ? window.location.hostname : '';
+            const isLocal = host === 'localhost' || host.includes('127.0.0.1');
+            const isAppHost = host.startsWith('app.') || isLocal;
+
+            return isAppHost ? <Navigate to="/Home" /> : <Landing />;
+          })()
+        }
+      />
       {/* Public */}
       <Route path="/Home" element={<Home />} />
+      {/* Marketing landing page (always accessible, even on localhost) */}
+      <Route path="/landing" element={<Landing />} />
+      <Route path="/Landing" element={<Navigate to="/landing" replace />} />
       <Route path="/SiteAdminLogin" element={<SiteAdminLogin />} />
       <Route path="/Register" element={<Register />} />
       <Route path="/ConfirmEmail" element={<ConfirmEmail />} />
       <Route path="/ForgotPassword" element={<ForgotPassword />} />
       <Route path="/ResetPassword" element={<ResetPassword />} />
+
+      {/* Explicit SiteAdmin child paths (defensive): ensure /SiteAdmin/People works even if nesting breaks */}
+      <Route
+        path="/SiteAdmin/People"
+        element={
+          <RequireSiteAdminManage>
+            <SiteAdminPeople />
+          </RequireSiteAdminManage>
+        }
+      />
+      <Route
+        path="/SiteAdmin/Members"
+        element={
+          <RequireSiteAdminManage>
+            <SiteAdminPeople />
+          </RequireSiteAdminManage>
+        }
+      />
+      <Route
+        path="/SiteAdmin/siteadmins"
+        element={
+          <RequireSiteAdminManage>
+            <SiteAdminPeople />
+          </RequireSiteAdminManage>
+        }
+      />
 
       {/* Site Admin (layout + bottom nav) */}
       <Route
@@ -90,11 +175,15 @@ export default function App() {
       >
         <Route index element={<SiteAdmin />} />
         <Route path="Validate" element={<SiteAdminValidate />} />
-        <Route path="Equipment&Locations" element={<SiteAdminEquipmentLocations />} />
-        <Route path="Sites" element={<SiteAdminSites />} />
-        <Route path="SiteAdmins" element={<SiteAdminSiteAdmins />} />
-        <Route path="ApproveFeedback" element={<SiteAdminFeedbackApproval />} />
-        <Route path="Seed" element={<SiteAdminSeed />} />
+        {/* Validators must be able to access Equipment & Locations */}
+        <Route path="Equipment&Locations" element={<RequireSiteAdmin><SiteAdminEquipmentLocations /></RequireSiteAdmin>} />
+        <Route path="Sites" element={<RequireSiteAdminSuper><SiteAdminSites /></RequireSiteAdminSuper>} />
+        <Route path="People" element={<RequireSiteAdminManage><SiteAdminPeople /></RequireSiteAdminManage>} />
+        
+        {/* allow lowercase for convenience */}
+        <Route path="members" element={<Navigate to="/SiteAdmin/Members" replace />} />
+        <Route path="ApproveFeedback" element={<RequireSiteAdminSuper><SiteAdminFeedbackApproval /></RequireSiteAdminSuper>} />
+        <Route path="Seed" element={<RequireSiteAdminSuper><SiteAdminSeed /></RequireSiteAdminSuper>} />
         <Route path="Edit" element={<div className="p-6">Coming soon</div>} />
         <Route path="Export" element={<div className="p-6">Coming soon</div>} />
 
@@ -102,7 +191,7 @@ export default function App() {
         <Route path="CreateSite" element={<Navigate to="/SiteAdmin/Sites" replace />} />
         <Route
           path="CreateSiteAdministrators"
-          element={<Navigate to="/SiteAdmin/SiteAdmins" replace />}
+          element={<Navigate to="/SiteAdmin/People" replace />}
         />
         <Route path="Menu" element={<SiteAdminMenu />} />
       </Route>

@@ -413,12 +413,16 @@ export default function SiteAdminValidate() {
   // Ensure logged in
   useEffect(() => {
     (async () => {
-      const db = await getDB();
-      const sa = await db.get('session', 'site_admin');
-      if (sa?.token) return;
-      const auth = await db.get('session', 'auth');
-      if (auth?.token && auth?.is_admin) return;
-      nav('/SiteAdminLogin');
+      // Validate access via server truth. This supports:
+      //  - users.is_admin (super)
+      //  - membership role=admin/validator
+      try {
+        const me: any = await api('/api/site-admin/me');
+        if (me?.ok) return;
+      } catch {
+        // fall through
+      }
+      nav('/Home');
     })();
   }, [nav]);
 
