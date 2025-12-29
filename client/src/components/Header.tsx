@@ -70,7 +70,15 @@ return (
 
 }
 
-export default function Header({ showSync = true, showBell = true }: { showSync?: boolean; showBell?: boolean }) {
+export default function Header({
+  showSync = true,
+  showBell = true,
+  title,
+}: {
+  showSync?: boolean;
+  showBell?: boolean;
+  title?: string;
+}) {
   const [shift, setShift] = useState<{ date?: string; dn?: 'DS' | 'NS' }>({});
   const [unread, setUnread] = useState<number>(0);
   const loc = useLocation();
@@ -148,7 +156,7 @@ export default function Header({ showSync = true, showBell = true }: { showSync?
       <div className="flex items-center gap-3 min-w-0">
         <img src="/logo.png" alt="Spectatore" className="w-10 h-10 object-contain flex-shrink-0" />
         <div className="min-w-0">
-          <div className="logo-title text-xl truncate">Spectatore</div>
+          <div className="logo-title text-xl truncate">{title || 'Spectatore'}</div>
         </div>
       </div>
 
