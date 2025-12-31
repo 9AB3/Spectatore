@@ -35,7 +35,8 @@ if (!IS_DEV && !BASE) {
 /**
  * Main API wrapper
  */
-export async function api(path: string, init: RequestInit = {}) {
+// Allow passing plain JS objects as `body` (we JSON.stringify them below).
+export async function api(path: string, init: (RequestInit & { body?: any }) = {}) {
   let url: string;
 
   // Absolute URLs are passed through untouched
@@ -122,6 +123,6 @@ export async function api(path: string, init: RequestInit = {}) {
 /**
  * Helper when cookies / credentials are required
  */
-export function apiWithCreds(path: string, init: RequestInit = {}) {
+export function apiWithCreds(path: string, init: (RequestInit & { body?: any }) = {}) {
   return api(path, { ...init, credentials: 'include' });
 }

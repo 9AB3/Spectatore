@@ -148,6 +148,19 @@ export default function SiteAdminAddActivity() {
   const [pdModal, setPdModal] = useState<null | { bucket: ProdDrillBucket }>(null);
   const [pdLastDiameter, setPdLastDiameter] = useState<string>('102mm');
 
+  // Derived metres totals from the individual hole list (matches user form behaviour)
+  const pdTotals = useMemo(() => {
+    const out: Record<string, number> = {};
+    (Object.keys(pdHoles) as ProdDrillBucket[]).forEach((k) => {
+      const sum = (pdHoles[k] || []).reduce((acc, h) => {
+        const n = Number(String(h.length_m ?? '').trim());
+        return acc + (Number.isFinite(n) ? n : 0);
+      }, 0);
+      out[k] = Math.round(sum * 100) / 100;
+    });
+    return out;
+  }, [pdHoles]);
+
 
   const activityKeys = Object.keys(data as any);
   const [activity, setActivity] = useState<string>(activityKeys[0] || '');
