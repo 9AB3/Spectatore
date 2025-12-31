@@ -114,6 +114,17 @@ export default function ViewActivities() {
                                     {k}: <b>{String(v)}</b>
                                   </span>
                                 ))}
+
+                                {act === 'Hauling' && Array.isArray((p as any).loads) && (p as any).loads.length ? (
+                                  <div className="mt-1 text-[11px] text-slate-500">
+                                    Truck weights: {(p as any).loads
+                                      .map((l: any, ii: number) => {
+                                        const w = Number(String(l?.weight ?? l?.Weight ?? '').replace(/[^0-9.]/g, ''));
+                                        return `${ii + 1}:${Number.isFinite(w) ? w : 0}`;
+                                      })
+                                      .join(', ')}
+                                  </div>
+                                ) : null}
                   </div>
                               <div className="mt-1">
                                 <button
@@ -157,15 +168,27 @@ export default function ViewActivities() {
     let totalTKMs = 0;
 
     for (const it of tasks) {
-      const p = it.payload || {};
-      const v = p.values || {};
-      const trucks = parseFloat(String(v['Trucks'] ?? v['No of trucks'] ?? v['No of Trucks'] ?? 0)) || 0;
-      const weight = parseFloat(String(v['Weight'] ?? 0)) || 0;
+      const p: any = it.payload || {};
+      const v: any = p.values || {};
+
+      const loads = Array.isArray(p.loads) ? p.loads : null;
+
+      const trucks = loads
+        ? loads.length
+        : parseFloat(String(v['Trucks'] ?? v['No of trucks'] ?? v['No of Trucks'] ?? 0)) || 0;
+
+      // Total tonnes hauled (prefer per-load weights, then explicit total, then legacy trucks×weight)
+      const tonnes = loads
+        ? loads.reduce((acc: number, l: any) => acc + (parseFloat(String(l?.weight ?? l?.Weight ?? 0)) || 0), 0)
+        : (parseFloat(String(v['Tonnes Hauled'] ?? 0)) || 0) ||
+          (trucks * (parseFloat(String(v['Weight'] ?? 0)) || 0));
+
       const distance = parseFloat(String(v['Distance'] ?? 0)) || 0;
+
       totalTrucks += trucks;
-      totalWeight += trucks * weight;
-      totalDistance += trucks * distance; // per request
-      totalTKMs += trucks * weight * distance;
+      totalWeight += tonnes;
+      totalDistance += trucks * distance; // sum of distance per load
+      totalTKMs += tonnes * distance;
     }
 
     return (

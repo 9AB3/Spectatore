@@ -316,7 +316,15 @@ router.post('/finalize', authMiddleware, async (req: any, res: any) => {
       if (rawP?.[k] != null && values?.[k] == null) values[k] = rawP[k];
     }
 
-    return { activity, sub, values };
+    const holes = rawP.holes ?? rawP.payload?.holes ?? rawP.payload_json?.holes;
+    const loads = rawP.loads ?? rawP.payload?.loads ?? rawP.payload_json?.loads;
+
+    // Preserve per-load trucking weights for Hauling (used for tonnes + TKMs and validator adjustments).
+    // Keep it general so older payloads without loads still work.
+    const base: any = { activity, sub, values };
+    if (holes) base.holes = holes;
+    if (Array.isArray(loads)) base.loads = loads;
+    return base;
   }
 
   try {
@@ -397,36 +405,51 @@ function buildMetaJson(items: any[]) {
       }
 
       // Mirror the finalized snapshot into validation layer (unvalidated by default).
-      // (validated_* tables are keyed by site/date/dn/user_email in this project.)
-      await client.query(
-        `DELETE FROM validated_shift_activities
-         WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
-        [site, date, dn, user_email],
-      );
-      await client.query(
-        `DELETE FROM validated_shifts
-         WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
-        [site, date, dn, user_email],
-      );
+// IMPORTANT: once a validator has created validation rows for this shift,
+// operators re-finalizing must NOT overwrite or delete validation-layer data.
+const existingV = await client.query(
+  `SELECT id, validated
+     FROM validated_shifts
+    WHERE site=$1 AND date=$2::date AND dn=$3
+      AND COALESCE(user_email,'')=COALESCE($4,'')
+    LIMIT 1`,
+  [site, date, dn, user_email],
+);
 
-      await client.query(
-        `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, validated, totals_json)
-         VALUES ($1,$2::date,$3,$4,$5,0,$6::jsonb)`,
-        [site, date, dn, user_email, user_name, JSON.stringify(totals || {})],
-      );
+if (!existingV.rows?.length) {
+  // (validated_* tables are keyed by site/date/dn/user_email in this project.)
+  await client.query(
+    `DELETE FROM validated_shift_activities
+     WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
+    [site, date, dn, user_email],
+  );
+  await client.query(
+    `DELETE FROM validated_shifts
+     WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
+    [site, date, dn, user_email],
+  );
 
-      for (const it of activities) {
-        const p = normaliseItem(it);
-        if (!p.activity) continue;
+	  await client.query(
+	    `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, validated, totals_json)
+	     VALUES ($1,$2::date,$3,COALESCE($4,''),$5,0,$6::jsonb)`,
+	    [site, date, dn, user_email, user_name, JSON.stringify(totals || {})],
+	  );
 
-        await client.query(
-          `INSERT INTO validated_shift_activities (site, date, dn, user_email, user_name, activity, sub_activity, payload_json)
-           VALUES ($1,$2::date,$3,$4,$5,$6,$7,$8::jsonb)`,
-          [site, date, dn, user_email, user_name, p.activity, p.sub, JSON.stringify(p)],
-        );
-      }
+  for (const it of activities) {
+    const p = normaliseItem(it);
+    if (!p.activity) continue;
 
-      await client.query('COMMIT');
+    await client.query(
+      `INSERT INTO validated_shift_activities (site, date, dn, user_email, user_name, activity, sub_activity, payload_json)
+       VALUES ($1,$2::date,$3,$4,$5,$6,$7,$8::jsonb)`,
+      [site, date, dn, user_email, user_name, p.activity, p.sub, JSON.stringify(p)],
+    );
+  }
+}
+
+await client.query('COMMIT');
+
+
 
       // --- Notifications (best-effort; do not fail finalize) ---
       try {

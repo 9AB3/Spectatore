@@ -221,12 +221,26 @@ export default function FinalizeShift() {
         const gsDrillm = isNaN(bolts) || isNaN(bl) ? 0 : bolts * bl;
         totals[activity][subActivity]['GS Drillm'] = (totals[activity][subActivity]['GS Drillm'] || 0) + gsDrillm;
       }
-      if (activity === 'Hauling' && (subActivity === 'Production' || subActivity === 'Development')) {
-        const wt = parseFloat((p.values || {})['Weight'] ?? (0 as any));
+      
+      if (activity === 'Hauling') {
+        const loads = Array.isArray((p as any).loads) ? (p as any).loads : null;
         const dist = parseFloat((p.values || {})['Distance'] ?? (0 as any));
-        const trucks = parseFloat((p.values || {})['Trucks'] ?? (0 as any));
-        const tkms = isNaN(wt) || isNaN(dist) || isNaN(trucks) ? 0 : wt * dist * trucks;
-        totals[activity][subActivity]['TKMs'] = (totals[activity][subActivity]['TKMs'] || 0) + tkms;
+        const legacyWt = parseFloat((p.values || {})['Weight'] ?? (0 as any));
+        const legacyTrucks = parseFloat((p.values || {})['Trucks'] ?? (0 as any));
+
+        const trucks = loads ? loads.length : (Number.isFinite(legacyTrucks) ? legacyTrucks : 0);
+        const totalW = loads
+          ? loads.reduce((acc: number, l: any) => acc + (parseFloat(String(l?.weight ?? l?.Weight ?? 0)) || 0), 0)
+          : (Number.isFinite(legacyWt) ? legacyWt * trucks : 0);
+
+        // Store common totals so the "Subgroup Totals" table shows them.
+        totals[activity][subActivity]['Trucks'] = (totals[activity][subActivity]['Trucks'] || 0) + trucks;
+        totals[activity][subActivity]['Weight'] = (totals[activity][subActivity]['Weight'] || 0) + totalW;
+        if (Number.isFinite(dist)) {
+          totals[activity][subActivity]['Distance'] = (totals[activity][subActivity]['Distance'] || 0) + trucks * dist;
+          const tkms = totalW * dist;
+          totals[activity][subActivity]['TKMs'] = (totals[activity][subActivity]['TKMs'] || 0) + tkms;
+        }
       }
     }
   // Special derived totals: Hauling ore/waste truck counts
@@ -238,7 +252,8 @@ export default function FinalizeShift() {
       if (p.activity !== 'Hauling') continue;
       const subA = p.sub || '';
       const vals: any = p.values || {};
-      const trucks = parseFloat(String(vals?.Trucks ?? '0'));
+      const loads = Array.isArray((p as any).loads) ? (p as any).loads : null;
+      const trucks = loads ? loads.length : parseFloat(String(vals?.Trucks ?? '0'));
       const material = String(vals?.Material ?? '');
       if (!Number.isFinite(trucks)) continue;
       if (String(subA) === 'Production') ore += trucks;
@@ -476,7 +491,7 @@ export default function FinalizeShift() {
 
       {/* Confirm Finalize Modal */}
       {confirmOpen && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center">
+        <div className="fixed inset-0 bg-black/30 flex items-start justify-center">
           <div className="card w-full max-w-sm">
             <h3 className="text-lg font-semibold mb-3">Finalize shift for {fmtShift()}</h3>
             <div className="flex gap-2 pt-2">
@@ -503,7 +518,7 @@ export default function FinalizeShift() {
 
       {/* Change Date / Shift Modal */}
       {changeOpen && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center">
+        <div className="fixed inset-0 bg-black/30 flex items-start justify-center">
           <div className="card w-full max-w-sm">
             <h3 className="text-lg font-semibold mb-3">Change date / shift</h3>
             <div className="space-y-3">

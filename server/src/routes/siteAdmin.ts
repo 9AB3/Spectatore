@@ -45,7 +45,7 @@ router.get('/admin-sites', siteAdminMiddleware, async (_req, res) => {
       return res.json({ ok: true, sites: fallback });
     }
     return res.json({ ok: true, sites: r.rows });
-  } catch (e: any) {
+  } catch (e) {
     res.status(500).json({ ok: false, error: e?.message || 'Failed to load admin sites' });
   }
 });
@@ -68,7 +68,7 @@ router.post('/admin-sites', siteAdminMiddleware, async (req, res) => {
       [name, state || null],
     );
     res.json({ ok: true, site: r.rows[0] });
-  } catch (e: any) {
+  } catch (e) {
     res.status(500).json({ ok: false, error: e?.message || 'Failed to create site' });
   }
 });
@@ -116,7 +116,7 @@ router.delete('/admin-sites', siteAdminMiddleware, async (req: any, res) => {
     await pool.query('COMMIT');
 
     return res.json({ ok: true });
-  } catch (e: any) {
+  } catch (e) {
     try {
       await pool.query('ROLLBACK');
     } catch {
@@ -147,6 +147,26 @@ router.get('/me', siteAdminMiddleware, async (req: any, res) => {
     return res.json({ ok: true, sites, site_rows: [], is_super: sites.includes('*'), can_manage: !!req.site_admin?.can_manage });
   }
 });
+
+// List operators for a given site (used by validation "Add Activity" so operator is selectable, not free-typed)
+router.get('/site-users', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    const site = String(req.query?.site || '').trim() || normalizeSiteParam(req);
+    if (!site || site === '*') return res.status(400).json({ ok: false, error: 'missing site' });
+    assertSiteAccess(req, site);
+
+    const r = await pool.query(
+      `SELECT id, name, email, site
+         FROM users
+        WHERE site=$1
+        ORDER BY name ASC, email ASC`,
+      [site],
+    );
+    return res.json({ ok: true, users: r.rows || [] });
+  } catch (e) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'Failed to load users' });
+  }
+});
 // ---- site admin accounts (legacy: users.is_admin=true) ----
 // These endpoints power the "Site Admins" page in the SiteAdmin UI.
 // Note: validators/memberships are managed separately via /members/* endpoints.
@@ -174,7 +194,7 @@ router.get('/site-admins', siteAdminMiddleware, async (req: any, res) => {
       [sites],
     );
     return res.json({ ok: true, admins: r.rows || [] });
-  } catch (e: any) {
+  } catch (e) {
     return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'Failed to load admins' });
   }
 });
@@ -221,7 +241,7 @@ router.post('/create-site-admin', siteAdminMiddleware, async (req: any, res) => 
     }
 
     return res.json({ ok: true, admin: r.rows?.[0] });
-  } catch (e: any) {
+  } catch (e) {
     return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'Failed to create admin' });
   }
 });
@@ -248,7 +268,7 @@ router.delete('/site-admins', siteAdminMiddleware, async (req: any, res) => {
     await pool.query('COMMIT');
 
     return res.json({ ok: true });
-  } catch (e: any) {
+  } catch (e) {
     try {
       await pool.query('ROLLBACK');
     } catch {
@@ -271,7 +291,7 @@ router.get('/feedback/pending', siteAdminMiddleware, async (req: any, res) => {
        ORDER BY created_at ASC`,
     );
     return res.json({ ok: true, rows: r.rows });
-  } catch (e: any) {
+  } catch (e) {
     return res.status(500).json({ ok: false, error: e?.message || 'Failed to load feedback' });
   }
 });
@@ -295,7 +315,7 @@ router.post('/feedback/decision', siteAdminMiddleware, async (req: any, res) => 
       [id, approve, !approve, req.site_admin?.username || 'Super Admin'],
     );
     return res.json({ ok: true });
-  } catch (e: any) {
+  } catch (e) {
     return res.status(500).json({ ok: false, error: e?.message || 'Failed to update feedback' });
   }
 });
@@ -366,7 +386,7 @@ router.get('/members', siteAdminMiddleware, async (req: any, res) => {
     });
 
     return res.json({ ok: true, rows });
-  } catch (e: any) {
+  } catch (e) {
     return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'Failed to load members' });
   }
 });
@@ -428,7 +448,7 @@ router.post('/members/approve', siteAdminMiddleware, async (req: any, res) => {
     }
 
     return res.json({ ok: true });
-  } catch (e: any) {
+  } catch (e) {
     return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
   }
 });
@@ -467,7 +487,7 @@ router.get('/members/search', siteAdminMiddleware, async (req: any, res) => {
       [like, site_id],
     );
     return res.json({ ok: true, rows: r.rows || [] });
-  } catch (e: any) {
+  } catch (e) {
     return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
   }
 });
@@ -523,7 +543,7 @@ router.post('/members/add', siteAdminMiddleware, async (req: any, res) => {
     }
 
     return res.json({ ok: true, user_id });
-  } catch (e: any) {
+  } catch (e) {
     return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
   }
 });
@@ -542,7 +562,7 @@ router.post('/members/revoke', siteAdminMiddleware, async (req: any, res) => {
       [user_id, site],
     );
     return res.json({ ok: true });
-  } catch (e: any) {
+  } catch (e) {
     return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
   }
 });
@@ -579,17 +599,25 @@ function computeTotalsBySubFromPayloads(payloads: any[]) {
         totals[activity][subActivity][key] = (totals[activity][subActivity][key] || 0) + num;
       }
     }
+// For Hauling, accumulate weighted totals for Weight and Distance.
+if (activity === 'Hauling') {
+  const loads = Array.isArray((p as any).loads) ? (p as any).loads : null;
+  const trucks = loads ? loads.length : n((p.values || {})['Trucks']);
+  const dist = n((p.values || {})['Distance']);
+  const totalW = loads
+    ? loads.reduce((acc: number, l: any) => acc + n(l?.weight ?? l?.Weight), 0)
+    : trucks * n((p.values || {})['Weight']);
 
-    // For Hauling, accumulate weighted totals for Weight and Distance.
-    if (activity === 'Hauling') {
-      const trucks = n((p.values || {})['Trucks']);
-      const wt = n((p.values || {})['Weight']);
-      const dist = n((p.values || {})['Distance']);
-      totals[activity][subActivity]['Weight'] =
-        (totals[activity][subActivity]['Weight'] || 0) + trucks * wt;
-      totals[activity][subActivity]['Distance'] =
-        (totals[activity][subActivity]['Distance'] || 0) + trucks * dist;
-    }
+  // Weight is stored as total tonnes (sum of loads)
+  totals[activity][subActivity]['Weight'] =
+    (totals[activity][subActivity]['Weight'] || 0) + totalW;
+  // Distance is stored as sum of distance per load (trucks × distance)
+  totals[activity][subActivity]['Distance'] =
+    (totals[activity][subActivity]['Distance'] || 0) + trucks * dist;
+  // Trucks count
+  totals[activity][subActivity]['Trucks'] =
+    (totals[activity][subActivity]['Trucks'] || 0) + trucks;
+}
 
     // Derived metrics (keep consistent with client)
     if (activity === 'Development' && subActivity === 'Face Drilling') {
@@ -607,13 +635,17 @@ function computeTotalsBySubFromPayloads(payloads: any[]) {
       totals[activity][subActivity]['GS Drillm'] =
         (totals[activity][subActivity]['GS Drillm'] || 0) + gsDrillm;
     }
-    if (activity === 'Hauling' && (subActivity === 'Production' || subActivity === 'Development')) {
-      const wt = n((p.values || {})['Weight']);
-      const dist = n((p.values || {})['Distance']);
-      const trucks = n((p.values || {})['Trucks']);
-      const tkms = wt * dist * trucks;
-      totals[activity][subActivity]['TKMs'] = (totals[activity][subActivity]['TKMs'] || 0) + tkms;
-    }
+    
+if (activity === 'Hauling' && (subActivity === 'Production' || subActivity === 'Development')) {
+  const loads = Array.isArray((p as any).loads) ? (p as any).loads : null;
+  const trucks = loads ? loads.length : n((p.values || {})['Trucks']);
+  const dist = n((p.values || {})['Distance']);
+  const totalW = loads
+    ? loads.reduce((acc: number, l: any) => acc + n(l?.weight ?? l?.Weight), 0)
+    : trucks * n((p.values || {})['Weight']);
+  const tkms = totalW * dist;
+  totals[activity][subActivity]['TKMs'] = (totals[activity][subActivity]['TKMs'] || 0) + tkms;
+}
   }
   return totals;
 }
@@ -769,15 +801,22 @@ router.post('/login', async (req, res) => {
 // --- META ---
 router.get('/sites', siteAdminMiddleware, async (req: any, res) => {
   const tokenSites = allowedSites(req);
+
+  // Super-admins can see all official sites (admin_sites).
+  // Fallback to shifts-derived sites if admin_sites is empty (older DBs).
   if (tokenSites.includes('*')) {
-    const r = await pool.query(
+    const r = await pool.query(`SELECT name AS site FROM admin_sites WHERE name IS NOT NULL AND TRIM(name) <> '' ORDER BY name ASC`);
+    const sites = (r.rows || []).map((x: any) => String(x.site || '').trim()).filter(Boolean);
+    if (sites.length) return res.json({ sites });
+
+    const rr = await pool.query(
       `SELECT DISTINCT site as site FROM shifts WHERE site IS NOT NULL AND site != '' ORDER BY site`,
     );
-    return res.json({ sites: r.rows.map((x) => x.site).filter(Boolean) });
+    return res.json({ sites: (rr.rows || []).map((x: any) => x.site).filter(Boolean) });
   }
+
   return res.json({ sites: tokenSites });
 });
-
 // --- ADMIN MASTER LISTS (per-site) ---
 router.get('/admin-equipment', siteAdminMiddleware, async (req: any, res) => {
   try {
@@ -791,7 +830,7 @@ router.get('/admin-equipment', siteAdminMiddleware, async (req: any, res) => {
       [site],
     );
     return res.json({ rows: r.rows || [] });
-  } catch (e: any) {
+  } catch (e) {
     return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
   }
 });
@@ -810,7 +849,7 @@ router.post('/admin-equipment', siteAdminMiddleware, async (req: any, res) => {
       [site, type, equipment_id],
     );
     return res.json({ ok: true });
-  } catch (e: any) {
+  } catch (e) {
     return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
   }
 });
@@ -823,7 +862,7 @@ router.delete('/admin-equipment', siteAdminMiddleware, async (req: any, res) => 
     if (!site || !equipment_id) return res.status(400).json({ error: 'missing site or equipment_id' });
     await pool.query(`DELETE FROM admin_equipment WHERE site=$1 AND equipment_id=$2`, [site, equipment_id]);
     return res.json({ ok: true });
-  } catch (e: any) {
+  } catch (e) {
     return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
   }
 });
@@ -840,7 +879,7 @@ router.get('/admin-locations', siteAdminMiddleware, async (req: any, res) => {
       [site],
     );
     return res.json({ rows: r.rows || [] });
-  } catch (e: any) {
+  } catch (e) {
     return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
   }
 });
@@ -859,7 +898,7 @@ router.post('/admin-locations', siteAdminMiddleware, async (req: any, res) => {
       [site, name, type || null],
     );
     return res.json({ ok: true });
-  } catch (e: any) {
+  } catch (e) {
     return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
   }
 });
@@ -872,7 +911,7 @@ router.delete('/admin-locations', siteAdminMiddleware, async (req: any, res) => 
     if (!site || !name) return res.status(400).json({ error: 'missing site or name' });
     await pool.query(`DELETE FROM admin_locations WHERE site=$1 AND name=$2`, [site, name]);
     return res.json({ ok: true });
-  } catch (e: any) {
+  } catch (e) {
     return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
   }
 });
@@ -1148,6 +1187,324 @@ router.post('/update-validated', siteAdminMiddleware, async (req: any, res) => {
     await client.query('ROLLBACK').catch(() => undefined);
     console.error('update-validated failed', err);
     return res.status(500).json({ error: 'update-validated failed' });
+  } finally {
+    client.release();
+  }
+});
+
+
+
+// --- Validation layer: add / delete activities & create shifts ---
+// These endpoints are the ONLY way validated data changes once a shift/day is validated.
+// We intentionally avoid relying on UNIQUE/ON CONFLICT so this works against older local DBs too.
+
+async function markValidatedDayUnvalidated(client: any, site: string, date: string, ctx: string) {
+  try {
+    // If table doesn't exist yet, skip (keeps app usable for old DBs)
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS validated_days (
+        site TEXT NOT NULL,
+        date DATE NOT NULL,
+        status TEXT NOT NULL DEFAULT 'unvalidated',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (site, date)
+      )`,
+    );
+
+    const u = await client.query(
+      `UPDATE validated_days
+          SET status='unvalidated', updated_at=NOW()
+        WHERE site=$1 AND date=$2::date`,
+      [site, date],
+    );
+    if ((u.rowCount || 0) === 0) {
+      await client.query(
+        `INSERT INTO validated_days (site, date, status) VALUES ($1,$2::date,'unvalidated')`,
+        [site, date],
+      );
+    }
+  } catch (e: any) {
+    console.error(`validated_days mark unvalidated failed (${ctx})`, e?.message || e);
+  }
+}
+
+// Create an empty validated shift row (used when operator did not upload)
+router.post('/validated/create-shift', siteAdminMiddleware, async (req: any, res) => {
+  const client = await pool.connect();
+  try {
+    const site = String(req.body?.site || '').trim();
+    const date = String(req.body?.date || '').trim();
+    const dn = String(req.body?.dn || '').trim() || 'DS';
+    const user_email = String(req.body?.user_email || '').trim();
+
+    if (!site || !date || !dn || !user_email) return res.status(400).json({ ok: false, error: 'missing fields' });
+    assertSiteAccess(req, site);
+
+    // Friendly name (optional)
+    let user_name = '';
+    try {
+      const ur = await client.query(`SELECT name FROM users WHERE email=$1 LIMIT 1`, [user_email]);
+      user_name = String(ur.rows?.[0]?.name || '').trim();
+    } catch {
+      // ignore
+    }
+    if (!user_name) user_name = user_email;
+
+    await client.query('BEGIN');
+
+    // Ensure shift row exists without ON CONFLICT
+    const ex = await client.query(
+      `SELECT 1 FROM validated_shifts
+        WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
+        LIMIT 1`,
+      [site, date, dn, user_email],
+    );
+
+    if ((ex.rowCount || 0) === 0) {
+      await client.query(
+        `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, validated, totals_json)
+         VALUES ($1,$2::date,$3,COALESCE($4,''),$5,0,'{}'::jsonb)`,
+        [site, date, dn, user_email, user_name],
+      );
+    }
+
+    await markValidatedDayUnvalidated(client, site, date, 'create-shift');
+
+    await client.query('COMMIT');
+    return res.json({ ok: true });
+  } catch (e: any) {
+    console.error('validated/create-shift failed', {
+      message: e?.message,
+      detail: e?.detail,
+      where: e?.where,
+      code: e?.code,
+      stack: e?.stack,
+    });
+    try {
+      await client.query('ROLLBACK');
+    } catch {}
+    return res.status(500).json({ ok: false, error: e?.message || 'failed' });
+  } finally {
+    client.release();
+  }
+});
+
+// Add a validated activity row and recompute totals for that validated shift
+router.post('/validated/add-activity', siteAdminMiddleware, async (req: any, res) => {
+  const client = await pool.connect();
+  try {
+    const site = String(req.body?.site || '').trim();
+    const date = String(req.body?.date || '').trim();
+    const dn = String(req.body?.dn || '').trim() || 'DS';
+    const user_email = String(req.body?.user_email || '').trim();
+    const activity = String(req.body?.activity || '').trim();
+    const sub_activity = String(req.body?.sub_activity || '').trim();
+    const payload_json = req.body?.payload_json;
+
+    if (!site || !date || !dn || !user_email || !activity) return res.status(400).json({ ok: false, error: 'missing fields' });
+    assertSiteAccess(req, site);
+
+    let user_name = '';
+    try {
+      const ur = await client.query(`SELECT name FROM users WHERE email=$1 LIMIT 1`, [user_email]);
+      user_name = String(ur.rows?.[0]?.name || '').trim();
+    } catch {}
+    if (!user_name) user_name = user_email;
+
+    await client.query('BEGIN');
+
+    // Ensure validated_shifts exists (same as create-shift)
+    const ex = await client.query(
+      `SELECT 1 FROM validated_shifts
+        WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
+        LIMIT 1`,
+      [site, date, dn, user_email],
+    );
+    if ((ex.rowCount || 0) === 0) {
+      await client.query(
+        `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, validated, totals_json)
+         VALUES ($1,$2::date,$3,COALESCE($4,''),$5,0,'{}'::jsonb)`,
+        [site, date, dn, user_email, user_name],
+      );
+    }
+
+    await client.query(
+      `INSERT INTO validated_shift_activities (site, date, dn, user_email, user_name, activity, sub_activity, payload_json)
+       VALUES ($1,$2::date,$3,COALESCE($4,''),$5,$6,$7,$8::jsonb)`,
+      [site, date, dn, user_email, user_name, activity, sub_activity, JSON.stringify(payload_json || {})],
+    );
+
+    // Recompute totals for this validated shift only
+    const rr = await client.query(
+  `SELECT payload_json
+     FROM validated_shift_activities
+    WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
+    ORDER BY id ASC`,
+  [site, date, dn, user_email],
+);
+const payloads = (rr.rows || []).map((x: any) => x.payload_json);
+const totals = computeTotalsBySubFromPayloads(payloads);
+
+const up = await client.query(
+  `UPDATE validated_shifts
+      SET totals_json=$5::jsonb, validated=0
+    WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
+  [site, date, dn, user_email, JSON.stringify(totals)],
+);
+if ((up.rowCount || 0) === 0) {
+  await client.query(
+    `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, validated, totals_json)
+     VALUES ($1,$2::date,$3,COALESCE($4,''),$5,0,$6::jsonb)`,
+    [site, date, dn, user_email, user_name, JSON.stringify(totals)],
+  );
+}
+
+await markValidatedDayUnvalidated(client, site, date, 'add-activity');
+
+await client.query('COMMIT');
+return res.json({ ok: true, totals });
+
+  } catch (e: any) {
+    console.error('validated/add-activity failed', {
+      message: e?.message,
+      detail: e?.detail,
+      where: e?.where,
+      code: e?.code,
+      stack: e?.stack,
+    });
+    try {
+      await client.query('ROLLBACK');
+    } catch {}
+    return res.status(500).json({ ok: false, error: e?.message || 'failed' });
+  } finally {
+    client.release();
+  }
+});
+
+// Delete a validated activity row by id
+router.post('/validated/delete-activity', siteAdminMiddleware, async (req: any, res) => {
+  const client = await pool.connect();
+  try {
+    const site = String(req.body?.site || '').trim();
+    const date = String(req.body?.date || '').trim();
+    const id = Number(req.body?.id || 0);
+
+    if (!site || !date || !id) return res.status(400).json({ ok: false, error: 'missing fields' });
+    assertSiteAccess(req, site);
+
+    await client.query('BEGIN');
+
+    const r = await client.query(
+      `SELECT dn, COALESCE(user_email,'') AS user_email
+         FROM validated_shift_activities
+        WHERE id=$1 AND site=$2 AND date=$3::date
+        LIMIT 1`,
+      [id, site, date],
+    );
+    if (!r.rows?.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'not found' });
+    }
+    const dn = String(r.rows[0].dn || '');
+    const user_email = String(r.rows[0].user_email || '');
+
+    const del = await client.query(
+      `DELETE FROM validated_shift_activities
+        WHERE id=$1 AND site=$2 AND date=$3::date`,
+      [id, site, date],
+    );
+    if (!del.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'not found' });
+    }
+
+    // Recompute totals after deletion
+    const rr = await client.query(
+      `SELECT payload_json
+         FROM validated_shift_activities
+        WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
+        ORDER BY id ASC`,
+      [site, date, dn, user_email],
+    );
+    const payloads = (rr.rows || []).map((x: any) => x.payload_json);
+    const totals = computeTotalsBySubFromPayloads(payloads);
+
+    // Update shift totals (no ON CONFLICT)
+    const up = await client.query(
+      `UPDATE validated_shifts
+          SET totals_json=$5::jsonb, validated=0
+        WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
+      [site, date, dn, user_email, JSON.stringify(totals)],
+    );
+    if ((up.rowCount || 0) === 0) {
+      await client.query(
+        `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, validated, totals_json)
+         VALUES ($1,$2::date,$3,COALESCE($4,''),$5,0,$6::jsonb)`,
+        [site, date, dn, user_email, user_email, JSON.stringify(totals)],
+      );
+    }
+
+    await markValidatedDayUnvalidated(client, site, date, 'delete-activity');
+
+    await client.query('COMMIT');
+    return res.json({ ok: true, totals });
+  } catch (e: any) {
+    console.error('validated/delete-activity failed', {
+      message: e?.message,
+      detail: e?.detail,
+      where: e?.where,
+      code: e?.code,
+      stack: e?.stack,
+    });
+    try {
+      await client.query('ROLLBACK');
+    } catch {}
+    return res.status(500).json({ ok: false, error: e?.message || 'failed' });
+  } finally {
+    client.release();
+  }
+});
+
+// Delete an entire validated shift (and all its activities) - only via validation page
+router.post('/validated/delete-shift', siteAdminMiddleware, async (req: any, res) => {
+  const client = await pool.connect();
+  try {
+    const site = String(req.body?.site || '').trim();
+    const date = String(req.body?.date || '').trim();
+    const dn = String(req.body?.dn || '').trim();
+    const user_email = String(req.body?.user_email || '').trim();
+
+    if (!site || !date || !dn) return res.status(400).json({ ok: false, error: 'missing fields' });
+    assertSiteAccess(req, site);
+
+    await client.query('BEGIN');
+    await client.query(
+      `DELETE FROM validated_shift_activities
+        WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
+      [site, date, dn, user_email],
+    );
+    await client.query(
+      `DELETE FROM validated_shifts
+        WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
+      [site, date, dn, user_email],
+    );
+
+    await markValidatedDayUnvalidated(client, site, date, 'delete-shift');
+
+    await client.query('COMMIT');
+    return res.json({ ok: true });
+  } catch (e: any) {
+    console.error('validated/delete-shift failed', {
+      message: e?.message,
+      detail: e?.detail,
+      where: e?.where,
+      code: e?.code,
+      stack: e?.stack,
+    });
+    try {
+      await client.query('ROLLBACK');
+    } catch {}
+    return res.status(500).json({ ok: false, error: e?.message || 'failed' });
   } finally {
     client.release();
   }

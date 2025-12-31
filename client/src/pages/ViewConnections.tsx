@@ -134,7 +134,7 @@ export default function ViewConnections() {
                         <div className="text-xs text-slate-600">{r.email}</div>
                       </div>
                       <button
-                        className="ml-3 w-8 h-8 rounded-full border flex items-center justify-center text-slate-600 hover:bg-slate-50"
+                        className="ml-3 w-8 h-8 rounded-full border flex items-start justify-center text-slate-600 hover:bg-slate-50"
                         title="Remove"
                         onClick={() => {
                           setRemoveId(r.id);
@@ -203,7 +203,7 @@ export default function ViewConnections() {
         </div>
 
         {removeId !== null && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="fixed inset-0 bg-black/30 flex items-start justify-center z-[1000] overflow-auto pt-6 pb-24">
             <div className="card w-full max-w-sm">
               <div className="text-lg font-semibold mb-2">Remove crew mate?</div>
               <div className="text-sm text-slate-600 mb-4">

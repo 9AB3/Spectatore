@@ -105,7 +105,7 @@ export default function ClearShifts() {
       </div>
 
       {confirmOpen && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/30 flex items-start justify-center z-[1000] overflow-auto pt-6 pb-24">
           <div className="card w-full max-w-sm">
             <h3 className="text-lg font-semibold mb-2">Delete shift data</h3>
             <div className="text-sm text-slate-700 mb-4">Delete shift data? (Y/N)</div>
@@ -202,7 +202,7 @@ function MultiSelectCalendar({
           // Style rules:
           // - green background for dates that have finalized data
           // - strong border/contrast for selected dates
-          const base = 'h-9 rounded flex items-center justify-center text-sm border';
+          const base = 'h-9 rounded flex items-start justify-center text-sm border';
           const cls = isSel
             ? `${base} border-slate-900 bg-slate-900 text-white`
             : has

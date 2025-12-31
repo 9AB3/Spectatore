@@ -176,7 +176,7 @@ export default function Main() {
       </div>
 
       {open && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center">
+        <div className="fixed inset-0 bg-black/30 flex items-start justify-center">
           <div className="card w-full max-w-sm">
             <h3 className="text-lg font-semibold mb-3">Start Shift</h3>
             <div className="space-y-3">
@@ -341,7 +341,7 @@ function ShiftDateCalendar({
                   return (
                     <div
                       key={`${wi}-${di}`}
-                      className="w-8 h-8 inline-flex items-center justify-center"
+                      className="w-8 h-8 inline-flex items-start justify-center"
                     />
                   );
                 }
@@ -350,7 +350,7 @@ function ShiftDateCalendar({
                 const hasData = datesWithData.has(ymd);
 
                 let base =
-                  'w-8 h-8 inline-flex items-center justify-center rounded-full text-xs cursor-pointer';
+                  'w-8 h-8 inline-flex items-start justify-center rounded-full text-xs cursor-pointer';
                 let extra = ' text-slate-700 hover:bg-slate-100';
 
                 if (hasData) {

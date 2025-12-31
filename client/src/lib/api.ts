@@ -35,11 +35,7 @@ if (!IS_DEV && !BASE) {
 /**
  * Main API wrapper
  */
-// RequestInit.body is typed as BodyInit, which doesn't include plain objects.
-// In this app we frequently pass JSON objects and stringify them here.
-export type ApiInit = Omit<RequestInit, 'body'> & { body?: any };
-
-export async function api(path: string, init: ApiInit = {}) {
+export async function api(path: string, init: RequestInit = {}) {
   let url: string;
 
   // Absolute URLs are passed through untouched

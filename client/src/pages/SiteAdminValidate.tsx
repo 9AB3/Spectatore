@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import { api } from '../lib/api';
 import { getDB } from '../lib/idb';
@@ -359,6 +359,8 @@ function actKeyBase(act: ActKeyBaseInput, userEmail: string, location: string): 
 
 
 export default function SiteAdminValidate() {
+  const isReadonly = false; // safety: local flag used in a few render blocks
+
   const [online, setOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
 
   useEffect(() => {
@@ -373,6 +375,8 @@ export default function SiteAdminValidate() {
   }, []);
 
   const nav = useNavigate();
+  const loc = useLocation();
+  const qs = useMemo(() => new URLSearchParams(loc.search), [loc.search]);
 
   if (!online) {
     return (
@@ -402,6 +406,8 @@ export default function SiteAdminValidate() {
   const [shifts, setShifts] = useState<ShiftRow[]>([]);
   const [acts, setActs] = useState<ActRow[]>([]);
   const [editedActs, setEditedActs] = useState<Record<number, any>>({});
+  const [holeOpen, setHoleOpen] = useState<Record<string, boolean>>({});
+  const [truckOpen, setTruckOpen] = useState<Record<string, boolean>>({});
   const [adminLocRows, setAdminLocRows] = useState<AdminLocationRow[]>([]);
   const [adminEquipRows, setAdminEquipRows] = useState<AdminEquipmentRow[]>([]);
 
@@ -409,6 +415,14 @@ export default function SiteAdminValidate() {
   const [validatedActs, setValidatedActs] = useState<any[]>([]);
   const [dayStatus, setDayStatus] = useState<DayStatus>('none');
   const [calendarOpen, setCalendarOpen] = useState<boolean>(true);
+
+  // Allow deep-linking back to a specific date (e.g. after adding an activity)
+  useEffect(() => {
+    const d = String(qs.get('date') || '').trim();
+    if (d) setSelectedDate(d);
+    const s = String(qs.get('site') || '').trim();
+    if (s) setSite(s);
+  }, [qs]);
 
   // Ensure logged in
   useEffect(() => {
@@ -663,6 +677,27 @@ export default function SiteAdminValidate() {
     }
   }
 
+
+async function deleteValidatedActivity(actId: number) {
+  if (!selectedDate) return;
+  if (!actId) return;
+  const ok = window.confirm('Delete this activity from the validated data? This cannot be undone.');
+  if (!ok) return;
+  try {
+    await api('/api/site-admin/validated/delete-activity', {
+      method: 'POST',
+      body: JSON.stringify({ site, date: selectedDate, id: actId }),
+    });
+    await loadDate(selectedDate);
+    const cal = await api(`/api/site-admin/calendar?year=${year}&site=${encodeURIComponent(site)}`);
+    const map: Record<string, DayStatus> = {};
+    for (const d of cal?.days || []) map[String(d.date)] = (d.status as DayStatus) || 'none';
+    setDays(map);
+  } catch {
+    setMsg('Failed to delete activity');
+  }
+}
+
   const totalRows = useMemo(() => {
     // Build the Shift Totals section from VALIDATED activities (including any local edits).
     const payloadsAll = (validatedActs as any[]).map((a) => getValidatedActObj(a)).filter(Boolean);
@@ -716,11 +751,21 @@ export default function SiteAdminValidate() {
         const sub = String(p.sub || p.sub_activity || '').toLowerCase();
         const v: any = p.values && typeof p.values === 'object' ? p.values : {};
 
-        const trucks = n2(v['No of trucks'] ?? v['No. of trucks'] ?? v['Trucks'] ?? v['No of Trucks']);
-        const weightPer = n2(v['Weight'] ?? v['weight']); // t/truck
-        const tonnes = trucks * weightPer;
+        
+const loads = Array.isArray((p as any).loads) ? (p as any).loads : null;
+const trucks = loads ? loads.length : n2(v['No of trucks'] ?? v['No. of trucks'] ?? v['Trucks'] ?? v['No of Trucks']);
+const weightPer = n2(v['Weight'] ?? v['weight']); // t/truck (legacy)
+const tonnes = loads ? loads.reduce((acc: number, l: any) => acc + n2(l?.weight ?? l?.Weight), 0) : trucks * weightPer;
 
-        const material = String(v['Material'] ?? v.material ?? '').toLowerCase();
+
+        let material = String(v['Material'] ?? v.material ?? '').toLowerCase();
+
+        // Production/Development breakdown
+        const isProd = sub.includes('production') || sub === 'production';
+        const isDev = sub.includes('development') || sub === 'development';
+
+        // Production hauling is always ore (Material dropdown not shown).
+        if (!material && isProd) material = 'ore';
 
         // Ore/Waste totals (by material)
         if (material.includes('ore')) {
@@ -730,10 +775,6 @@ export default function SiteAdminValidate() {
           out.wasteTrucks += trucks;
           out.wasteT += tonnes;
         }
-
-        // Production/Development breakdown
-        const isProd = sub.includes('production') || sub === 'production';
-        const isDev = sub.includes('development') || sub === 'development';
 
         if (isProd) {
           out.prodTrucks += trucks;
@@ -1324,6 +1365,16 @@ export default function SiteAdminValidate() {
                 >
                   Validate shift
                 </button>
+                <button
+                  type="button"
+                  className="px-3 py-2 rounded-xl bg-white border border-slate-200 shadow-sm hover:bg-slate-50 text-sm"
+                  onClick={() => {
+                    if (!selectedDate) return;
+                    nav(`/SiteAdmin/AddActivity?date=${encodeURIComponent(selectedDate)}&site=${encodeURIComponent(site)}`);
+                  }}
+                >
+                  + Add activity
+                </button>
               </div>
             </div>
 
@@ -1358,7 +1409,7 @@ export default function SiteAdminValidate() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {(() => {
+{(() => {
                                     const out: any[] = [];
                                     for (const a of actsList) {
                                       const rows = byAct[a] || [];
@@ -1367,7 +1418,7 @@ export default function SiteAdminValidate() {
                                       // activity header
                                       out.push(
                                         <tr key={`act|||${a}`} className="border-b border-slate-200 bg-slate-50">
-                                          <td className="p-2 font-semibold" colSpan={4}>
+                                          <td className="p-2 font-semibold" colSpan={3}>
                                             {a}
                                           </td>
                                         </tr>,
@@ -1381,7 +1432,7 @@ export default function SiteAdminValidate() {
                                               key={`${a}|||sub|||${r.sub}`}
                                               className="border-b border-slate-200 bg-slate-50/60"
                                             >
-                                              <td className="p-2 pl-6 font-semibold" colSpan={4}>
+                                              <td className="p-2 pl-6 font-semibold" colSpan={3}>
                                                 {r.sub}
                                               </td>
                                             </tr>,
@@ -1441,6 +1492,7 @@ export default function SiteAdminValidate() {
 
                   <div className="flex items-center gap-3 mb-2">
                     <div className="font-bold">Activities</div>
+
                     <div className="text-xs opacity-80 flex items-center gap-2">
                       <span className="inline-block w-4 h-3 rounded-sm bg-amber-50/40 border border-black/10 relative overflow-hidden">
                         <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-amber-400/70" />
@@ -1500,14 +1552,20 @@ export default function SiteAdminValidate() {
                             if (kl === 'material') return 3;
                             return 100;
                           };
-                          const cols = Array.from(colSet).sort((a, b) => {
+  const colsAll = Array.from(colSet).sort((a, b) => {
                             const pa = prio(a);
                             const pb = prio(b);
                             if (pa !== pb) return pa - pb;
                             return a.localeCompare(b);
                           });
 
-                          // Build Sub -> GroupValue -> rows structure
+                          // Hauling: hide raw Weight column (tonnes hauled is derived from individual trucks)
+                          const cols = actLc === 'hauling'
+                            ? colsAll.filter((k) => {
+                                const kl = String(k || '').toLowerCase();
+                                return kl !== 'weight' && kl !== 'total weight';
+                              })
+                            : colsAll;               // Build Sub -> GroupValue -> rows structure
                           const bySub: Record<string, Record<string, any[]>> = {};
                           for (const r of rowsForAct) {
                             const objOrig: any = getValidatedActObjOriginal(r) || {};
@@ -1520,7 +1578,8 @@ export default function SiteAdminValidate() {
                           }
 
                           const subNames = Object.keys(bySub).sort((a, b) => a.localeCompare(b));
-                          const colSpan = 2 + (groupKey ? 1 : 0) + cols.length;
+                          const colSpan = 2 + (groupKey ? 1 : 0) + cols.length + 1;
+
 
                           return (
                             <div key={actName} className="rounded-2xl bg-white border border-slate-200 shadow-sm p-4">
@@ -1538,6 +1597,7 @@ export default function SiteAdminValidate() {
                                           {c}
                                         </th>
                                       ))}
+                                      <th className="p-2 text-right whitespace-nowrap">Actions</th>
                                     </tr>
                                   </thead>
 
@@ -1562,12 +1622,365 @@ export default function SiteAdminValidate() {
                                                 {groupKey && loc ? (
                                                   <tr className="border-b border-slate-200">
                                                     <td className="p-2 pl-4 font-semibold text-sm" colSpan={colSpan}>
-                                                      {loc}
+                                                      <div className="flex items-center justify-between gap-2">
+                                                        <span>{loc}</span>
+                                                        {actName === 'Production Drilling' ? (
+                                                          <button
+                                                            type="button"
+                                                            className="btn btn-xs"
+                                                            onClick={() => {
+                                                              const k = `${actName}|||${sub}|||${loc}`;
+                                                              setHoleOpen((prev) => ({ ...prev, [k]: !prev[k] }));
+                                                            }}
+                                                          >
+                                                            {holeOpen[`${actName}|||${sub}|||${loc}`] ? 'Hide holes' : 'Show holes'}
+                                                          </button>
+                                                        ) : null}
+
+                                                        {actName === 'Hauling' ? (
+                                                          <button
+                                                            type="button"
+                                                            className="btn btn-xs"
+                                                            onClick={() => {
+                                                              const k = `${actName}|||${sub}|||${loc}`;
+                                                              setTruckOpen((prev) => ({ ...prev, [k]: !prev[k] }));
+                                                            }}
+                                                          >
+                                                            {truckOpen[`${actName}|||${sub}|||${loc}`] ? 'Hide trucks' : 'Show trucks'}
+                                                          </button>
+                                                        ) : null}
+                                                      </div>
                                                     </td>
                                                   </tr>
                                                 ) : null}
 
-                                                {rows.map((r) => {
+                                                {actName === 'Hauling' && truckOpen[`${actName}|||${sub}|||${loc}`] ? (
+                                                  <tr className="border-b border-slate-200 bg-slate-50/50">
+                                                    <td className="p-2 pl-6" colSpan={colSpan}>
+                                                      {(() => {
+                                                        const flat: any[] = [];
+                                                        for (const rr of rows) {
+                                                          const objOrig: any = getValidatedActObjOriginal(rr) || {};
+                                                          const objCur: any = getValidatedActObj(rr) || objOrig || {};
+                                                          const loads: any[] = Array.isArray((objCur as any)?.loads)
+                                                            ? (objCur as any).loads
+                                                            : Array.isArray((objOrig as any)?.loads)
+                                                              ? (objOrig as any).loads
+                                                              : [];
+                                                          loads.forEach((l: any, idx: number) =>
+                                                            flat.push({ _act_id: (rr as any).id, _idx: idx, weight: l?.weight ?? l?.Weight ?? '' }),
+                                                          );
+                                                        }
+
+                                                        const recalc = (baseLoads: any[], baseValues: any) => {
+                                                          const tonnes = baseLoads.reduce(
+                                                            (acc: number, l: any) => acc + (parseFloat(String(l?.weight ?? l?.Weight ?? 0)) || 0),
+                                                            0,
+                                                          );
+                                                          return { ...baseValues, Trucks: baseLoads.length, ['Tonnes Hauled']: tonnes };
+                                                        };
+
+                                                        const setTruck = (actId: number, idx: number, weight: any) => {
+                                                          setEditedActs((prev) => {
+                                                            const rr = rows.find((x: any) => Number((x as any).id) === actId) || rows[0];
+                                                            const objOrig: any = rr ? (getValidatedActObjOriginal(rr) || {}) : {};
+                                                            const objCurAny: any = rr ? (getValidatedActObj(rr) || objOrig || {}) : objOrig || {};
+                                                            const baseAny = prev[actId] || objCurAny || objOrig || {};
+                                                            const base: any = typeof baseAny === 'string' ? JSON.parse(baseAny) : baseAny;
+                                                            const baseLoads: any[] = Array.isArray((base as any).loads) ? [...(base as any).loads] : [];
+                                                            while (baseLoads.length <= idx) baseLoads.push({ weight: '' });
+                                                            baseLoads[idx] = { ...(baseLoads[idx] || {}), weight };
+                                                            const baseValues =
+                                                              (base as any).values && typeof (base as any).values === 'object' ? { ...(base as any).values } : {};
+                                                            const values = recalc(baseLoads, baseValues);
+                                                            return { ...prev, [actId]: { ...base, loads: baseLoads, values } };
+                                                          });
+                                                        };
+
+                                                        const deleteTruck = (actId: number, idx: number) => {
+                                                          setEditedActs((prev) => {
+                                                            const rr = rows.find((x: any) => Number((x as any).id) === actId) || rows[0];
+                                                            const objOrig: any = rr ? (getValidatedActObjOriginal(rr) || {}) : {};
+                                                            const objCurAny: any = rr ? (getValidatedActObj(rr) || objOrig || {}) : objOrig || {};
+                                                            const baseAny = prev[actId] || objCurAny || objOrig || {};
+                                                            const base: any = typeof baseAny === 'string' ? JSON.parse(baseAny) : baseAny;
+                                                            const baseLoads: any[] = Array.isArray((base as any).loads) ? [...(base as any).loads] : [];
+                                                            baseLoads.splice(idx, 1);
+                                                            const baseValues =
+                                                              (base as any).values && typeof (base as any).values === 'object' ? { ...(base as any).values } : {};
+                                                            const values = recalc(baseLoads, baseValues);
+                                                            return { ...prev, [actId]: { ...base, loads: baseLoads, values } };
+                                                          });
+                                                        };
+
+                                                        const addTruck = () => {
+                                                          const first = flat[0] as any;
+                                                          const actId = Number(first?._act_id || (rows?.[0] as any)?.id || 0);
+                                                          if (!actId) return;
+                                                          const rr = rows.find((x: any) => Number((x as any).id) === actId) || rows[0];
+                                                          const objOrig: any = rr ? (getValidatedActObjOriginal(rr) || {}) : {};
+                                                          const objCurAny: any = rr ? (getValidatedActObj(rr) || objOrig || {}) : objOrig || {};
+
+                                                          setEditedActs((prev) => {
+                                                            const baseAny = prev[actId] || objCurAny || objOrig || {};
+                                                            const base: any = typeof baseAny === 'string' ? JSON.parse(baseAny) : baseAny;
+                                                            const baseLoads: any[] = Array.isArray((base as any).loads) ? [...(base as any).loads] : [];
+                                                            baseLoads.push({ weight: '' });
+                                                            const baseValues =
+                                                              (base as any).values && typeof (base as any).values === 'object' ? { ...(base as any).values } : {};
+                                                            const values = recalc(baseLoads, baseValues);
+                                                            return { ...prev, [actId]: { ...base, loads: baseLoads, values } };
+                                                          });
+                                                        };
+
+                                                        return (
+                                                          <div className="overflow-auto border rounded-xl bg-white">
+                                                            <table className="w-full text-xs table-fixed">
+                                                              <thead className="bg-slate-50 border-b">
+                                                                <tr>
+                                                                  <th className="p-1 text-left w-[72px]">Truck #</th>
+                                                                  <th className="p-1 text-left w-[140px]">Weight (t)</th>
+                                                                  <th className="p-1 text-left w-[36px]"></th>
+                                                                </tr>
+                                                              </thead>
+                                                              <tbody>
+                                                                {flat.length === 0 ? (
+                                                                  <tr>
+                                                                    <td className="p-2 text-xs opacity-70" colSpan={3}>
+                                                                      No truck weights found on these rows.
+                                                                    </td>
+                                                                  </tr>
+                                                                ) : (
+                                                                  flat.map((t, ii) => {
+                                                                    const actId = Number(t._act_id || 0);
+                                                                    const idx = Number(t._idx || 0);
+                                                                    return (
+                                                                      <tr key={`${actId}|||${idx}|||${ii}`} className="border-b last:border-b-0">
+<td className="p-1">{idx + 1}</td>
+                                                                        <td className="p-1">
+                                                                          <input
+                                                                            className="input w-full"
+                                                                            value={String(t.weight ?? '')}
+                                                                            onChange={(e) => setTruck(actId, idx, e.target.value)}
+                                                                          />
+                                                                        </td>
+                                                                        <td className="p-1">
+                                                                          <button
+                                                                            type="button"
+                                                                            aria-label="Delete truck"
+                                                                            title="Delete truck"
+                                                                            className="w-8 h-8 flex items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
+                                                                            onClick={() => deleteTruck(actId, idx)}
+                                                                          >
+                                                                            ✕
+                                                                          </button>
+                                                                        </td>
+                                                                      </tr>
+                                                                    );
+                                                                  })
+                                                                )}
+                                                              </tbody>
+                                                            </table>
+                                                            <div className="p-2 border-t bg-slate-50 flex items-center justify-between gap-2">
+                                                              <button
+                                                                type="button"
+                                                                className="px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50 text-xs"
+                                                                onClick={addTruck}
+                                                              >
+                                                                + Add truck
+                                                              </button>
+                                                              <div className="text-xs opacity-70">Edit trucks (totals auto-calc).</div>
+                                                            </div>
+                                                          </div>
+                                                        );
+                                                      })()}
+                                                    </td>
+                                                  </tr>
+                                                ) : null}
+
+                                                
+                                                {actName === 'Production Drilling' && holeOpen[`${actName}|||${sub}|||${loc}`] ? (
+                                                  <tr className="border-b border-slate-200 bg-slate-50/50">
+                                                    <td className="p-2 pl-6" colSpan={colSpan}>
+                                                      {(() => {
+                                                        const flat: any[] = [];
+                                                        for (const rr of rows) {
+                                                          const objOrig: any = getValidatedActObjOriginal(rr) || {};
+                                                          const objCur: any = getValidatedActObj(rr) || objOrig || {};
+                                                          const holes: any = (objCur as any)?.holes || (objOrig as any)?.holes || null;
+                                                          if (!holes) continue;
+                                                          for (const bucket of ['Metres Drilled', 'Cleanouts Drilled', 'Redrills']) {
+                                                            const arr = Array.isArray(holes[bucket]) ? holes[bucket] : [];
+                                                            arr.forEach((h: any, _idx: number) => flat.push({ _act_id: (rr as any).id, _idx, bucket, ...h }));
+                                                          }
+                                                        }
+                                                        const flatEmpty = (flat.length === 0);
+                                                        return (
+                                                          <div className="overflow-auto border rounded-xl bg-white">
+                                                            <table className="w-full text-xs table-fixed">
+  <thead className="bg-slate-50 border-b">
+    <tr>
+      <th className="p-1 text-left w-[92px]">Bucket</th>
+      <th className="p-1 text-left w-[72px]">Ring ID</th>
+      <th className="p-1 text-left w-[72px]">Hole ID</th>
+      <th className="p-1 text-left w-[92px]">Diameter</th>
+      <th className="p-1 text-left w-[92px]">Length (m)</th>
+      <th className="p-1 text-left w-[36px]"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {flat.map((h, ii) => {
+      const actId = Number((h as any)._act_id || 0);
+      const bucket = String((h as any).bucket || 'Metres Drilled');
+      const idx = Number((h as any)._idx || 0);
+      const HOLE_DIAMETER_OPTIONS = ['64mm','76mm','89mm','102mm','152mm','203mm','254mm','other'] as const;
+
+      const rr = rows.find((x: any) => Number((x as any).id) === actId) || rows[0];
+      const objOrig: any = rr ? (getValidatedActObjOriginal(rr) || {}) : {};
+      const objCurAny: any = rr ? (getValidatedActObj(rr) || objOrig || {}) : (objOrig || {});
+      const objCur: any = typeof objCurAny === 'string' ? JSON.parse(objCurAny) : objCurAny;
+
+      const holes: any = (objCur as any)?.holes && typeof (objCur as any).holes === 'object' ? (objCur as any).holes : {};
+      const arr = Array.isArray(holes[bucket]) ? holes[bucket] : [];
+      const cur = arr[idx] || {};
+
+      const recalcTotals = (newHoles: any, baseValues: any) => {
+        const sumLen = (a: any[]) => (a || []).reduce((acc, hh) => acc + Number(String(hh?.length_m || '').replace(/[^0-9.]/g, '') || 0), 0);
+        const m = sumLen(Array.isArray(newHoles['Metres Drilled']) ? newHoles['Metres Drilled'] : []);
+        const c = sumLen(Array.isArray(newHoles['Cleanouts Drilled']) ? newHoles['Cleanouts Drilled'] : []);
+        const r = sumLen(Array.isArray(newHoles['Redrills']) ? newHoles['Redrills'] : []);
+        return { ...baseValues, ['Metres Drilled']: m || '', ['Cleanouts Drilled']: c || '', ['Redrills']: r || '' };
+      };
+
+      const setHole = (patch: any) => {
+        setEditedActs((prev) => {
+          const baseAny = prev[actId] || objCur || objOrig || {};
+          const base: any = typeof baseAny === 'string' ? JSON.parse(baseAny) : baseAny;
+          const baseHoles: any = (base as any).holes && typeof (base as any).holes === 'object' ? (base as any).holes : {};
+          const newHoles: any = { ...baseHoles };
+          const nextArr = Array.isArray(newHoles[bucket]) ? [...newHoles[bucket]] : [];
+          nextArr[idx] = { ...(nextArr[idx] || {}), ...patch };
+          newHoles[bucket] = nextArr;
+          const baseValues = (base as any).values && typeof (base as any).values === 'object' ? { ...(base as any).values } : {};
+          const values = recalcTotals(newHoles, baseValues);
+          return { ...prev, [actId]: { ...base, holes: newHoles, values } };
+        });
+      };
+
+      const moveBucket = (nextBucket: string) => {
+        if (!nextBucket || nextBucket === bucket) return;
+        setEditedActs((prev) => {
+          const baseAny = prev[actId] || objCur || objOrig || {};
+          const base: any = typeof baseAny === 'string' ? JSON.parse(baseAny) : baseAny;
+          const baseHoles: any = (base as any).holes && typeof (base as any).holes === 'object' ? (base as any).holes : {};
+          const newHoles: any = { ...baseHoles };
+          const fromArr = Array.isArray(newHoles[bucket]) ? [...newHoles[bucket]] : [];
+          const item = fromArr[idx] || {};
+          fromArr.splice(idx, 1);
+          newHoles[bucket] = fromArr;
+          const toArr = Array.isArray(newHoles[nextBucket]) ? [...newHoles[nextBucket]] : [];
+          toArr.push(item);
+          newHoles[nextBucket] = toArr;
+          const baseValues = (base as any).values && typeof (base as any).values === 'object' ? { ...(base as any).values } : {};
+          const values = recalcTotals(newHoles, baseValues);
+          return { ...prev, [actId]: { ...base, holes: newHoles, values } };
+        });
+      };
+
+      const deleteHole = () => {
+        setEditedActs((prev) => {
+          const baseAny = prev[actId] || objCur || objOrig || {};
+          const base: any = typeof baseAny === 'string' ? JSON.parse(baseAny) : baseAny;
+          const baseHoles: any = (base as any).holes && typeof (base as any).holes === 'object' ? (base as any).holes : {};
+          const newHoles: any = { ...baseHoles };
+          const nextArr = Array.isArray(newHoles[bucket]) ? [...newHoles[bucket]] : [];
+          nextArr.splice(idx, 1);
+          newHoles[bucket] = nextArr;
+          const baseValues = (base as any).values && typeof (base as any).values === 'object' ? { ...(base as any).values } : {};
+          const values = recalcTotals(newHoles, baseValues);
+          return { ...prev, [actId]: { ...base, holes: newHoles, values } };
+        });
+      };
+
+      return (
+        <tr key={ii} className="border-b last:border-b-0">
+          <td className="p-1">
+            <select className="input w-full" value={bucket} onChange={(e) => moveBucket(e.target.value)}>
+              {['Metres Drilled','Cleanouts Drilled','Redrills'].map((b) => (<option key={b} value={b}>{b}</option>))}
+            </select>
+          </td>
+          <td className="p-1">
+            <input className="input w-full" value={String(cur.ring_id || '')} onChange={(e) => setHole({ ring_id: e.target.value })} />
+          </td>
+          <td className="p-1">
+            <input className="input w-full" value={String(cur.hole_id || '')} onChange={(e) => setHole({ hole_id: e.target.value })} />
+          </td>
+          <td className="p-1">
+            <select className="input w-full" value={String(cur.diameter || '102mm')} onChange={(e) => setHole({ diameter: e.target.value, diameter_other: e.target.value === 'other' ? (cur.diameter_other || '') : '' })}>
+              {HOLE_DIAMETER_OPTIONS.map((d) => (<option key={d} value={d}>{d}</option>))}
+            </select>
+            {String(cur.diameter || '') === 'other' ? (
+              <input className="input w-full mt-1" placeholder="e.g. 115mm" value={String(cur.diameter_other || '')} onChange={(e) => setHole({ diameter_other: e.target.value })} />
+            ) : null}
+          </td>
+          <td className="p-1">
+            <input className="input w-full" value={String(cur.length_m || '')} onChange={(e) => setHole({ length_m: e.target.value })} />
+          </td>
+          <td className="p-1">
+            <button type="button" aria-label="Delete hole" title="Delete hole" className="w-8 h-8 flex items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50" onClick={deleteHole}>✕</button>
+          </td>
+        </tr>
+      );
+    })}
+  </tbody>
+</table>
+    <div className="p-2 border-t bg-slate-50 flex items-center justify-between gap-2">
+      <button
+        type="button"
+        className="px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50 text-xs"
+        onClick={() => {
+          const first = flat[0] as any;
+          const actId = Number((first?._act_id) || (rows?.[0]?.id) || 0);
+          if (!actId) return;
+          const defaultBucket = 'Metres Drilled';
+          const rr = rows.find((x: any) => Number((x as any).id) === actId) || rows[0];
+          const objOrig: any = rr ? (getValidatedActObjOriginal(rr) || {}) : {};
+          const objCurAny: any = rr ? (getValidatedActObj(rr) || objOrig || {}) : (objOrig || {});
+          const objCur: any = typeof objCurAny === 'string' ? JSON.parse(objCurAny) : objCurAny;
+          const recalcTotals = (newHoles: any, baseValues: any) => {
+            const sumLen = (a: any[]) => (a || []).reduce((acc, hh) => acc + Number(String(hh?.length_m || '').replace(/[^0-9.]/g, '') || 0), 0);
+            const m = sumLen(Array.isArray(newHoles['Metres Drilled']) ? newHoles['Metres Drilled'] : []);
+            const c = sumLen(Array.isArray(newHoles['Cleanouts Drilled']) ? newHoles['Cleanouts Drilled'] : []);
+            const r = sumLen(Array.isArray(newHoles['Redrills']) ? newHoles['Redrills'] : []);
+            return { ...baseValues, ['Metres Drilled']: m || '', ['Cleanouts Drilled']: c || '', ['Redrills']: r || '' };
+          };
+
+          setEditedActs((prev) => {
+            const baseAny = prev[actId] || objCur || objOrig || {};
+            const base: any = typeof baseAny === 'string' ? JSON.parse(baseAny) : baseAny;
+            const baseHoles: any = (base as any).holes && typeof (base as any).holes === 'object' ? (base as any).holes : {};
+            const newHoles: any = { ...baseHoles };
+            const arr = Array.isArray(newHoles[defaultBucket]) ? [...newHoles[defaultBucket]] : [];
+            arr.push({ ring_id: '', hole_id: '', diameter: '102mm', diameter_other: '', length_m: '' });
+            newHoles[defaultBucket] = arr;
+            const baseValues = (base as any).values && typeof (base as any).values === 'object' ? { ...(base as any).values } : {};
+            const values = recalcTotals(newHoles, baseValues);
+            return { ...prev, [actId]: { ...base, holes: newHoles, values } };
+          });
+        }}
+      >
+        + Add hole
+      </button>
+      <div className="text-xs opacity-70">Edit holes (totals auto-calc).</div>
+    </div>
+                                                          </div>
+                                                        );
+                                                      })()}
+                                                    </td>
+                                                  </tr>
+                                                ) : null}
+
+{rows.map((r) => {
                                                   const userLabel =
                                                     nameByEmail.get(String((r as any)?.user_email || '')) ||
                                                     String((r as any)?.user_email || '') ||
@@ -1612,9 +2025,10 @@ export default function SiteAdminValidate() {
                                                               <div>
                                                                 <select
                                                                   className="input w-full"
-                                                                  title={`Validated: ${currentGrp || ''} | Original: ${String(baselineGrp || '')}`}
+                                                                  title={`Edited: ${currentGrp || ""} | Original: ${String(baselineGrp || "")}`}
                                                                   value={selVal}
-                                                                  onChange={(e) => {
+                                                                  disabled={isReadonly}
+                      onChange={(e) => {
                                                                     const v = e.target.value;
                                                                     setEditedActs((prev) => ({
                                                                       ...prev,
@@ -1684,12 +2098,13 @@ export default function SiteAdminValidate() {
                                                                 const inList = optsEq.includes(String(cur || ''));
                                                                 return (
                                                                   <select
-                                                                    className="input w-full"
+                                                                    className={`input w-full ${(isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))) ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
                                                                     title={`Validated: ${String(curVal ?? '')} | Original: ${String(
                                                                       (hasLive ? liveVal : baselineVal) ?? '',
                                                                     )}`}
                                                                     value={String(cur || '')}
-                                                                    onChange={(e) => {
+                                                                    disabled={isReadonly || ((c === 'Metres Drilled' || c === 'Cleanouts Drilled' || c === 'Redrills'))}
+                      onChange={(e) => {
                                                                       const v = e.target.value;
                                                                       setEditedActs((prev) => ({
                                                                         ...prev,
@@ -1722,12 +2137,13 @@ export default function SiteAdminValidate() {
                                                                 const inList = optsLoc.includes(String(cur || ''));
                                                                 return (
                                                                   <select
-                                                                    className="input w-full"
+                                                                    className={`input w-full ${(isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))) ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
                                                                     title={`Validated: ${String(curVal ?? '')} | Original: ${String(
                                                                       (hasLive ? liveVal : baselineVal) ?? '',
                                                                     )}`}
                                                                     value={String(cur || '')}
-                                                                    onChange={(e) => {
+                disabled={isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))}
+                      onChange={(e) => {
                                                                       const v = e.target.value;
                                                                       setEditedActs((prev) => ({
                                                                         ...prev,
@@ -1751,17 +2167,23 @@ export default function SiteAdminValidate() {
                                                               }
 
                                                               if (cn === 'Material') {
+                                                                // Production hauling is always ore and should not be selectable.
+                                                                const rowSub = String(getSubNameFromObj(r as any, currentObj) || '').toLowerCase();
+                                                                if (String(actName || '').toLowerCase() === 'hauling' && rowSub === 'production') {
+                                                                  return <div className="input bg-slate-50 text-slate-700 cursor-default">ore</div>;
+                                                                }
                                                                 const curStr = String(cur || '').toLowerCase();
                                                                 const normalized =
                                                                   curStr === 'ore' || curStr === 'waste' ? curStr : curStr ? curStr : '';
                                                                 return (
                                                                   <select
-                                                                    className="input w-full"
+                                                                    className={`input w-full ${(isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))) ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
                                                                     title={`Shift: ${String(hasLive ? liveVal : baselineVal)} | Validated: ${String(
                                                                       cur ?? '',
                                                                     )}`}
                                                                     value={normalized}
-                                                                    onChange={(e) => {
+                disabled={isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))}
+                      onChange={(e) => {
                                                                       const v = e.target.value;
                                                                       setEditedActs((prev) => ({
                                                                         ...prev,
@@ -1776,15 +2198,42 @@ export default function SiteAdminValidate() {
                                                                 );
                                                               }
 
+                                                              // Derived totals
+                                                              // - Production Drilling totals come from holes
+                                                              // - Hauling (Trucks / Tonnes Hauled) comes from per-truck loads
+                                                              if (actName === 'Production Drilling' && (c === 'Metres Drilled' || c === 'Cleanouts Drilled' || c === 'Redrills')) {
+                                                                return (
+                                                                  <div className="px-2 py-1.5">
+                                                                    <div className="text-sm text-slate-800">{String(cur ?? '')}</div>
+                                                                  </div>
+                                                                );
+                                                              }
+
+                                                              if (actName === 'Hauling' && (c === 'Trucks' || c === 'Tonnes Hauled')) {
+                                                                const loadsArr: any[] = Array.isArray((currentObj as any)?.loads) ? (currentObj as any).loads : [];
+                                                                const trucks = loadsArr.length;
+                                                                const tonnes = loadsArr.reduce(
+                                                                  (acc: number, l: any) => acc + (parseFloat(String(l?.weight ?? l?.Weight ?? 0)) || 0),
+                                                                  0,
+                                                                );
+                                                                const shown = c === 'Trucks' ? trucks : tonnes;
+                                                                return (
+                                                                  <div className="px-2 py-1.5">
+                                                                    <div className="text-sm text-slate-800">{String(shown ?? '')}</div>
+                                                                  </div>
+                                                                );
+                                                              }
+
                                                               // Default: free input (numeric/text)
                                                               return (
                                                                 <input
-                                                                  className="input w-full"
+                                                                  className={`input w-full ${(isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))) ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
                                                                   title={`Validated: ${String(curVal ?? '')} | Original: ${String(
                                                                     (hasLive ? liveVal : baselineVal) ?? '',
                                                                   )}`}
                                                                   value={String(cur ?? '')}
-                                                                  onChange={(e) => {
+                disabled={isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))}
+                      onChange={(e) => {
                                                                     const v = e.target.value;
                                                                     setEditedActs((prev) => ({
                                                                       ...prev,
@@ -1797,6 +2246,45 @@ export default function SiteAdminValidate() {
                                                           </td>
                                                         );
                                                       })}
+
+                                                      <td className="p-2 text-right whitespace-nowrap">
+                                                        <button
+                                                          type="button"
+                                                          className="px-3 py-1 rounded-full border border-slate-200 bg-white hover:bg-rose-50 text-rose-700 text-xs"
+                                                          title="Delete this activity from validated data"
+                                                          disabled={isReadonly}
+                                                          onClick={async () => {
+                                                            const id = Number((r as any)?.id);
+                                                            if (!id || !selectedDate) return;
+                                                            if (!confirm("Delete this validated activity?")) return;
+                                                            try {
+                                                              await api('/api/site-admin/validated/delete-activity', {
+                                                                method: 'POST',
+                                                                body: JSON.stringify({ site, date: selectedDate, id }),
+                                                              });
+                                                              setMsg('Activity deleted');
+                                                              await loadDate(selectedDate);
+                                                              const cal = await api(`/api/site-admin/calendar?year=${year}&site=${encodeURIComponent(site)}`);
+                                                              const map: Record<string, DayStatus> = {};
+                                                              for (const d of cal?.days || []) map[String(d.date)] = (d.status as DayStatus) || 'none';
+                                                              setDays(map);
+                                                            } catch (e: any) {
+                                                              // Surface backend error details to make debugging possible
+                                                              const raw = String(e?.message || e || 'Failed');
+                                                              let msg = raw;
+                                                              try {
+                                                                const j = JSON.parse(raw);
+                                                                msg = j?.error || j?.message || raw;
+                                                              } catch {
+                                                                // leave as-is
+                                                              }
+                                                              setMsg(`Failed to delete: ${msg}`);
+                                                            }
+                                                          }}
+                                                        >
+                                                          Delete
+                                                        </button>
+                                                      </td>
                                                     </tr>
                                                   );
                                                 })}

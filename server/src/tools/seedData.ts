@@ -441,12 +441,12 @@ export async function seedData(opts: SeedOptions) {
           [site, user_email, ymd(d), dn],
         );
 
-        const vShiftRes = await client.query(
-          `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, validated, totals_json)
-           VALUES ($1,$2::date,$3,$4,$5,0,$6::jsonb)
-           RETURNING id`,
-          [site, ymd(d), dn, user_email, user_name, JSON.stringify(rollup)],
-        );
+	        const vShiftRes = await client.query(
+	          `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, validated, totals_json)
+	           VALUES ($1,$2::date,$3,COALESCE($4,''),$5,0,$6::jsonb)
+	           RETURNING id`,
+	          [site, ymd(d), dn, user_email, user_name, JSON.stringify(rollup)],
+	        );
         const v_shift_id = vShiftRes.rows[0].id as number;
 
         // validated_shift_activities is keyed by (site,date,dn,user_email) in this schema

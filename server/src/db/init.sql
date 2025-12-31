@@ -93,6 +93,38 @@ CREATE TABLE IF NOT EXISTS admin_sites (
   terms_version TEXT
 );
 
+-- Backward-compatible migration: older databases may have admin_sites.site instead of admin_sites.name.
+-- Ensure required columns exist and backfill name from site when present.
+ALTER TABLE admin_sites ADD COLUMN IF NOT EXISTS name TEXT;
+ALTER TABLE admin_sites ADD COLUMN IF NOT EXISTS state TEXT;
+ALTER TABLE admin_sites ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
+ALTER TABLE admin_sites ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ;
+ALTER TABLE admin_sites ADD COLUMN IF NOT EXISTS terms_version TEXT;
+
+-- Backfill admin_sites.name from admin_sites.site if that legacy column exists.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name='admin_sites' AND column_name='site'
+  ) THEN
+    EXECUTE 'UPDATE admin_sites SET name = COALESCE(NULLIF(name, ''''), TRIM(site)) WHERE COALESCE(NULLIF(name, ''''), '''') = ''''';
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  -- do nothing; safe on partial schemas
+END $$;
+
+-- Ensure uniqueness on name (some older schemas may miss the constraint)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_indexes
+     WHERE tablename='admin_sites' AND indexname='admin_sites_name_key'
+  ) THEN
+    EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS admin_sites_name_key ON admin_sites(name)';
+  END IF;
+END $$;
+
 
 -- SITE MEMBERSHIPS (approval + roles)
 -- Authoritative membership + roles per site.
@@ -245,3 +277,78 @@ CREATE TABLE IF NOT EXISTS contact_requests (
 );
 
 CREATE INDEX IF NOT EXISTS idx_contact_requests_created_at ON contact_requests(created_at);
+-- SHIFTS (authoritative user-finalized data)
+CREATE TABLE IF NOT EXISTS shifts (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  site TEXT NOT NULL DEFAULT 'default',
+  date DATE NOT NULL,
+  dn TEXT NOT NULL,
+  totals_json JSONB DEFAULT '{}'::jsonb,
+  meta_json JSONB DEFAULT '{}'::jsonb,
+  finalized_at TIMESTAMPTZ,
+  user_email TEXT,
+  user_name TEXT,
+  UNIQUE (user_id, date, dn)
+);
+
+CREATE INDEX IF NOT EXISTS idx_shifts_site_date ON shifts(site, date);
+CREATE INDEX IF NOT EXISTS idx_shifts_user_date ON shifts(user_id, date);
+
+CREATE TABLE IF NOT EXISTS shift_activities (
+  id SERIAL PRIMARY KEY,
+  shift_id INT NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+  user_email TEXT,
+  user_name TEXT,
+  site TEXT,
+  activity TEXT,
+  sub_activity TEXT,
+  payload_json JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_shift_activities_shift ON shift_activities(shift_id);
+CREATE INDEX IF NOT EXISTS idx_shift_activities_site ON shift_activities(site);
+
+-- VALIDATION LAYER (editable snapshot used by Site Admin validation)
+CREATE TABLE IF NOT EXISTS validated_shifts (
+  id SERIAL PRIMARY KEY,
+  site TEXT NOT NULL,
+  date DATE NOT NULL,
+  dn TEXT NOT NULL,
+  -- Normalise NULLs so we can enforce a simple UNIQUE constraint.
+  user_email TEXT NOT NULL DEFAULT '',
+  user_name TEXT,
+  validated INT NOT NULL DEFAULT 0,
+  totals_json JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (site, date, dn, user_email)
+);
+
+-- Day-level status for Site Admin validation calendar.
+-- Used for UI colouring and quick status checks.
+CREATE TABLE IF NOT EXISTS validated_days (
+  site TEXT NOT NULL,
+  date DATE NOT NULL,
+  status TEXT NOT NULL DEFAULT 'unvalidated',
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (site, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_validated_shifts_site_date ON validated_shifts(site, date);
+
+CREATE TABLE IF NOT EXISTS validated_shift_activities (
+  id SERIAL PRIMARY KEY,
+  site TEXT NOT NULL,
+  date DATE NOT NULL,
+  dn TEXT NOT NULL,
+  user_email TEXT,
+  user_name TEXT,
+  activity TEXT,
+  sub_activity TEXT,
+  payload_json JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_validated_acts_site_date ON validated_shift_activities(site, date);
+CREATE INDEX IF NOT EXISTS idx_validated_acts_site_date_dn_email ON validated_shift_activities(site, date, dn, COALESCE(user_email,''));

@@ -27,6 +27,7 @@ import Notifications from './pages/Notifications';
 import SiteAdminLogin from './pages/SiteAdminLogin';
 import SiteAdmin from './pages/SiteAdmin';
 import SiteAdminValidate from './pages/SiteAdminValidate';
+import SiteAdminAddActivity from './pages/SiteAdminAddActivity';
 import SiteAdminEquipmentLocations from './pages/SiteAdminEquipmentLocations';
 import SiteAdminMenu from './pages/SiteAdminMenu';
 import SiteAdminLayout from './components/SiteAdminLayout';
@@ -175,6 +176,7 @@ export default function App() {
       >
         <Route index element={<SiteAdmin />} />
         <Route path="Validate" element={<SiteAdminValidate />} />
+        <Route path="AddActivity" element={<SiteAdminAddActivity />} />
         {/* Validators must be able to access Equipment & Locations */}
         <Route path="Equipment&Locations" element={<RequireSiteAdmin><SiteAdminEquipmentLocations /></RequireSiteAdmin>} />
         <Route path="Sites" element={<RequireSiteAdminSuper><SiteAdminSites /></RequireSiteAdminSuper>} />

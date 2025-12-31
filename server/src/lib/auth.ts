@@ -73,7 +73,9 @@ export function siteAdminMiddleware(req: any, res: any, next: any) {
               `SELECT COALESCE(s.name, m.site, m.site_name) as site, m.role
                  FROM site_memberships m
                  LEFT JOIN admin_sites s ON s.id=m.site_id
-                WHERE m.user_id=$1 AND LOWER(COALESCE(m.status,'')) IN ('active','approved') AND LOWER(COALESCE(m.role,'')) IN ('validator','admin','site_admin','site_validator')`,
+                WHERE m.user_id=$1
+                  AND LOWER(COALESCE(NULLIF(m.status,''),'active')) IN ('active','approved')
+                  AND LOWER(COALESCE(NULLIF(m.role,''),'')) IN ('validator','admin','site_admin','site_validator')`,
               [u.id],
             );
                         const sites = (mr.rows || []).map((x: any) => String(x.site)).filter(Boolean);

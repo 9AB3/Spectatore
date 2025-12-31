@@ -12,7 +12,7 @@ export default function useToast() {
 
   const Toast = () =>
     msg ? (
-      <div className="fixed inset-0 flex items-center justify-center z-[9999] pointer-events-none">
+      <div className="fixed inset-0 flex items-start justify-center z-[9999] pointer-events-none">
         <div className="bg-black text-white px-4 py-2 rounded-lg shadow-lg pointer-events-auto">
           {msg}
         </div>

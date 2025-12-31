@@ -139,19 +139,19 @@
         "field": "Metres Drilled",
         "required": 1,
         "unit": "m",
-        "input": "number|0-400"
+        "input": "number|0-400|1dp"
       },
       {
         "field": "Cleanouts Drilled",
         "required": 1,
         "unit": "m",
-        "input": "number|0-400"
+        "input": "number|0-400|1dp"
       },
       {
         "field": "Redrills",
         "required": 1,
         "unit": "m",
-        "input": "number|0-400"
+        "input": "number|0-400|1dp"
       }
     ],
     "Service Hole": [
@@ -171,19 +171,19 @@
         "field": "Metres Drilled",
         "required": 1,
         "unit": "m",
-        "input": "number|0-400"
+        "input": "number|0-400|1dp"
       },
       {
         "field": "Cleanouts Drilled",
         "required": 1,
         "unit": "m",
-        "input": "number|0-400"
+        "input": "number|0-400|1dp"
       },
       {
         "field": "Redrills",
         "required": 1,
         "unit": "m",
-        "input": "number|0-400"
+        "input": "number|0-400|1dp"
       }
     ]
   },
