@@ -434,15 +434,15 @@ router.post('/members/approve', siteAdminMiddleware, async (req: any, res) => {
     // Update first (works even if there is no UNIQUE constraint for ON CONFLICT)
     const upd = await pool.query(
       `UPDATE site_memberships
-          SET role=$3, status='active', approved_at=NOW(), approved_by=$4, site=COALESCE(site,$2), site_name=COALESCE(site_name,$2)
+          SET role=$3, status='active', approved_at=NOW(), approved_by=$4, site_name=COALESCE(site_name,$2)
         WHERE user_id=$1 AND site_id=$5`,
       [user_id, site, role, req.user_id || null, site_id],
     );
 
     if ((upd.rowCount || 0) === 0) {
       await pool.query(
-        `INSERT INTO site_memberships (user_id, site_id, site, site_name, role, status, approved_at, approved_by)
-         VALUES ($1,$2,$3,$3,$4,'active',NOW(),$5)`,
+        `INSERT INTO site_memberships (user_id, site_id, site_name, role, status, approved_at, approved_by)
+         VALUES ($1,$2,$3,$4,'active',NOW(),$5)`,
         [user_id, site_id, site, role, req.user_id || null],
       );
     }
@@ -529,15 +529,14 @@ router.post('/members/add', siteAdminMiddleware, async (req: any, res) => {
               requested_at=NOW(),
               approved_at=NULL,
               approved_by=NULL,
-              site=COALESCE(site,$2),
               site_name=COALESCE(site_name,$2)
         WHERE user_id=$1 AND site_id=$4 AND status <> 'active'`,
       [user_id, site, role, site_id],
     );
     if ((upd.rowCount || 0) === 0) {
       await pool.query(
-        `INSERT INTO site_memberships (user_id, site_id, site, site_name, role, status, requested_at)
-         VALUES ($1,$2,$3,$3,$4,'invited',NOW())`,
+        `INSERT INTO site_memberships (user_id, site_id, site_name, role, status, requested_at)
+         VALUES ($1,$2,$3,$4,'invited',NOW())`,
         [user_id, site_id, site, role],
       );
     }
