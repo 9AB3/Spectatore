@@ -7,6 +7,28 @@ import { authMiddleware } from '../lib/auth.js';
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
+// ---- schema helpers (support older DB variants) ----
+let _colsCache: Record<string, Set<string>> = {};
+
+async function tableColumns(table: string): Promise<Set<string>> {
+  if (_colsCache[table]) return _colsCache[table];
+  const r = await pool.query(
+    `SELECT column_name
+       FROM information_schema.columns
+      WHERE table_schema='public'
+        AND table_name=$1`,
+    [table],
+  );
+  const set = new Set<string>((r.rows || []).map((x: any) => String(x.column_name)));
+  _colsCache[table] = set;
+  return set;
+}
+
+async function hasColumn(table: string, col: string): Promise<boolean> {
+  const cols = await tableColumns(table);
+  return cols.has(col);
+}
+
 // ---- admin_sites schema compatibility ----
 // Some earlier databases have admin_sites.site (TEXT) instead of admin_sites.name (TEXT).
 // We avoid referencing a non-existent column by trying the newer schema first and falling
@@ -140,15 +162,21 @@ router.get('/me', authMiddleware, async (req: any, res) => {
     let memberships: any[] = [];
     try {
       // Don't depend on admin_sites columns here; membership rows already carry the site name.
+      const cols = await tableColumns('site_memberships');
+      const siteExpr = cols.has('site_name')
+        ? 'm.site_name'
+        : cols.has('site')
+          ? 'm.site'
+          : "''";
       const mr = await pool.query(
         `SELECT m.id,
                 m.site_id,
-                COALESCE(m.site_name, m.site, '') AS site,
+                COALESCE(${siteExpr}, '') AS site,
                 COALESCE(NULLIF(m.role, ''), 'member') AS role,
                 COALESCE(NULLIF(m.status, ''), 'requested') AS status
            FROM site_memberships m
           WHERE m.user_id=$1
-          ORDER BY COALESCE(m.site_name, m.site, '') ASC`,
+          ORDER BY COALESCE(${siteExpr}, '') ASC`,
         [user_id],
       );
       memberships = mr.rows || [];
@@ -224,8 +252,14 @@ router.post('/active-site', authMiddleware, async (req: any, res) => {
     }
 
     // must be an active membership for this site
+    const cols = await tableColumns('site_memberships');
+    const siteExpr = cols.has('site_name')
+      ? 'm.site_name'
+      : cols.has('site')
+        ? 'm.site'
+        : "''";
     const mr = await pool.query(
-      `SELECT COALESCE(m.site_name, m.site) AS name
+      `SELECT ${siteExpr} AS name
          FROM site_memberships m
         WHERE m.user_id=$1 AND m.site_id=$2 AND COALESCE(NULLIF(m.status,''),'requested')='active'
         LIMIT 1`,
@@ -260,12 +294,18 @@ router.get('/site-assets', authMiddleware, async (req: any, res) => {
       [user_id, site],
     );
     if (!vr.rows?.length) {
+      const cols = await tableColumns('site_memberships');
+      const siteExpr = cols.has('site_name')
+        ? 'm.site_name'
+        : cols.has('site')
+          ? 'm.site'
+          : "''";
       const mr = await pool.query(
         `SELECT 1
            FROM site_memberships m
           WHERE m.user_id=$1
             AND COALESCE(NULLIF(m.status,''),'requested')='active'
-            AND COALESCE(m.site_name, m.site)=$2
+            AND ${siteExpr}=$2
           LIMIT 1`,
         [user_id, site],
       );
@@ -273,20 +313,47 @@ router.get('/site-assets', authMiddleware, async (req: any, res) => {
     }
 
     // admin_equipment uses equipment_id (not name). Alias it to name for client-side consistency.
-    const er = await pool.query(
-      `SELECT id, equipment_id AS name, type
-         FROM admin_equipment
-        WHERE site=$1
-        ORDER BY equipment_id ASC`,
-      [site],
-    );
-    const lr = await pool.query(
-      `SELECT id, name, type
-         FROM admin_locations
-        WHERE site=$1
-        ORDER BY name ASC`,
-      [site],
-    );
+    // admin_equipment may be equipment_id (newer) or name (older). Always return {name} to client.
+    let er;
+    try {
+      er = await pool.query(
+        `SELECT id, equipment_id AS name, type
+           FROM admin_equipment
+          WHERE site=$1
+          ORDER BY equipment_id ASC`,
+        [site],
+      );
+    } catch (e: any) {
+      if (String(e?.code) !== '42703') throw e;
+      er = await pool.query(
+        `SELECT id, name, type
+           FROM admin_equipment
+          WHERE site=$1
+          ORDER BY name ASC`,
+        [site],
+      );
+    }
+
+    // admin_locations may be name (newer) or location_id (older). Always return {name} to client.
+    let lr;
+    try {
+      lr = await pool.query(
+        `SELECT id, name, type
+           FROM admin_locations
+          WHERE site=$1
+          ORDER BY name ASC`,
+        [site],
+      );
+    } catch (e: any) {
+      if (String(e?.code) !== '42703') throw e;
+      lr = await pool.query(
+        `SELECT id, location_id AS name, type
+           FROM admin_locations
+          WHERE site=$1
+          ORDER BY location_id ASC`,
+        [site],
+      );
+    }
 
     return res.json({ equipment: er.rows || [], locations: lr.rows || [] });
   } catch (err) {
@@ -308,14 +375,56 @@ router.post('/site-requests', authMiddleware, async (req: any, res) => {
     const siteName = await adminSitesSelectNameById(site_id);
     if (!siteName) return res.status(400).json({ error: 'site_not_found' });
 
+    const mcols = await tableColumns('site_memberships');
+    // Note: different DBs have different columns on site_memberships.
+    // We always write user_id/site_id/role and set status/requested_at via literals.
+    const cols: string[] = ['user_id', 'site_id', 'role', 'status', 'requested_at'];
+    const vals: any[] = [user_id, site_id, role];
 
-    await pool.query(
-      `INSERT INTO site_memberships (user_id, site_id, site, site_name, role, status, requested_at)
-       VALUES ($1, $2, $3, $3, $4, 'requested', now())
-       ON CONFLICT (user_id, site_id)
-       DO UPDATE SET role=EXCLUDED.role, status='requested', requested_at=now()`,
-      [user_id, site_id, siteName, role],
-    );
+    // optional columns depending on schema
+    if (mcols.has('site_name')) {
+      cols.splice(2, 0, 'site_name');
+      vals.splice(2, 0, siteName);
+    }
+    if (mcols.has('site')) {
+      cols.splice(2, 0, 'site');
+      vals.splice(2, 0, siteName);
+    }
+
+    // rebuild placeholders in order
+    const valueParts: string[] = [];
+    let idx = 1;
+    for (const c of cols) {
+      if (c === 'status') valueParts.push(`'requested'`);
+      else if (c === 'requested_at') valueParts.push('now()');
+      else {
+        valueParts.push(`$${idx}`);
+        idx++;
+      }
+    }
+
+    const insertSql = `INSERT INTO site_memberships (${cols.join(', ')})\n       VALUES (${valueParts.join(', ')})`;
+
+    // Prefer upsert if a suitable unique constraint exists. If not, fall back to delete+insert.
+    try {
+      await pool.query(
+        `${insertSql}\n       ON CONFLICT (user_id, site_id)\n       DO UPDATE SET role=EXCLUDED.role, status='requested', requested_at=now()`,
+        vals,
+      );
+    } catch (e: any) {
+      if (String(e?.code) === '42P10') {
+        // no unique constraint matching the ON CONFLICT, do a deterministic replace
+        await pool.query('DELETE FROM site_memberships WHERE user_id=$1 AND site_id=$2', [user_id, site_id]);
+        await pool.query(insertSql, vals);
+      } else if (String(e?.code) === '42703') {
+        // schema mismatch: retry without site/site_name columns and let the DB defaults handle it
+        const basicCols = ['user_id', 'site_id', 'role', 'status', 'requested_at'];
+        const basicSql = `INSERT INTO site_memberships (${basicCols.join(', ')}) VALUES ($1,$2,$3,'requested',now())`;
+        await pool.query(basicSql, [user_id, site_id, role]);
+      } else {
+        throw e;
+      }
+    }
 
     // Best-effort: set primary_site_id if empty
     try {
@@ -486,10 +595,16 @@ router.post('/terms/accept', authMiddleware, async (req: any, res) => {
 router.get('/site-invites', authMiddleware, async (req: any, res) => {
   try {
     const user_id = req.user_id;
+    const cols = await tableColumns('site_memberships');
+    const siteExpr = cols.has('site_name')
+      ? 'm.site_name'
+      : cols.has('site')
+        ? 'm.site'
+        : "''";
     const r = await pool.query(
       `SELECT
          m.id,
-         COALESCE(m.site_name, m.site, '') as site,
+         COALESCE(${siteExpr}, '') as site,
          COALESCE(m.role,'member') as role,
          COALESCE(m.status,'') as status,
          m.requested_at
