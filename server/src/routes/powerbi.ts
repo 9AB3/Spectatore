@@ -61,12 +61,20 @@ router.get('/shift-totals', async (req, res) => {
         COALESCE(NULLIF(s.user_email, ''), u.email, '') AS user_email,
         COALESCE(NULLIF(s.user_name, ''), u.name, '') AS user_name,
         kv.key AS metric,
-        kv.value AS value_text,
-        NULLIF(regexp_replace(kv.value, '[^0-9\.-]', '', 'g'), '')::double precision AS value_num,
+	        CASE
+	          WHEN jsonb_typeof(kv.value) = 'string' THEN kv.value #>> '{}'
+	          ELSE kv.value::text
+	        END AS value_text,
+	        CASE
+	          WHEN jsonb_typeof(kv.value) = 'number' THEN (kv.value::text)::double precision
+	          WHEN jsonb_typeof(kv.value) = 'string' AND (kv.value #>> '{}') ~ '^-?[0-9]+(\\.[0-9]+)?$'
+	            THEN (kv.value #>> '{}')::double precision
+	          ELSE NULL
+	        END AS value_num,
         s.finalized_at
       FROM shifts s
       LEFT JOIN users u ON u.id = s.user_id
-      CROSS JOIN LATERAL jsonb_each_text(COALESCE(s.totals_json, '{}'::jsonb)) kv
+	      CROSS JOIN LATERAL jsonb_each(COALESCE(s.totals_json, '{}'::jsonb)) kv
       WHERE ($1::text IS NULL OR s.site = $1)
         AND ($2::date IS NULL OR s.date >= $2)
         AND ($3::date IS NULL OR s.date <= $3)
@@ -106,13 +114,20 @@ router.get('/activity-payloads', async (req, res) => {
         a.activity,
         a.sub_activity,
         kv.key AS field,
-        kv.value AS value_text,
-        NULLIF(regexp_replace(kv.value, '[^0-9\.-]', '', 'g'), '')::double precision AS value_num,
+	        CASE
+	          WHEN jsonb_typeof(kv.value) = 'string' THEN kv.value #>> '{}'
+	          ELSE kv.value::text
+	        END AS value_text,
+	        CASE
+	          WHEN jsonb_typeof(kv.value) = 'number' THEN (kv.value::text)::double precision
+	          WHEN jsonb_typeof(kv.value) = 'string' AND (kv.value #>> '{}') ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN (kv.value #>> '{}')::double precision
+	          ELSE NULL
+	        END AS value_num,
         a.created_at
       FROM shift_activities a
       JOIN shifts s ON s.id = a.shift_id
       LEFT JOIN users u ON u.id = s.user_id
-      CROSS JOIN LATERAL jsonb_each_text(COALESCE(a.payload_json, '{}'::jsonb)) kv
+	      CROSS JOIN LATERAL jsonb_each(COALESCE(a.payload_json, '{}'::jsonb)) kv
       WHERE ($1::text IS NULL OR COALESCE(a.site, s.site) = $1)
         AND ($2::date IS NULL OR s.date >= $2)
         AND ($3::date IS NULL OR s.date <= $3)
@@ -147,12 +162,20 @@ router.get('/validated/shift-totals', async (req, res) => {
         v.user_email,
         COALESCE(NULLIF(v.user_name, ''), '') AS user_name,
         kv.key AS metric,
-        kv.value AS value_text,
-        NULLIF(regexp_replace(kv.value, '[^0-9\.-]', '', 'g'), '')::double precision AS value_num,
+	        CASE
+	          WHEN jsonb_typeof(kv.value) = 'string' THEN kv.value #>> '{}'
+	          ELSE kv.value::text
+	        END AS value_text,
+	        CASE
+	          WHEN jsonb_typeof(kv.value) = 'number' THEN (kv.value::text)::double precision
+	          WHEN jsonb_typeof(kv.value) = 'string' AND (kv.value #>> '{}') ~ '^-?[0-9]+(\\.[0-9]+)?$'
+	            THEN (kv.value #>> '{}')::double precision
+	          ELSE NULL
+	        END AS value_num,
         v.validated,
         v.created_at
       FROM validated_shifts v
-      CROSS JOIN LATERAL jsonb_each_text(COALESCE(v.totals_json, '{}'::jsonb)) kv
+	      CROSS JOIN LATERAL jsonb_each(COALESCE(v.totals_json, '{}'::jsonb)) kv
       WHERE ($1::text IS NULL OR v.site = $1)
         AND ($2::date IS NULL OR v.date >= $2)
         AND ($3::date IS NULL OR v.date <= $3)
@@ -184,12 +207,16 @@ router.get('/validated/activity-payloads', async (req, res) => {
         COALESCE(NULLIF(a.user_name, ''), '') AS user_name,
         a.activity,
         a.sub_activity,
-        kv.key AS field,
-        kv.value AS value_text,
-        NULLIF(regexp_replace(kv.value, '[^0-9\.-]', '', 'g'), '')::double precision AS value_num,
+	        kv.key AS field,
+	        CASE WHEN jsonb_typeof(kv.value) = 'string' THEN kv.value #>> '{}' ELSE kv.value::text END AS value_text,
+	        CASE
+	          WHEN jsonb_typeof(kv.value) = 'number' THEN (kv.value::text)::double precision
+	          WHEN jsonb_typeof(kv.value) = 'string' AND (kv.value #>> '{}') ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN (kv.value #>> '{}')::double precision
+	          ELSE NULL
+	        END AS value_num,
         a.created_at
       FROM validated_shift_activities a
-      CROSS JOIN LATERAL jsonb_each_text(COALESCE(a.payload_json, '{}'::jsonb)) kv
+	      CROSS JOIN LATERAL jsonb_each(COALESCE(a.payload_json, '{}'::jsonb)) kv
       WHERE ($1::text IS NULL OR a.site = $1)
         AND ($2::date IS NULL OR a.date >= $2)
         AND ($3::date IS NULL OR a.date <= $3)
