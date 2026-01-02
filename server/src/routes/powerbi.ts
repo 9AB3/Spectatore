@@ -353,6 +353,158 @@ router.get('/validated/activity-payloads', async (req, res) => {
     res.status(500).json({ error: 'powerbi_validated_activity_payloads_failed' });
   }
 });
+/**
+ * GET /api/powerbi/validated/activity-metrics
+ * Returns VALIDATED activity-level metrics flattened from validated_shift_activities.payload_json
+ * Designed for Power BI:
+ * - Use Anonymous auth in Power BI
+ * - Append ?token=YOUR_POWERBI_TOKEN to the URL
+ *
+ * Output rows: one per (shift_activity x group x metric)
+ * group = e.g. "Production" / "Development" / "(No Sub Activity)" etc (first-level key when payload_json is nested)
+ * metric_key = the metric name (e.g. "Trucks", "Weight", "Distance", "TKMs", "Metres Drilled", etc)
+ * metric_value = numeric when parseable, else null; metric_text always provided
+ */
+router.get('/validated/activity-metrics', async (req, res) => {
+  try {
+    if (!(await requirePowerBiAuth(req, res))) return;
+
+    const site = String(req.query.site || '').trim();
+    const from = String(req.query.from || '').trim(); // YYYY-MM-DD
+    const to = String(req.query.to || '').trim();     // YYYY-MM-DD
+
+    const where: string[] = [];
+    const params: any[] = [];
+    let p = 1;
+
+    if (site) { where.push(`vsa.site = $${p++}`); params.push(site); }
+    if (isYmd(from)) { where.push(`vs.date >= $${p++}`); params.push(from); }
+    if (isYmd(to)) { where.push(`vs.date <= $${p++}`); params.push(to); }
+
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    // We flatten payload_json in a robust "1- or 2-level" way:
+    // - If payload_json is { "Production": {...}, "Development": {...} } → group=Production, metric_key from inner object.
+    // - If payload_json is { "Trucks": 5, "Weight": 45 } → group="(No Group)", metric_key from top-level.
+    //
+    // We also pull "context" fields out when present (equipment/location/from/to/source/destination).
+    //
+    // NOTE: context fields may be stored in payload_json alongside metrics. We exclude common context keys from metric flattening.
+    const sql = `
+      WITH base AS (
+        SELECT
+          vsa.id AS activity_id,
+          vs.date,
+          vs.dn,
+          vs.site,
+          u.email AS user_email,
+          COALESCE(u.name, u.email) AS user_name,
+          vsa.activity,
+          COALESCE(vsa.sub_activity, '(No Sub Activity)') AS sub_activity,
+          vsa.payload_json::jsonb AS payload
+        FROM validated_shift_activities vsa
+        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        JOIN users u ON u.id = vs.user_id
+        ${whereSql}
+      ),
+      top_kv AS (
+        SELECT
+          b.*,
+          kv.key AS top_key,
+          kv.value AS top_val
+        FROM base b
+        CROSS JOIN LATERAL jsonb_each(b.payload) kv
+      ),
+      flattened AS (
+        -- Case A: top-level values are objects → group=top_key, metric=inner key
+        SELECT
+          activity_id,
+          date,
+          dn,
+          site,
+          user_email,
+          user_name,
+          activity,
+          sub_activity,
+          top_key AS metric_group,
+          kv2.key AS metric_key,
+          kv2.value AS metric_json
+        FROM top_kv
+        CROSS JOIN LATERAL (
+          SELECT * FROM jsonb_each(top_val)
+        ) kv2
+        WHERE jsonb_typeof(top_val) = 'object'
+
+        UNION ALL
+
+        -- Case B: top-level is scalar → group="(No Group)", metric=top_key
+        SELECT
+          activity_id,
+          date,
+          dn,
+          site,
+          user_email,
+          user_name,
+          activity,
+          sub_activity,
+          '(No Group)' AS metric_group,
+          top_key AS metric_key,
+          top_val AS metric_json
+        FROM top_kv
+        WHERE jsonb_typeof(top_val) <> 'object'
+      ),
+      cleaned AS (
+        SELECT
+          f.*,
+          -- context fields (best-effort)
+          COALESCE(base.payload->>'equipment', base.payload->>'Equipment') AS equipment,
+          COALESCE(base.payload->>'location', base.payload->>'Location') AS location,
+          COALESCE(base.payload->>'from', base.payload->>'From', base.payload->>'from_location', base.payload->>'From Location') AS from_location,
+          COALESCE(base.payload->>'to', base.payload->>'To', base.payload->>'to_location', base.payload->>'To Location') AS to_location,
+          COALESCE(base.payload->>'source', base.payload->>'Source') AS source,
+          COALESCE(base.payload->>'destination', base.payload->>'Destination') AS destination
+        FROM flattened f
+        JOIN base ON base.activity_id = f.activity_id
+      )
+      SELECT
+        date,
+        dn,
+        site,
+        user_email,
+        user_name,
+        activity,
+        sub_activity,
+        equipment,
+        location,
+        from_location,
+        to_location,
+        source,
+        destination,
+        metric_group,
+        metric_key,
+        -- metric_text and metric_value
+        CASE
+          WHEN jsonb_typeof(metric_json) IN ('string', 'number', 'boolean') THEN trim(both '"' from metric_json::text)
+          ELSE metric_json::text
+        END AS metric_text,
+        CASE
+          WHEN jsonb_typeof(metric_json) = 'number' THEN (metric_json::text)::double precision
+          WHEN jsonb_typeof(metric_json) = 'string' AND (trim(both '"' from metric_json::text) ~ '^-?\d+(\.\d+)?$')
+            THEN (trim(both '"' from metric_json::text))::double precision
+          ELSE NULL
+        END AS metric_value
+      FROM cleaned
+      WHERE metric_key NOT IN ('equipment','Equipment','location','Location','from','From','from_location','From Location','to','To','to_location','To Location','source','Source','destination','Destination')
+      ORDER BY date, dn, site, user_email, activity, sub_activity, metric_group, metric_key;
+    `;
+
+    const r = await pool.query(sql, params);
+    res.json(r.rows);
+  } catch (e: any) {
+    console.error('[powerbi] validated/activity-metrics failed', e?.message || e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
 
 /**
  * Optional: a small "dimension" endpoint Power BI can use for slicers.
