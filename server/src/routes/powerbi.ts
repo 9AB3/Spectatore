@@ -406,8 +406,18 @@ router.get('/validated/activity-metrics', async (req, res) => {
           COALESCE(vsa.sub_activity, '(No Sub Activity)') AS sub_activity,
           vsa.payload_json::jsonb AS payload
         FROM validated_shift_activities vsa
-        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
-        JOIN users u ON u.id = vs.user_id
+        /*
+          validated_shift_activities does NOT store validated_shift_id.
+          Link to validated_shifts via the natural key (site/date/dn/user_email).
+        */
+        JOIN validated_shifts vs
+          ON vs.site = vsa.site
+         AND vs.date = vsa.date
+         AND vs.dn = vsa.dn
+         AND vs.user_email = vsa.user_email
+        LEFT JOIN users u
+          ON u.id = vs.user_id
+          OR u.email = vs.user_email
         ${whereSql}
       ),
       top_kv AS (
