@@ -50,6 +50,11 @@ function asDateParam(v: any) {
   return s ? s : null;
 }
 
+// yyyy-mm-dd helper for validating query params
+function isYmd(s: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '').trim());
+}
+
 /**
  * GET /api/powerbi/shift-totals?site=<name>&from=YYYY-MM-DD&to=YYYY-MM-DD
  *
@@ -367,8 +372,6 @@ router.get('/validated/activity-payloads', async (req, res) => {
  */
 router.get('/validated/activity-metrics', async (req, res) => {
   try {
-    if (!(await requirePowerBiAuth(req, res))) return;
-
     const site = String(req.query.site || '').trim();
     const from = String(req.query.from || '').trim(); // YYYY-MM-DD
     const to = String(req.query.to || '').trim();     // YYYY-MM-DD
