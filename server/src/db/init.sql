@@ -319,6 +319,7 @@ CREATE TABLE IF NOT EXISTS validated_shifts (
   -- Normalise NULLs so we can enforce a simple UNIQUE constraint.
   user_email TEXT NOT NULL DEFAULT '',
   user_name TEXT,
+  user_id INTEGER,
   validated INT NOT NULL DEFAULT 0,
   totals_json JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT now(),
@@ -352,3 +353,23 @@ CREATE TABLE IF NOT EXISTS validated_shift_activities (
 
 CREATE INDEX IF NOT EXISTS idx_validated_acts_site_date ON validated_shift_activities(site, date);
 CREATE INDEX IF NOT EXISTS idx_validated_acts_site_date_dn_email ON validated_shift_activities(site, date, dn, COALESCE(user_email,''));
+
+
+-- Add missing validated user_id columns (backfill-safe)
+ALTER TABLE IF EXISTS validated_shifts ADD COLUMN IF NOT EXISTS user_id INTEGER;
+ALTER TABLE IF EXISTS validated_shift_activities ADD COLUMN IF NOT EXISTS user_id INTEGER;
+
+-- Backfill validated user_id/user_name from users table where possible
+UPDATE validated_shifts vs
+SET user_id = u.id,
+    user_name = COALESCE(NULLIF(vs.user_name,''), u.name, vs.user_email)
+FROM users u
+WHERE vs.user_id IS NULL
+  AND vs.user_email = u.email;
+
+UPDATE validated_shift_activities vsa
+SET user_id = u.id,
+    user_name = COALESCE(NULLIF(vsa.user_name,''), u.name, vsa.user_email)
+FROM users u
+WHERE vsa.user_id IS NULL
+  AND vsa.user_email = u.email;

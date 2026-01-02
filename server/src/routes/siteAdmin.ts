@@ -1241,8 +1241,10 @@ router.post('/validated/create-shift', siteAdminMiddleware, async (req: any, res
 
     // Friendly name (optional)
     let user_name = '';
+    let user_id: number | null = null;
     try {
-      const ur = await client.query(`SELECT name FROM users WHERE email=$1 LIMIT 1`, [user_email]);
+      const ur = await client.query(`SELECT id, name FROM users WHERE email=$1 LIMIT 1`, [user_email]);
+      user_id = (ur.rows?.[0]?.id as number | undefined) ?? null;
       user_name = String(ur.rows?.[0]?.name || '').trim();
     } catch {
       // ignore
@@ -1261,9 +1263,9 @@ router.post('/validated/create-shift', siteAdminMiddleware, async (req: any, res
 
     if ((ex.rowCount || 0) === 0) {
       await client.query(
-        `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, validated, totals_json)
-         VALUES ($1,$2::date,$3,COALESCE($4,''),$5,0,'{}'::jsonb)`,
-        [site, date, dn, user_email, user_name],
+        `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, user_id, validated, totals_json)
+         VALUES ($1,$2::date,$3,COALESCE($4,''),$5,$6,0,'{}'::jsonb)`,
+        [site, date, dn, user_email, user_name, user_id],
       );
     }
 
@@ -1304,8 +1306,10 @@ router.post('/validated/add-activity', siteAdminMiddleware, async (req: any, res
     assertSiteAccess(req, site);
 
     let user_name = '';
+    let user_id: number | null = null;
     try {
-      const ur = await client.query(`SELECT name FROM users WHERE email=$1 LIMIT 1`, [user_email]);
+      const ur = await client.query(`SELECT id, name FROM users WHERE email=$1 LIMIT 1`, [user_email]);
+      user_id = (ur.rows?.[0]?.id as number | undefined) ?? null;
       user_name = String(ur.rows?.[0]?.name || '').trim();
     } catch {}
     if (!user_name) user_name = user_email;
@@ -1321,16 +1325,16 @@ router.post('/validated/add-activity', siteAdminMiddleware, async (req: any, res
     );
     if ((ex.rowCount || 0) === 0) {
       await client.query(
-        `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, validated, totals_json)
-         VALUES ($1,$2::date,$3,COALESCE($4,''),$5,0,'{}'::jsonb)`,
-        [site, date, dn, user_email, user_name],
+        `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, user_id, validated, totals_json)
+         VALUES ($1,$2::date,$3,COALESCE($4,''),$5,$6,0,'{}'::jsonb)`,
+        [site, date, dn, user_email, user_name, user_id],
       );
     }
 
     await client.query(
-      `INSERT INTO validated_shift_activities (site, date, dn, user_email, user_name, activity, sub_activity, payload_json)
-       VALUES ($1,$2::date,$3,COALESCE($4,''),$5,$6,$7,$8::jsonb)`,
-      [site, date, dn, user_email, user_name, activity, sub_activity, JSON.stringify(payload_json || {})],
+      `INSERT INTO validated_shift_activities (site, date, dn, user_email, user_name, user_id, activity, sub_activity, payload_json)
+       VALUES ($1,$2::date,$3,COALESCE($4,''),$5,$6,$7,$8,$9::jsonb)`,
+      [site, date, dn, user_email, user_name, user_id, activity, sub_activity, JSON.stringify(payload_json || {})],
     );
 
     // Recompute totals for this validated shift only
@@ -1352,7 +1356,7 @@ const up = await client.query(
 );
 if ((up.rowCount || 0) === 0) {
   await client.query(
-    `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, validated, totals_json)
+    `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, user_id, validated, totals_json)
      VALUES ($1,$2::date,$3,COALESCE($4,''),$5,0,$6::jsonb)`,
     [site, date, dn, user_email, user_name, JSON.stringify(totals)],
   );
@@ -1437,7 +1441,7 @@ router.post('/validated/delete-activity', siteAdminMiddleware, async (req: any, 
     );
     if ((up.rowCount || 0) === 0) {
       await client.query(
-        `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, validated, totals_json)
+        `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, user_id, validated, totals_json)
          VALUES ($1,$2::date,$3,COALESCE($4,''),$5,0,$6::jsonb)`,
         [site, date, dn, user_email, user_email, JSON.stringify(totals)],
       );
