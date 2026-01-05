@@ -392,151 +392,110 @@ router.get('/validated/activity-metrics', async (req, res) => {
     const sql = `WITH base AS (
   SELECT
     vsa.id AS activity_id,
-    vsa.date::date AS date,
-    vsa.dn,
-    vsa.site,
-    vsa.user_id,
-    vsa.user_email,
-    COALESCE(NULLIF(TRIM(vsa.user_name), ''), vsa.user_email) AS user_name,
-    COALESCE(vsa.activity, vsa.payload_json->>'activity', vsa.payload_json->>'Activity') AS activity,
-    COALESCE(vsa.sub_activity,
-      vsa.payload_json->>'sub',
-      vsa.payload_json->>'sub_activity',
-      vsa.payload_json->>'Sub',
-      vsa.payload_json->>'Sub Activity',
-      '(No Sub Activity)'
-    ) AS sub_activity,
-    COALESCE(vsa.payload_json, '{}'::jsonb) AS payload,
-    COALESCE(vsa.payload_json->'values', vsa.payload_json, '{}'::jsonb) AS vals
+    vs.id AS validated_shift_id,
+    vs.date::date AS date_ymd,
+    vs.date::timestamptz AS date,
+    vs.dn AS dn,
+    vs.site AS site,
+    vs.user_id AS user_id,
+    u.email AS user_email,
+    u.name  AS user_name,
+    vsa.activity AS activity,
+    COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+    vsa.payload_json AS payload
   FROM validated_shift_activities vsa
-  LEFT JOIN validated_shifts vs
-    ON vs.site = vsa.site
-   AND vs.date = vsa.date
-   AND vs.dn = vsa.dn
-   AND vs.user_email = vsa.user_email
-  WHERE 1=1
-    AND ($1::text IS NULL OR vsa.site = $1)
-    AND ($2::date IS NULL OR vsa.date >= $2)
-    AND ($3::date IS NULL OR vsa.date <= $3)
+  JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+  LEFT JOIN users u ON u.id = vs.user_id
+  WHERE vs.site = $1
+    AND vs.date >= $2::date
+    AND vs.date <= $3::date
 ),
-kv AS (
+activity_rows AS (
   SELECT
     b.*,
-    kv.key AS metric_key,
-    kv.value AS metric_val
-  FROM base b
-  CROSS JOIN LATERAL jsonb_each(b.vals) kv
-),
-typed AS (
-  SELECT
-    activity_id,
-    payload,
-    date,
-    to_char(date, 'YYYY-MM-DD') AS date_ymd,
-    dn,
-    site,
-    user_id,
-    user_email,
-    user_name,
-    activity,
-    sub_activity,
-    -- context fields from payload.values first, then top-level fallbacks
+    COALESCE(b.payload->'values', '{}'::jsonb) AS vals,
     COALESCE(
-      vals->>'Equipment', vals->>'equipment',
-      payload->>'Equipment', payload->>'equipment'
+      NULLIF(TRIM(COALESCE(b.payload->>'equipment','')),''),
+      NULLIF(TRIM(COALESCE((b.payload->'values'->>'Equipment'),'')),'')
     ) AS equipment,
     COALESCE(
-      vals->>'Location', vals->>'location',
-      payload->>'Location', payload->>'location',
-      payload->>'lo', payload->>'loc'
+      NULLIF(TRIM(COALESCE(b.payload->>'location','')),''),
+      NULLIF(TRIM(COALESCE((b.payload->'values'->>'Location'),'')),'')
     ) AS location,
     COALESCE(
-      vals->>'From', vals->>'from', vals->>'From Location', vals->>'from_location',
-      payload->>'From', payload->>'from', payload->>'From Location', payload->>'from_location'
+      NULLIF(TRIM(COALESCE(b.payload->>'from_location','')),''),
+      NULLIF(TRIM(COALESCE((b.payload->'values'->>'From'),'')),'')
     ) AS from_location,
     COALESCE(
-      vals->>'To', vals->>'to', vals->>'To Location', vals->>'to_location',
-      payload->>'To', payload->>'to', payload->>'To Location', payload->>'to_location'
+      NULLIF(TRIM(COALESCE(b.payload->>'to_location','')),''),
+      NULLIF(TRIM(COALESCE((b.payload->'values'->>'To'),'')),'')
     ) AS to_location,
     COALESCE(
-      vals->>'Source', vals->>'source',
-      payload->>'Source', payload->>'source'
-    ) AS source,
-    COALESCE(
-      vals->>'Destination', vals->>'destination', vals->>'Dest', vals->>'dest',
-      payload->>'Destination', payload->>'destination', payload->>'Dest', payload->>'dest'
-    ) AS destination,
-    metric_key,
-    CASE
-      WHEN jsonb_typeof(metric_val) IN ('string','number','boolean') THEN metric_val #>> '{}'
-      ELSE NULL
-    END AS value_text,
-    CASE
-      WHEN jsonb_typeof(metric_val) = 'number' THEN (metric_val #>> '{}')::double precision
-      WHEN jsonb_typeof(metric_val) = 'string' AND (metric_val #>> '{}') ~ '^-?[0-9]+(\.[0-9]+)?$'
-        THEN (metric_val #>> '{}')::double precision
-      ELSE NULL
-    END AS value_num
-  FROM kv
+      NULLIF(TRIM(COALESCE(b.payload->>'source','')),''),
+      NULLIF(TRIM(COALESCE((b.payload->'values'->>'Source'),'')),''),
+      NULLIF(TRIM(COALESCE((b.payload->'values'->>'From'),'')),'')
+    ) AS source
+  FROM base b
 ),
 typed_metrics AS (
   SELECT
-    'vsa_' || activity_id::text AS task_id,
-    activity_id AS task_row_id,
+    ar.activity_id AS task_row_id,
+    ar.validated_shift_id AS task_id,
     NULL::int AS task_item_index,
-    NULL::text AS task_item_type,
-    date,
-    date_ymd,
-    dn,
-    site,
-    user_id,
-    user_email,
-    user_name,
-    activity,
-    sub_activity,
-    equipment,
-    location,
-    from_location,
-    to_location,
-    source,
-    destination,
-    metric_key,
-    value_text,
-    value_num
-  FROM typed
-  WHERE LOWER(metric_key) NOT IN (
-    'from','to','source','destination','dest','equipment','location','material'
-  )
+    'metric'::text AS task_item_type,
+    ar.date,
+    ar.date_ymd,
+    ar.dn,
+    ar.site,
+    ar.user_id,
+    ar.user_email,
+    ar.user_name,
+    ar.activity,
+    ar.sub_activity,
+    ar.equipment,
+    ar.location,
+    ar.from_location,
+    ar.to_location,
+    ar.source,
+    kv.key::text AS metric_key,
+    kv.value::text AS value_text,
+    CASE
+      WHEN kv.value::text ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (kv.value::text)::double precision
+      ELSE NULL
+    END AS value_num
+  FROM activity_rows ar
+  JOIN LATERAL jsonb_each(ar.vals) AS kv(key, value) ON true
+  WHERE kv.key IS NOT NULL
+    AND kv.key NOT IN ('From','To','Source','Destination','Location','Equipment','Material')
 ),
 load_weights AS (
   SELECT
-    'vsa_' || t.activity_id::text AS task_id,
-    t.activity_id AS task_row_id,
+    ar.activity_id AS task_row_id,
+    ar.validated_shift_id AS task_id,
     lw.ord::int AS task_item_index,
     'load'::text AS task_item_type,
-    t.date,
-    t.date_ymd,
-    t.dn,
-    t.site,
-    t.user_id,
-    t.user_email,
-    t.user_name,
-    t.activity,
-    t.sub_activity,
-    t.equipment,
-    t.location,
-    t.from_location,
-    t.to_location,
-    t.source,
-    t.destination,
+    ar.date,
+    ar.date_ymd,
+    ar.dn,
+    ar.site,
+    ar.user_id,
+    ar.user_email,
+    ar.user_name,
+    ar.activity,
+    ar.sub_activity,
+    ar.equipment,
+    ar.location,
+    ar.from_location,
+    ar.to_location,
+    ar.source,
     'Load Weight'::text AS metric_key,
     (lw.elem->>'weight') AS value_text,
     CASE
       WHEN (lw.elem->>'weight') ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (lw.elem->>'weight')::double precision
       ELSE NULL
     END AS value_num
-  FROM typed t
-  JOIN LATERAL jsonb_array_elements(COALESCE(t.payload->'loads','[]'::jsonb)) WITH ORDINALITY AS lw(elem, ord) ON true
+  FROM activity_rows ar
+  JOIN LATERAL jsonb_array_elements(COALESCE(ar.payload->'loads','[]'::jsonb)) WITH ORDINALITY AS lw(elem, ord) ON true
   WHERE lw.elem ? 'weight'
 )
 SELECT
@@ -558,7 +517,6 @@ SELECT
   from_location,
   to_location,
   source,
-  destination,
   metric_key,
   value_text AS metric_text,
   value_num  AS metric_value,
@@ -569,8 +527,8 @@ FROM (
   UNION ALL
   SELECT * FROM load_weights
 ) x
-ORDER BY date, dn, user_email, activity, sub_activity, task_row_id, task_item_index NULLS FIRST, metric_key
-`;
+ORDER BY date, dn, user_email, activity, sub_activity, task_row_id, task_item_type, task_item_index NULLS FIRST, metric_key
+`;`;
 
     const r = await pool.query(sql, params);
     res.json(r.rows);
