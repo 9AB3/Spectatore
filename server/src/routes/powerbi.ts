@@ -528,7 +528,7 @@ FROM (
   SELECT * FROM load_weights
 ) x
 ORDER BY date, dn, user_email, activity, sub_activity, task_row_id, task_item_type, task_item_index NULLS FIRST, metric_key
-`;`;
+`;
 
     const r = await pool.query(sql, params);
     res.json(r.rows);
