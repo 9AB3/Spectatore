@@ -539,11 +539,36 @@ load_weights AS (
   JOIN LATERAL jsonb_array_elements(COALESCE(t.payload->'loads','[]'::jsonb)) WITH ORDINALITY AS lw(elem, ord) ON true
   WHERE lw.elem ? 'weight'
 )
-SELECT *
-FROM typed_metrics
-UNION ALL
-SELECT *
-FROM load_weights
+SELECT
+  task_id,
+  task_row_id,
+  task_item_index,
+  task_item_type,
+  date,
+  date_ymd,
+  dn,
+  site,
+  user_id,
+  user_email,
+  user_name,
+  activity,
+  sub_activity,
+  equipment,
+  location,
+  from_location,
+  to_location,
+  source,
+  destination,
+  metric_key,
+  value_text AS metric_text,
+  value_num  AS metric_value,
+  value_text,
+  value_num
+FROM (
+  SELECT * FROM typed_metrics
+  UNION ALL
+  SELECT * FROM load_weights
+) x
 ORDER BY date, dn, user_email, activity, sub_activity, task_row_id, task_item_index NULLS FIRST, metric_key
 `;
 
