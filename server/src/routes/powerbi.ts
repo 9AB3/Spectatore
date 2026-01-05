@@ -79,13 +79,13 @@ router.get('/shift-totals', async (req, res) => {
 	        CASE
 	          WHEN jsonb_typeof(kv.value) = 'string' THEN kv.value #>> '{}'
 	          ELSE kv.value::text
-	        END AS value_text,
+	        END AS metric_text,
 	        CASE
 	          WHEN jsonb_typeof(kv.value) = 'number' THEN (kv.value::text)::double precision
 	          WHEN jsonb_typeof(kv.value) = 'string' AND (kv.value #>> '{}') ~ '^-?[0-9]+(\\.[0-9]+)?$'
 	            THEN (kv.value #>> '{}')::double precision
 	          ELSE NULL
-	        END AS value_num,
+	        END AS metric_value,
         s.finalized_at
       FROM shifts s
       LEFT JOIN users u ON u.id = s.user_id
@@ -198,11 +198,11 @@ router.get('/shift-metrics', async (req, res) => {
           WHEN jsonb_typeof(val) = 'string' AND (val #>> '{}') ~ '^[-+]?[0-9]*\\.?[0-9]+$'
             THEN (val #>> '{}')::double precision
           ELSE NULL
-        END AS value_num,
+        END AS metric_value,
         CASE
           WHEN jsonb_typeof(val) = 'string' THEN val #>> '{}'
           ELSE val::text
-        END AS value_text
+        END AS metric_text
       FROM kv
       WHERE jsonb_typeof(val) <> 'object'
       ORDER BY date, dn, user_email, heading, sub_activity, metric;
@@ -244,12 +244,12 @@ router.get('/activity-payloads', async (req, res) => {
 	        CASE
 	          WHEN jsonb_typeof(kv.value) = 'string' THEN kv.value #>> '{}'
 	          ELSE kv.value::text
-	        END AS value_text,
+	        END AS metric_text,
 	        CASE
 	          WHEN jsonb_typeof(kv.value) = 'number' THEN (kv.value::text)::double precision
 	          WHEN jsonb_typeof(kv.value) = 'string' AND (kv.value #>> '{}') ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN (kv.value #>> '{}')::double precision
 	          ELSE NULL
-	        END AS value_num,
+	        END AS metric_value,
         a.created_at
       FROM shift_activities a
       JOIN shifts s ON s.id = a.shift_id
@@ -292,13 +292,13 @@ router.get('/validated/shift-totals', async (req, res) => {
 	        CASE
 	          WHEN jsonb_typeof(kv.value) = 'string' THEN kv.value #>> '{}'
 	          ELSE kv.value::text
-	        END AS value_text,
+	        END AS metric_text,
 	        CASE
 	          WHEN jsonb_typeof(kv.value) = 'number' THEN (kv.value::text)::double precision
 	          WHEN jsonb_typeof(kv.value) = 'string' AND (kv.value #>> '{}') ~ '^-?[0-9]+(\\.[0-9]+)?$'
 	            THEN (kv.value #>> '{}')::double precision
 	          ELSE NULL
-	        END AS value_num,
+	        END AS metric_value,
         v.validated,
         v.created_at
       FROM validated_shifts v
@@ -335,12 +335,12 @@ router.get('/validated/activity-payloads', async (req, res) => {
         a.activity,
         a.sub_activity,
 	        kv.key AS field,
-	        CASE WHEN jsonb_typeof(kv.value) = 'string' THEN kv.value #>> '{}' ELSE kv.value::text END AS value_text,
+	        CASE WHEN jsonb_typeof(kv.value) = 'string' THEN kv.value #>> '{}' ELSE kv.value::text END AS metric_text,
 	        CASE
 	          WHEN jsonb_typeof(kv.value) = 'number' THEN (kv.value::text)::double precision
 	          WHEN jsonb_typeof(kv.value) = 'string' AND (kv.value #>> '{}') ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN (kv.value #>> '{}')::double precision
 	          ELSE NULL
-	        END AS value_num,
+	        END AS metric_value,
         a.created_at
       FROM validated_shift_activities a
 	      CROSS JOIN LATERAL jsonb_each(COALESCE(a.payload_json, '{}'::jsonb)) kv
@@ -468,13 +468,13 @@ typed AS (
     CASE
       WHEN jsonb_typeof(metric_val) IN ('string','number','boolean') THEN metric_val #>> '{}'
       ELSE NULL
-    END AS value_text,
+    END AS metric_text,
     CASE
       WHEN jsonb_typeof(metric_val) = 'number' THEN (metric_val #>> '{}')::double precision
       WHEN jsonb_typeof(metric_val) = 'string' AND (metric_val #>> '{}') ~ '^-?[0-9]+(\.[0-9]+)?$'
         THEN (metric_val #>> '{}')::double precision
       ELSE NULL
-    END AS value_num
+    END AS metric_value
   FROM kv
 )
 SELECT *
