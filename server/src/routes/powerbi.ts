@@ -55,6 +55,40 @@ function isYmd(s: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '').trim());
 }
 
+
+function getCaseInsensitive(obj: any, key: string) {
+  if (!obj || typeof obj !== 'object') return undefined;
+  if (Object.prototype.hasOwnProperty.call(obj, key)) return (obj as any)[key];
+  const lower = key.toLowerCase();
+  for (const k of Object.keys(obj)) {
+    if (String(k).toLowerCase() === lower) return (obj as any)[k];
+  }
+  return undefined;
+}
+
+function extractContextFromPayload(payload: any) {
+  try {
+    const p = typeof payload === 'string' ? JSON.parse(payload) : payload;
+    const values = getCaseInsensitive(p, 'values') || {};
+    const pick = (keys: string[]) => {
+      for (const k of keys) {
+        const v = (getCaseInsensitive(values, k) ?? getCaseInsensitive(p, k));
+        if (v !== undefined && v !== null && String(v).trim() !== '') return v;
+      }
+      return null;
+    };
+    const equipment = pick(['Equipment','equipment','equip','machine']);
+    const location = pick(['Location','location','loc','lo','heading','area']);
+    const from_location = pick(['From','from','From Location','from_location','fromLocation','fromLoc','from loc']);
+    const to_location = pick(['To','to','To Location','to_location','toLocation','toLoc','to loc']);
+    const source = pick(['Source','source','src']);
+    const destination = pick(['Destination','destination','dest','dump']);
+    return { equipment, location, from_location, to_location, source, destination };
+  } catch {
+    return { equipment: null, location: null, from_location: null, to_location: null, source: null, destination: null };
+  }
+}
+
 /**
  * GET /api/powerbi/shift-totals?site=<name>&from=YYYY-MM-DD&to=YYYY-MM-DD
  *
@@ -415,50 +449,74 @@ router.get('/validated/activity-metrics', async (req, res) => {
       context AS (
         SELECT
           b.activity_id,
-          -- Prefer values.* when present, fall back to top-level variants
+          -- Prefer values.* when present, fall back to top-level variants.
+          -- Some older/alternate payload shapes use abbreviated keys like "lo" or "fromLoc".
+          -- We also do a final best-effort scan of top-level keys (case-insensitive).
           COALESCE(
             b.payload->'values'->>'Equipment',
             b.payload->'values'->>'equipment',
             b.payload->>'Equipment',
-            b.payload->>'equipment'
+            b.payload->>'equipment',
+            b.payload->>'equip',
+            b.payload->>'machine',
+            (SELECT j.value FROM jsonb_each_text(b.payload) j WHERE lower(j.key) IN ('equipment','equip','machine') LIMIT 1)
           ) AS equipment,
           COALESCE(
             b.payload->'values'->>'Location',
             b.payload->'values'->>'location',
             b.payload->>'Location',
-            b.payload->>'location'
+            b.payload->>'location',
+            b.payload->>'loc',
+            b.payload->>'lo',
+            (SELECT j.value FROM jsonb_each_text(b.payload) j WHERE lower(j.key) IN ('location','loc','lo','heading','area') LIMIT 1)
           ) AS location,
           COALESCE(
             b.payload->'values'->>'From',
             b.payload->'values'->>'From Location',
             b.payload->'values'->>'from',
             b.payload->'values'->>'from_location',
+            b.payload->'values'->>'fromLocation',
+            b.payload->'values'->>'fromLoc',
             b.payload->>'From',
             b.payload->>'From Location',
             b.payload->>'from',
-            b.payload->>'from_location'
+            b.payload->>'from_location',
+            b.payload->>'fromLocation',
+            b.payload->>'fromLoc',
+            (SELECT j.value FROM jsonb_each_text(b.payload) j WHERE lower(j.key) IN ('from','from_location','fromlocation','fromloc','fromlocn','fromlocname') LIMIT 1)
           ) AS from_location,
           COALESCE(
             b.payload->'values'->>'To',
             b.payload->'values'->>'To Location',
             b.payload->'values'->>'to',
             b.payload->'values'->>'to_location',
+            b.payload->'values'->>'toLocation',
+            b.payload->'values'->>'toLoc',
             b.payload->>'To',
             b.payload->>'To Location',
             b.payload->>'to',
-            b.payload->>'to_location'
+            b.payload->>'to_location',
+            b.payload->>'toLocation',
+            b.payload->>'toLoc',
+            (SELECT j.value FROM jsonb_each_text(b.payload) j WHERE lower(j.key) IN ('to','to_location','tolocation','toloc','tolocn','tolocname') LIMIT 1)
           ) AS to_location,
           COALESCE(
             b.payload->'values'->>'Source',
             b.payload->'values'->>'source',
+            b.payload->'values'->>'src',
             b.payload->>'Source',
-            b.payload->>'source'
+            b.payload->>'source',
+            b.payload->>'src',
+            (SELECT j.value FROM jsonb_each_text(b.payload) j WHERE lower(j.key) IN ('source','src','from') LIMIT 1)
           ) AS source,
           COALESCE(
             b.payload->'values'->>'Destination',
             b.payload->'values'->>'destination',
+            b.payload->'values'->>'dest',
             b.payload->>'Destination',
-            b.payload->>'destination'
+            b.payload->>'destination',
+            b.payload->>'dest',
+            (SELECT j.value FROM jsonb_each_text(b.payload) j WHERE lower(j.key) IN ('destination','dest','dump','to') LIMIT 1)
           ) AS destination
         FROM base b
       ),
@@ -532,6 +590,7 @@ router.get('/validated/activity-metrics', async (req, res) => {
         b.user_name,
         b.activity,
         b.sub_activity,
+        b.payload AS payload_json,
         c.equipment,
         c.location,
         c.from_location,
@@ -554,7 +613,31 @@ router.get('/validated/activity-metrics', async (req, res) => {
     `;
 
     const r = await pool.query(sql, [site, dn, from, to]);
-    res.json(r.rows);
+
+    const rows = (r.rows || []).map((row: any) => {
+      const missing =
+        row.equipment == null &&
+        row.location == null &&
+        row.from_location == null &&
+        row.to_location == null &&
+        row.source == null &&
+        row.destination == null;
+
+      if (missing && row.payload_json) {
+        const ctx = extractContextFromPayload(row.payload_json);
+        row.equipment = row.equipment ?? ctx.equipment;
+        row.location = row.location ?? ctx.location;
+        row.from_location = row.from_location ?? ctx.from_location;
+        row.to_location = row.to_location ?? ctx.to_location;
+        row.source = row.source ?? ctx.source;
+        row.destination = row.destination ?? ctx.destination;
+      }
+
+      delete row.payload_json;
+      return row;
+    });
+
+    res.json(rows);
   } catch (e: any) {
     console.error('[powerbi] validated/activity-metrics failed', e?.message || e);
     res.status(500).json({ error: 'server_error', detail: String(e?.message || e) });
