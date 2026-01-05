@@ -393,123 +393,110 @@ router.get('/validated/activity-metrics', async (req, res) => {
     // We also pull "context" fields out when present (equipment/location/from/to/source/destination).
     //
     // NOTE: context fields may be stored in payload_json alongside metrics. We exclude common context keys from metric flattening.
-    const sql = `
-      WITH base AS (
-        SELECT
-          vsa.id AS activity_id,
-          vs.date,
-          vs.dn,
-          vs.site,
-          u.email AS user_email,
-          COALESCE(u.name, u.email) AS user_name,
-          vsa.activity,
-          COALESCE(vsa.sub_activity, '(No Sub Activity)') AS sub_activity,
-          vsa.payload_json::jsonb AS payload
-        FROM validated_shift_activities vsa
-        /*
-          validated_shift_activities does NOT store validated_shift_id.
-          Link to validated_shifts via the natural key (site/date/dn/user_email).
-        */
-        JOIN validated_shifts vs
-          ON vs.site = vsa.site
-         AND vs.date = vsa.date
-         AND vs.dn = vsa.dn
-         AND vs.user_email = vsa.user_email
-        LEFT JOIN users u
-          ON u.id = vs.user_id
-          OR u.email = vs.user_email
-        ${whereSql}
-      ),
-      top_kv AS (
-        SELECT
-          b.*,
-          kv.key AS top_key,
-          kv.value AS top_val
-        FROM base b
-        CROSS JOIN LATERAL jsonb_each(b.payload) kv
-      ),
-      flattened AS (
-        -- Case A: top-level values are objects → group=top_key, metric=inner key
-        SELECT
-          activity_id,
-          date,
-          dn,
-          site,
-          user_email,
-          user_name,
-          activity,
-          sub_activity,
-          top_key AS metric_group,
-          kv2.key AS metric_key,
-          kv2.value AS metric_json
-        FROM top_kv
-        CROSS JOIN LATERAL (
-          SELECT * FROM jsonb_each(top_val)
-        ) kv2
-        WHERE jsonb_typeof(top_val) = 'object'
-
-        UNION ALL
-
-        -- Case B: top-level is scalar → group="(No Group)", metric=top_key
-        SELECT
-          activity_id,
-          date,
-          dn,
-          site,
-          user_email,
-          user_name,
-          activity,
-          sub_activity,
-          '(No Group)' AS metric_group,
-          top_key AS metric_key,
-          top_val AS metric_json
-        FROM top_kv
-        WHERE jsonb_typeof(top_val) <> 'object'
-      ),
-      cleaned AS (
-        SELECT
-          f.*,
-          -- context fields (best-effort)
-          COALESCE(base.payload->>'equipment', base.payload->>'Equipment') AS equipment,
-          COALESCE(base.payload->>'location', base.payload->>'Location') AS location,
-          COALESCE(base.payload->>'from', base.payload->>'From', base.payload->>'from_location', base.payload->>'From Location') AS from_location,
-          COALESCE(base.payload->>'to', base.payload->>'To', base.payload->>'to_location', base.payload->>'To Location') AS to_location,
-          COALESCE(base.payload->>'source', base.payload->>'Source') AS source,
-          COALESCE(base.payload->>'destination', base.payload->>'Destination') AS destination
-        FROM flattened f
-        JOIN base ON base.activity_id = f.activity_id
-      )
-      SELECT
-        date,
-        dn,
-        site,
-        user_email,
-        user_name,
-        activity,
-        sub_activity,
-        equipment,
-        location,
-        from_location,
-        to_location,
-        source,
-        destination,
-        metric_group,
-        metric_key,
-        -- metric_text and metric_value
-        CASE
-          WHEN jsonb_typeof(metric_json) IN ('string', 'number', 'boolean') THEN trim(both '"' from metric_json::text)
-          ELSE metric_json::text
-        END AS metric_text,
-        CASE
-          WHEN jsonb_typeof(metric_json) = 'number' THEN (metric_json::text)::double precision
-          WHEN jsonb_typeof(metric_json) = 'string' AND (trim(both '"' from metric_json::text) ~ '^-?\d+(\.\d+)?$')
-            THEN (trim(both '"' from metric_json::text))::double precision
-          ELSE NULL
-        END AS metric_value
-      FROM cleaned
-      WHERE metric_key NOT IN ('equipment','Equipment','location','Location','from','From','from_location','From Location','to','To','to_location','To Location','source','Source','destination','Destination')
-      ORDER BY date, dn, site, user_email, activity, sub_activity, metric_group, metric_key;
-    `;
+    const sql = `WITH base AS (
+  SELECT
+    vs.id AS shift_id,
+    vsa.id AS activity_id,
+    vsa.date::date AS date,
+    to_char(vsa.date::date, 'YYYY-MM-DD') AS date_ymd,
+    vsa.dn,
+    vsa.site,
+    COALESCE(vsa.user_id, vs.user_id) AS user_id,
+    vsa.user_email,
+    COALESCE(vsa.user_name, vs.user_name) AS user_name,
+    COALESCE(vsa.activity, vsa.payload_json->>'activity', vsa.payload_json->>'Activity') AS activity,
+    COALESCE(vsa.sub_activity, vsa.payload_json->>'sub', vsa.payload_json->>'sub_activity', vsa.payload_json->>'Sub') AS sub_activity,
+    COALESCE(vsa.equipment,
+      vsa.payload_json->'values'->>'Equipment', vsa.payload_json->'values'->>'equipment',
+      vsa.payload_json->>'Equipment', vsa.payload_json->>'equipment'
+    ) AS equipment,
+    COALESCE(vsa.location,
+      vsa.payload_json->'values'->>'Location', vsa.payload_json->'values'->>'location',
+      vsa.payload_json->>'Location', vsa.payload_json->>'location'
+    ) AS location,
+    COALESCE(vsa.from_location,
+      vsa.payload_json->'values'->>'From', vsa.payload_json->'values'->>'From Location',
+      vsa.payload_json->'values'->>'from', vsa.payload_json->'values'->>'from_location',
+      vsa.payload_json->>'From', vsa.payload_json->>'From Location',
+      vsa.payload_json->>'from', vsa.payload_json->>'from_location'
+    ) AS from_location,
+    COALESCE(vsa.to_location,
+      vsa.payload_json->'values'->>'To', vsa.payload_json->'values'->>'To Location',
+      vsa.payload_json->'values'->>'to', vsa.payload_json->'values'->>'to_location',
+      vsa.payload_json->>'To', vsa.payload_json->>'To Location',
+      vsa.payload_json->>'to', vsa.payload_json->>'to_location'
+    ) AS to_location,
+    COALESCE(vsa.source,
+      vsa.payload_json->'values'->>'Source', vsa.payload_json->'values'->>'source',
+      vsa.payload_json->>'Source', vsa.payload_json->>'source'
+    ) AS source,
+    COALESCE(vsa.destination,
+      vsa.payload_json->'values'->>'Destination', vsa.payload_json->'values'->>'destination',
+      vsa.payload_json->>'Destination', vsa.payload_json->>'destination'
+    ) AS destination,
+    COALESCE(vsa.payload_json, '{}'::jsonb) AS payload
+  FROM validated_shift_activities vsa
+  LEFT JOIN validated_shifts vs
+    ON vs.site = vsa.site
+   AND vs.date = vsa.date
+   AND vs.dn = vsa.dn
+   AND vs.user_email = vsa.user_email
+  WHERE 1=1
+    AND (vs.validated = 1 OR vs.validated IS NULL) -- allow if shift row missing but activity exists
+    AND ($1::text IS NULL OR vsa.site = $1)
+    AND ($2::text IS NULL OR vsa.dn = $2)
+    AND ($3::text IS NULL OR to_char(vsa.date::date,'YYYY-MM-DD') >= $3)
+    AND ($4::text IS NULL OR to_char(vsa.date::date,'YYYY-MM-DD') <= $4)
+),
+metrics AS (
+  SELECT
+    b.*,
+    m.value->>'group' AS metric_group,
+    m.value->>'key' AS metric_key,
+    m.value->>'text' AS metric_text,
+    NULLIF(m.value->>'value','')::double precision AS metric_value
+  FROM base b
+  LEFT JOIN LATERAL (
+    SELECT value
+    FROM jsonb_array_elements(
+      COALESCE(b.payload->'metrics', '[]'::jsonb)
+    ) value
+  ) m ON TRUE
+),
+final_rows AS (
+  SELECT
+    (metrics.activity_id::text || ':' || COALESCE(metrics.metric_key,'') || ':' || COALESCE(metrics.metric_text,'')) AS row_id,
+    metrics.shift_id,
+    metrics.activity_id,
+    metrics.date,
+    metrics.date_ymd,
+    metrics.dn,
+    metrics.site,
+    metrics.user_id,
+    metrics.user_email,
+    metrics.user_name,
+    metrics.activity,
+    metrics.sub_activity,
+    metrics.equipment,
+    metrics.location,
+    metrics.from_location,
+    metrics.to_location,
+    metrics.source,
+    metrics.destination,
+    CASE
+      WHEN metrics.activity IN ('Hauling','Loading') THEN COALESCE(metrics.source, metrics.location, metrics.from_location, metrics.to_location)
+      ELSE COALESCE(metrics.location, metrics.source, metrics.from_location, metrics.to_location)
+    END AS location_slice,
+    metrics.metric_group,
+    metrics.metric_key,
+    metrics.metric_text,
+    metrics.metric_value
+  FROM metrics
+)
+SELECT *
+FROM final_rows
+WHERE metric_key IS NOT NULL
+ORDER BY date, dn, site, user_email, activity, sub_activity, row_id`;
 
     const r = await pool.query(sql, params);
     res.json(r.rows);
