@@ -429,6 +429,8 @@ kv AS (
 ),
 typed AS (
   SELECT
+    activity_id,
+    payload,
     date,
     to_char(date, 'YYYY-MM-DD') AS date_ymd,
     dn,
@@ -438,7 +440,7 @@ typed AS (
     user_name,
     activity,
     sub_activity,
-    -- context fields from payload.values first, then top-level fallbacks (case-insensitive-ish)
+    -- context fields from payload.values first, then top-level fallbacks
     COALESCE(
       vals->>'Equipment', vals->>'equipment',
       payload->>'Equipment', payload->>'equipment'
@@ -468,22 +470,82 @@ typed AS (
     CASE
       WHEN jsonb_typeof(metric_val) IN ('string','number','boolean') THEN metric_val #>> '{}'
       ELSE NULL
-    END AS metric_text,
+    END AS value_text,
     CASE
       WHEN jsonb_typeof(metric_val) = 'number' THEN (metric_val #>> '{}')::double precision
       WHEN jsonb_typeof(metric_val) = 'string' AND (metric_val #>> '{}') ~ '^-?[0-9]+(\.[0-9]+)?$'
         THEN (metric_val #>> '{}')::double precision
       ELSE NULL
-    END AS metric_value
+    END AS value_num
   FROM kv
+),
+typed_metrics AS (
+  SELECT
+    'vsa_' || activity_id::text AS task_id,
+    activity_id AS task_row_id,
+    NULL::int AS task_item_index,
+    NULL::text AS task_item_type,
+    date,
+    date_ymd,
+    dn,
+    site,
+    user_id,
+    user_email,
+    user_name,
+    activity,
+    sub_activity,
+    equipment,
+    location,
+    from_location,
+    to_location,
+    source,
+    destination,
+    metric_key,
+    value_text,
+    value_num
+  FROM typed
+  WHERE LOWER(metric_key) NOT IN (
+    'from','to','source','destination','dest','equipment','location','material'
+  )
+),
+load_weights AS (
+  SELECT
+    'vsa_' || t.activity_id::text AS task_id,
+    t.activity_id AS task_row_id,
+    lw.ord::int AS task_item_index,
+    'load'::text AS task_item_type,
+    t.date,
+    t.date_ymd,
+    t.dn,
+    t.site,
+    t.user_id,
+    t.user_email,
+    t.user_name,
+    t.activity,
+    t.sub_activity,
+    t.equipment,
+    t.location,
+    t.from_location,
+    t.to_location,
+    t.source,
+    t.destination,
+    'Load Weight'::text AS metric_key,
+    (lw.elem->>'weight') AS value_text,
+    CASE
+      WHEN (lw.elem->>'weight') ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (lw.elem->>'weight')::double precision
+      ELSE NULL
+    END AS value_num
+  FROM typed t
+  JOIN LATERAL jsonb_array_elements(COALESCE(t.payload->'loads','[]'::jsonb)) WITH ORDINALITY AS lw(elem, ord) ON true
+  WHERE lw.elem ? 'weight'
 )
 SELECT *
-FROM typed
--- drop obvious context keys from the metric list (keeps your slicers clean)
-WHERE LOWER(metric_key) NOT IN (
-  'from','to','source','destination','dest','equipment','location','material'
-)
-ORDER BY date, dn, user_email, activity, sub_activity, metric_key`;
+FROM typed_metrics
+UNION ALL
+SELECT *
+FROM load_weights
+ORDER BY date, dn, user_email, activity, sub_activity, task_row_id, task_item_index NULLS FIRST, metric_key
+`;
 
     const r = await pool.query(sql, params);
     res.json(r.rows);
