@@ -45,16 +45,20 @@ Examples:
 - Production custom domain: `https://spectatore.com`
 - Render service domain: `https://spectatore.onrender.com`
 
-### Add the auth header
-In the **Web** connector dialog:
-- Choose **Advanced**
-- Add a request header:
+### Auth options (pick ONE)
 
-```
-Authorization = Bearer <POWERBI_TOKEN>
-```
+Power BI Desktop’s **From Web** connector can be awkward with custom headers depending on the auth mode. This project supports both:
 
-Then Load / Transform.
+1) **Header auth (best when it works)**
+   - Get Data → Web → **Advanced**
+   - Add request header:
+     - `Authorization` = `Bearer <POWERBI_TOKEN>`
+
+2) **Query-string token (most reliable)**
+   - Append `?token=<POWERBI_TOKEN>` to the URL
+   - In the Web connector, select **Anonymous**
+
+Either way, you can then **Load** or **Transform Data**.
 
 ---
 
@@ -91,6 +95,29 @@ GET /api/powerbi/validated/shift-totals?site=MineA&from=2025-12-01&to=2025-12-31
 GET /api/powerbi/validated/activity-payloads?site=MineA&from=2025-12-01&to=2025-12-31
 ```
 
+### Validated “FACT” tables (recommended for Power BI)
+
+These are **typed-column** tables (one row per validated activity) so slicers/filters are straightforward.
+
+```
+GET /api/powerbi/validated/fact-hauling
+GET /api/powerbi/validated/fact-hauling-loads
+GET /api/powerbi/validated/fact-loading
+GET /api/powerbi/validated/fact-dev-face-drilling
+GET /api/powerbi/validated/fact-ground-support
+GET /api/powerbi/validated/fact-production-drilling
+GET /api/powerbi/validated/fact-charging
+GET /api/powerbi/validated/fact-hoisting
+```
+
+Each supports: `site`, `from`, `to`.
+
+Example:
+
+```
+GET /api/powerbi/validated/fact-hauling?site=MineA&from=2025-12-01&to=2025-12-31
+```
+
 ### Dimension tables for slicers
 
 ```
@@ -112,11 +139,19 @@ If you set `POWERBI_TOKEN`, test with curl:
 ```bash
 curl -H "Authorization: Bearer $POWERBI_TOKEN" \
   "https://spectatore.com/api/powerbi/shift-totals?from=2025-12-01&to=2025-12-31"
+
+```
+
+Or (query-string token):
+
+```bash
+curl "https://spectatore.com/api/powerbi/validated/fact-hauling?token=$POWERBI_TOKEN&from=2025-12-01&to=2025-12-31"
 ```
 
 ---
 
 ## 5) Notes
 
-- These endpoints intentionally **do not hard-code metric names**. They expand `totals_json` / `payload_json` into key-value rows so Power BI can pivot, slice, and evolve with the app.
+- The **FACT** endpoints are the easiest to model in Power BI (clean columns).
+- The older “long” endpoints (`*-totals`, `*-payloads`, `validated/activity-metrics`) are still available when you want maximum flexibility without column definitions.
 - For large datasets, consider creating materialized views or adding pagination.

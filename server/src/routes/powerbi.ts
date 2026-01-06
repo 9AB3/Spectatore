@@ -372,165 +372,169 @@ router.get('/validated/activity-payloads', async (req, res) => {
  */
 router.get('/validated/activity-metrics', async (req, res) => {
   try {
+    const site = String(req.query.site || '').trim();
+    const from = String(req.query.from || '').trim(); // YYYY-MM-DD
+    const to = String(req.query.to || '').trim();     // YYYY-MM-DD
 
-    const site = String(req.query.site || '').trim() || null;
-    const from = isYmd(String(req.query.from || '').trim()) ? String(req.query.from || '').trim() : null;
-    const to = isYmd(String(req.query.to || '').trim()) ? String(req.query.to || '').trim() : null;
+    const params: any[] = [
+      site || null,
+      isYmd(from) ? from : null,
+      isYmd(to) ? to : null,
+    ];
 
-    // Long-format metrics table:
-    // - one row per metric (Distance, Tonnes Hauled, etc.)
-    // - one row per UNIQUE load weight (deduped) with a load_count column
-    // - task_id groups all metric rows that belong to the same underlying task (validated_shift_activity id)
-    const sql = `
-      WITH base AS (
-        SELECT
-          vsa.id AS task_id,
-          vs.id  AS validated_shift_id,
-          vs.date::timestamptz AS date,
-          vs.date::date AS date_ymd,
-          vs.dn,
-          vs.site,
-          vs.user_id,
-          u.email AS user_email,
-          u.name  AS user_name,
-          vsa.activity,
-          vsa.sub_activity,
-          vsa.payload_json
-        FROM validated_shift_activities vsa
-        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
-        LEFT JOIN users u ON u.id = vs.user_id
-        WHERE ($1::text IS NULL OR vs.site = $1)
-          AND ($2::date IS NULL OR vs.date::date >= $2::date)
-          AND ($3::date IS NULL OR vs.date::date <= $3::date)
-      ),
-      dims AS (
-        SELECT
-          b.*,
-          NULLIF(TRIM(b.payload_json->'values'->>'Source'), '') AS source,
-          NULLIF(TRIM(b.payload_json->'values'->>'From'), '')   AS from_location,
-          NULLIF(TRIM(b.payload_json->'values'->>'To'), '')     AS to_location,
-          NULLIF(TRIM(b.payload_json->>'equipment'), '')        AS equipment,
-          NULLIF(TRIM(b.payload_json->>'location'), '')         AS location
-        FROM base b
-      ),
-      value_metrics AS (
-        SELECT
-          d.task_id,
-          d.validated_shift_id,
-          d.date,
-          d.date_ymd,
-          d.dn,
-          d.site,
-          d.user_id,
-          d.user_email,
-          d.user_name,
-          d.activity,
-          d.sub_activity,
-          d.equipment,
-          d.location,
-          d.from_location,
-          d.to_location,
-          d.source,
-          kv.key::text AS metric_key,
-          kv.value::text AS value_text,
-          CASE
-            WHEN kv.value ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (kv.value)::numeric
-            ELSE NULL
-          END AS value_num,
-          NULL::int AS task_item_index,
-          'metric'::text AS task_item_type,
-          NULL::int AS load_count
-        FROM dims d
-        JOIN LATERAL jsonb_each_text(COALESCE(d.payload_json->'values', '{}'::jsonb)) kv ON true
-        WHERE kv.key IS NOT NULL
-          AND kv.key NOT IN ('Source','From','To')
-          AND kv.value ~ '^-?[0-9]+(\\.[0-9]+)?$'
-      ),
-      load_weights_raw AS (
-        SELECT
-          d.task_id,
-          d.validated_shift_id,
-          d.date,
-          d.date_ymd,
-          d.dn,
-          d.site,
-          d.user_id,
-          d.user_email,
-          d.user_name,
-          d.activity,
-          d.sub_activity,
-          d.equipment,
-          d.location,
-          d.from_location,
-          d.to_location,
-          d.source,
-          (lw->>'weight')::text AS weight_text,
-          CASE
-            WHEN (lw->>'weight') ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (lw->>'weight')::numeric
-            ELSE NULL
-          END AS weight_num
-        FROM dims d
-        JOIN LATERAL jsonb_array_elements(COALESCE(d.payload_json->'loads', '[]'::jsonb)) lw ON true
-        WHERE lw ? 'weight'
-      ),
-      load_weights AS (
-        SELECT
-          lwr.task_id,
-          lwr.validated_shift_id,
-          lwr.date,
-          lwr.date_ymd,
-          lwr.dn,
-          lwr.site,
-          lwr.user_id,
-          lwr.user_email,
-          lwr.user_name,
-          lwr.activity,
-          lwr.sub_activity,
-          lwr.equipment,
-          lwr.location,
-          lwr.from_location,
-          lwr.to_location,
-          lwr.source,
-          'Load Weight'::text AS metric_key,
-          MIN(lwr.weight_text) AS value_text,
-          lwr.weight_num AS value_num,
-          NULL::int AS task_item_index,
-          'load_weight'::text AS task_item_type,
-          COUNT(*)::int AS load_count
-        FROM load_weights_raw lwr
-        WHERE lwr.weight_num IS NOT NULL
-        GROUP BY
-          lwr.task_id,
-          lwr.validated_shift_id,
-          lwr.date,
-          lwr.date_ymd,
-          lwr.dn,
-          lwr.site,
-          lwr.user_id,
-          lwr.user_email,
-          lwr.user_name,
-          lwr.activity,
-          lwr.sub_activity,
-          lwr.equipment,
-          lwr.location,
-          lwr.from_location,
-          lwr.to_location,
-          lwr.source,
-          lwr.weight_num
-      )
-      SELECT *
-      FROM value_metrics
-      UNION ALL
-      SELECT *
-      FROM load_weights
-      ORDER BY date_ymd DESC, task_id DESC, task_item_type, metric_key;
-    `;
+// We flatten payload_json in a robust "1- or 2-level" way:
+    // - If payload_json is { "Production": {...}, "Development": {...} } → group=Production, metric_key from inner object.
+    // - If payload_json is { "Trucks": 5, "Weight": 45 } → group="(No Group)", metric_key from top-level.
+    //
+    // We also pull "context" fields out when present (equipment/location/from/to/source/destination).
+    //
+    // NOTE: context fields may be stored in payload_json alongside metrics. We exclude common context keys from metric flattening.
+    const sql = `WITH base AS (
+  SELECT
+    vsa.id AS activity_id,
+    vs.id AS validated_shift_id,
+    vs.date::date AS date_ymd,
+    vs.date::timestamptz AS date,
+    vs.dn AS dn,
+    vs.site AS site,
+    vs.user_id AS user_id,
+    u.email AS user_email,
+    u.name  AS user_name,
+    vsa.activity AS activity,
+    COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+    vsa.payload_json AS payload
+  FROM validated_shift_activities vsa
+  JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+  LEFT JOIN users u ON u.id = vs.user_id
+  WHERE vs.site = $1
+    AND vs.date >= $2::date
+    AND vs.date <= $3::date
+),
+activity_rows AS (
+  SELECT
+    b.*,
+    COALESCE(b.payload->'values', '{}'::jsonb) AS vals,
+    COALESCE(
+      NULLIF(TRIM(COALESCE(b.payload->>'equipment','')),''),
+      NULLIF(TRIM(COALESCE((b.payload->'values'->>'Equipment'),'')),'')
+    ) AS equipment,
+    COALESCE(
+      NULLIF(TRIM(COALESCE(b.payload->>'location','')),''),
+      NULLIF(TRIM(COALESCE((b.payload->'values'->>'Location'),'')),'')
+    ) AS location,
+    COALESCE(
+      NULLIF(TRIM(COALESCE(b.payload->>'from_location','')),''),
+      NULLIF(TRIM(COALESCE((b.payload->'values'->>'From'),'')),'')
+    ) AS from_location,
+    COALESCE(
+      NULLIF(TRIM(COALESCE(b.payload->>'to_location','')),''),
+      NULLIF(TRIM(COALESCE((b.payload->'values'->>'To'),'')),'')
+    ) AS to_location,
+    COALESCE(
+      NULLIF(TRIM(COALESCE(b.payload->>'source','')),''),
+      NULLIF(TRIM(COALESCE((b.payload->'values'->>'Source'),'')),''),
+      NULLIF(TRIM(COALESCE((b.payload->'values'->>'From'),'')),'')
+    ) AS source
+  FROM base b
+),
+typed_metrics AS (
+  SELECT
+    ar.activity_id AS task_row_id,
+    ar.validated_shift_id AS task_id,
+    NULL::int AS task_item_index,
+    'metric'::text AS task_item_type,
+    ar.date,
+    ar.date_ymd,
+    ar.dn,
+    ar.site,
+    ar.user_id,
+    ar.user_email,
+    ar.user_name,
+    ar.activity,
+    ar.sub_activity,
+    ar.equipment,
+    ar.location,
+    ar.from_location,
+    ar.to_location,
+    ar.source,
+    kv.key::text AS metric_key,
+    kv.value::text AS value_text,
+    CASE
+      WHEN kv.value::text ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (kv.value::text)::double precision
+      ELSE NULL
+    END AS value_num
+  FROM activity_rows ar
+  JOIN LATERAL jsonb_each(ar.vals) AS kv(key, value) ON true
+  WHERE kv.key IS NOT NULL
+    AND kv.key NOT IN ('From','To','Source','Destination','Location','Equipment','Material')
+),
+load_weights AS (
+  SELECT
+    ar.activity_id AS task_row_id,
+    ar.validated_shift_id AS task_id,
+    lw.ord::int AS task_item_index,
+    'load'::text AS task_item_type,
+    ar.date,
+    ar.date_ymd,
+    ar.dn,
+    ar.site,
+    ar.user_id,
+    ar.user_email,
+    ar.user_name,
+    ar.activity,
+    ar.sub_activity,
+    ar.equipment,
+    ar.location,
+    ar.from_location,
+    ar.to_location,
+    ar.source,
+    'Load Weight'::text AS metric_key,
+    (lw.elem->>'weight') AS value_text,
+    CASE
+      WHEN (lw.elem->>'weight') ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (lw.elem->>'weight')::double precision
+      ELSE NULL
+    END AS value_num
+  FROM activity_rows ar
+  JOIN LATERAL jsonb_array_elements(COALESCE(ar.payload->'loads','[]'::jsonb)) WITH ORDINALITY AS lw(elem, ord) ON true
+  WHERE lw.elem ? 'weight'
+)
+SELECT
+  task_id,
+  task_row_id,
+  task_item_index,
+  task_item_type,
+  date,
+  date_ymd,
+  dn,
+  site,
+  user_id,
+  user_email,
+  user_name,
+  activity,
+  sub_activity,
+  equipment,
+  location,
+  from_location,
+  to_location,
+  source,
+  metric_key,
+  value_text AS metric_text,
+  value_num  AS metric_value,
+  value_text,
+  value_num
+FROM (
+  SELECT * FROM typed_metrics
+  UNION ALL
+  SELECT * FROM load_weights
+) x
+ORDER BY date, dn, user_email, activity, sub_activity, task_row_id, task_item_type, task_item_index NULLS FIRST, metric_key
+`;
 
-    const r = await pool.query(sql, [site, from, to]);
-    return res.json(r.rows);
+    const r = await pool.query(sql, params);
+    res.json(r.rows);
   } catch (e: any) {
     console.error('[powerbi] validated/activity-metrics failed', e?.message || e);
-    return res.status(500).json({ error: 'internal', message: String(e?.message || e) });
+    res.status(500).json({ error: 'server_error' });
   }
 });
 
@@ -554,5 +558,579 @@ router.get('/dim/sites', async (_req, res) => {
     res.status(500).json({ error: 'powerbi_dim_sites_failed' });
   }
 });
+
+/**
+ * VALIDATED “FACT” endpoints (typed columns for Power BI slicers)
+ *
+ * These endpoints keep validated_shift_activities.payload_json as the source of truth,
+ * but present one row per activity with stable, typed columns.
+ *
+ * Common query params (all optional):
+ *  - site=<site name>
+ *  - from=YYYY-MM-DD
+ *  - to=YYYY-MM-DD
+ */
+
+// helper: optional site/from/to with basic YYYY-MM-DD validation
+function parseCommonFilters(req: any) {
+  const site = String(req.query.site || '').trim() || null;
+  const fromRaw = String(req.query.from || '').trim();
+  const toRaw = String(req.query.to || '').trim();
+  const from = isYmd(fromRaw) ? fromRaw : null;
+  const to = isYmd(toRaw) ? toRaw : null;
+  return { site, from, to };
+}
+
+// helper used in SQL blocks (numeric parsing)
+// NULLIF(regexp_replace(txt,'[^0-9.\-]','','g'),'')::numeric
+
+/**
+ * GET /api/powerbi/validated/fact-hauling
+ * One row per validated hauling activity.
+ */
+router.get('/validated/fact-hauling', async (req, res) => {
+  try {
+    const { site, from, to } = parseCommonFilters(req);
+
+    const sql = `
+      WITH base AS (
+        SELECT
+          vsa.id AS activity_id,
+          vs.id AS validated_shift_id,
+          vs.date::date AS date,
+          vs.dn,
+          vs.site,
+          vs.user_id,
+          COALESCE(u.email, vs.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vs.user_email, '') AS user_name,
+          vsa.activity,
+          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          vsa.payload_json AS payload
+        FROM validated_shift_activities vsa
+        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN users u ON u.id = vs.user_id
+        WHERE vsa.activity = 'Hauling'
+          AND ($1::text IS NULL OR vs.site = $1)
+          AND ($2::date IS NULL OR vs.date >= $2::date)
+          AND ($3::date IS NULL OR vs.date <= $3::date)
+      ), x AS (
+        SELECT
+          b.*,
+          COALESCE(b.payload->'values','{}'::jsonb) AS vals,
+          b.payload->'loads' AS loads
+        FROM base b
+      )
+      SELECT
+        activity_id,
+        validated_shift_id,
+        date,
+        dn,
+        site,
+        user_id,
+        user_email,
+        user_name,
+        activity,
+        sub_activity,
+
+        NULLIF(TRIM(vals->>'Equipment'), '') AS equipment,
+        NULLIF(TRIM(vals->>'Source'), '') AS source,
+        NULLIF(TRIM(vals->>'From'), '') AS from_location,
+        NULLIF(TRIM(vals->>'To'), '') AS to_location,
+        NULLIF(TRIM(vals->>'Material'), '') AS material,
+
+        CASE
+          WHEN jsonb_typeof(loads) = 'array' THEN jsonb_array_length(loads)
+          ELSE NULLIF(regexp_replace(COALESCE(vals->>'Trucks',''), '[^0-9]', '', 'g'), '')::int
+        END AS trucks,
+
+        NULLIF(regexp_replace(COALESCE(vals->>'Distance',''), '[^0-9.\-]', '', 'g'), '')::numeric AS distance_km,
+
+        -- tonnes_hauled: prefer explicit "Tonnes Hauled" key, else fall back to Trucks*Weight when parseable
+        COALESCE(
+          NULLIF(regexp_replace(COALESCE(vals->>'Tonnes Hauled',''), '[^0-9.\-]', '', 'g'), '')::numeric,
+          (
+            (NULLIF(regexp_replace(COALESCE(vals->>'Trucks',''), '[^0-9]', '', 'g'), '')::numeric)
+            * (NULLIF(regexp_replace(COALESCE(vals->>'Weight',''), '[^0-9.\-]', '', 'g'), '')::numeric)
+          )
+        ) AS tonnes_hauled,
+
+        CASE
+          WHEN jsonb_typeof(loads) = 'array' AND jsonb_array_length(loads) > 0 THEN
+            (
+              SELECT AVG(NULLIF(regexp_replace(COALESCE(lw->>'weight',''), '[^0-9.\-]', '', 'g'), '')::numeric)
+              FROM jsonb_array_elements(loads) lw
+            )
+          ELSE NULLIF(regexp_replace(COALESCE(vals->>'Weight',''), '[^0-9.\-]', '', 'g'), '')::numeric
+        END AS avg_load_weight_t,
+
+        (
+          COALESCE(
+            NULLIF(regexp_replace(COALESCE(vals->>'Tonnes Hauled',''), '[^0-9.\-]', '', 'g'), '')::numeric,
+            (
+              (NULLIF(regexp_replace(COALESCE(vals->>'Trucks',''), '[^0-9]', '', 'g'), '')::numeric)
+              * (NULLIF(regexp_replace(COALESCE(vals->>'Weight',''), '[^0-9.\-]', '', 'g'), '')::numeric)
+            )
+          )
+          * NULLIF(regexp_replace(COALESCE(vals->>'Distance',''), '[^0-9.\-]', '', 'g'), '')::numeric
+        ) AS tkm
+      FROM x
+      ORDER BY date, dn, user_email, activity_id;
+    `;
+
+    const r = await pool.query(sql, [site, from, to]);
+    res.json(r.rows);
+  } catch (e: any) {
+    console.error('[powerbi] validated/fact-hauling failed', e?.message || e);
+    res.status(500).json({ error: 'powerbi_validated_fact_hauling_failed' });
+  }
+});
+
+/**
+ * GET /api/powerbi/validated/fact-hauling-loads
+ * One row per hauling load weight (when payload_json.loads is present).
+ */
+router.get('/validated/fact-hauling-loads', async (req, res) => {
+  try {
+    const { site, from, to } = parseCommonFilters(req);
+
+    const sql = `
+      WITH base AS (
+        SELECT
+          vsa.id AS activity_id,
+          vs.id AS validated_shift_id,
+          vs.date::date AS date,
+          vs.dn,
+          vs.site,
+          vs.user_id,
+          COALESCE(u.email, vs.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vs.user_email, '') AS user_name,
+          COALESCE(vsa.sub_activity,'(No Sub Activity)') AS sub_activity,
+          vsa.payload_json AS payload,
+          COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals,
+          vsa.payload_json->'loads' AS loads
+        FROM validated_shift_activities vsa
+        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN users u ON u.id = vs.user_id
+        WHERE vsa.activity = 'Hauling'
+          AND ($1::text IS NULL OR vs.site = $1)
+          AND ($2::date IS NULL OR vs.date >= $2::date)
+          AND ($3::date IS NULL OR vs.date <= $3::date)
+          AND jsonb_typeof(vsa.payload_json->'loads') = 'array'
+      )
+      SELECT
+        b.activity_id,
+        b.validated_shift_id,
+        b.date,
+        b.dn,
+        b.site,
+        b.user_id,
+        b.user_email,
+        b.user_name,
+        b.sub_activity,
+
+        NULLIF(TRIM(b.vals->>'Equipment'), '') AS equipment,
+        NULLIF(TRIM(b.vals->>'Source'), '') AS source,
+        NULLIF(TRIM(b.vals->>'From'), '') AS from_location,
+        NULLIF(TRIM(b.vals->>'To'), '') AS to_location,
+        NULLIF(TRIM(b.vals->>'Material'), '') AS material,
+
+        (x.ord - 1) AS load_index,
+        NULLIF(regexp_replace(COALESCE(x.lw->>'weight',''), '[^0-9.\-]', '', 'g'), '')::numeric AS load_weight_t
+      FROM base b
+      CROSS JOIN LATERAL jsonb_array_elements(b.loads) WITH ORDINALITY AS x(lw, ord)
+      ORDER BY b.date, b.dn, b.user_email, b.activity_id, load_index;
+    `;
+
+    const r = await pool.query(sql, [site, from, to]);
+    res.json(r.rows);
+  } catch (e: any) {
+    console.error('[powerbi] validated/fact-hauling-loads failed', e?.message || e);
+    res.status(500).json({ error: 'powerbi_validated_fact_hauling_loads_failed' });
+  }
+});
+
+/**
+ * GET /api/powerbi/validated/fact-loading
+ * One row per validated loading activity (prod/dev).
+ */
+router.get('/validated/fact-loading', async (req, res) => {
+  try {
+    const { site, from, to } = parseCommonFilters(req);
+
+    const sql = `
+      WITH base AS (
+        SELECT
+          vsa.id AS activity_id,
+          vs.id AS validated_shift_id,
+          vs.date::date AS date,
+          vs.dn,
+          vs.site,
+          vs.user_id,
+          COALESCE(u.email, vs.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vs.user_email, '') AS user_name,
+          vsa.activity,
+          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
+        FROM validated_shift_activities vsa
+        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN users u ON u.id = vs.user_id
+        WHERE vsa.activity = 'Loading'
+          AND ($1::text IS NULL OR vs.site = $1)
+          AND ($2::date IS NULL OR vs.date >= $2::date)
+          AND ($3::date IS NULL OR vs.date <= $3::date)
+      )
+      SELECT
+        activity_id,
+        validated_shift_id,
+        date,
+        dn,
+        site,
+        user_id,
+        user_email,
+        user_name,
+        activity,
+        sub_activity,
+
+        NULLIF(TRIM(vals->>'Equipment'), '') AS equipment,
+        NULLIF(TRIM(vals->>'Source'), '') AS source,
+        NULLIF(TRIM(vals->>'Material'), '') AS material,
+
+        NULLIF(regexp_replace(COALESCE(vals->>'Stope to Truck',''), '[^0-9.\-]', '', 'g'), '')::numeric AS stope_to_truck,
+        NULLIF(regexp_replace(COALESCE(vals->>'Stope to SP',''), '[^0-9.\-]', '', 'g'), '')::numeric AS stope_to_sp,
+
+        NULLIF(regexp_replace(COALESCE(vals->>'Heading to Truck',''), '[^0-9.\-]', '', 'g'), '')::numeric AS heading_to_truck,
+        NULLIF(regexp_replace(COALESCE(vals->>'Heading to SP',''), '[^0-9.\-]', '', 'g'), '')::numeric AS heading_to_sp,
+
+        NULLIF(regexp_replace(COALESCE(vals->>'SP to Truck',''), '[^0-9.\-]', '', 'g'), '')::numeric AS sp_to_truck,
+        NULLIF(regexp_replace(COALESCE(vals->>'SP to SP',''), '[^0-9.\-]', '', 'g'), '')::numeric AS sp_to_sp
+      FROM base
+      ORDER BY date, dn, user_email, activity_id;
+    `;
+
+    const r = await pool.query(sql, [site, from, to]);
+    res.json(r.rows);
+  } catch (e: any) {
+    console.error('[powerbi] validated/fact-loading failed', e?.message || e);
+    res.status(500).json({ error: 'powerbi_validated_fact_loading_failed' });
+  }
+});
+
+/**
+ * GET /api/powerbi/validated/fact-dev-face-drilling
+ * One row per validated Development → Face Drilling activity.
+ */
+router.get('/validated/fact-dev-face-drilling', async (req, res) => {
+  try {
+    const { site, from, to } = parseCommonFilters(req);
+
+    const sql = `
+      WITH base AS (
+        SELECT
+          vsa.id AS activity_id,
+          vs.id AS validated_shift_id,
+          vs.date::date AS date,
+          vs.dn,
+          vs.site,
+          vs.user_id,
+          COALESCE(u.email, vs.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vs.user_email, '') AS user_name,
+          vsa.activity,
+          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
+        FROM validated_shift_activities vsa
+        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN users u ON u.id = vs.user_id
+        WHERE vsa.activity = 'Development'
+          AND vsa.sub_activity = 'Face Drilling'
+          AND ($1::text IS NULL OR vs.site = $1)
+          AND ($2::date IS NULL OR vs.date >= $2::date)
+          AND ($3::date IS NULL OR vs.date <= $3::date)
+      )
+      SELECT
+        activity_id,
+        validated_shift_id,
+        date,
+        dn,
+        site,
+        user_id,
+        user_email,
+        user_name,
+        activity,
+        sub_activity,
+
+        NULLIF(TRIM(vals->>'Equipment'), '') AS equipment,
+        NULLIF(TRIM(vals->>'Location'), '') AS location,
+
+        NULLIF(regexp_replace(COALESCE(vals->>'No of Reamers',''), '[^0-9.\-]', '', 'g'), '')::numeric AS reamers,
+        NULLIF(regexp_replace(COALESCE(vals->>'No of Holes',''), '[^0-9.\-]', '', 'g'), '')::numeric AS holes,
+        NULLIF(regexp_replace(COALESCE(vals->>'Cut Length',''), '[^0-9.\-]', '', 'g'), '')::numeric AS cut_length_m,
+
+        (
+          NULLIF(regexp_replace(COALESCE(vals->>'No of Holes',''), '[^0-9.\-]', '', 'g'), '')::numeric
+          * NULLIF(regexp_replace(COALESCE(vals->>'Cut Length',''), '[^0-9.\-]', '', 'g'), '')::numeric
+        ) AS dev_drill_m
+      FROM base
+      ORDER BY date, dn, user_email, activity_id;
+    `;
+
+    const r = await pool.query(sql, [site, from, to]);
+    res.json(r.rows);
+  } catch (e: any) {
+    console.error('[powerbi] validated/fact-dev-face-drilling failed', e?.message || e);
+    res.status(500).json({ error: 'powerbi_validated_fact_dev_face_drilling_failed' });
+  }
+});
+
+/**
+ * GET /api/powerbi/validated/fact-ground-support
+ * One row per validated Development → Ground Support or Rehab.
+ */
+router.get('/validated/fact-ground-support', async (req, res) => {
+  try {
+    const { site, from, to } = parseCommonFilters(req);
+
+    const sql = `
+      WITH base AS (
+        SELECT
+          vsa.id AS activity_id,
+          vs.id AS validated_shift_id,
+          vs.date::date AS date,
+          vs.dn,
+          vs.site,
+          vs.user_id,
+          COALESCE(u.email, vs.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vs.user_email, '') AS user_name,
+          vsa.activity,
+          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
+        FROM validated_shift_activities vsa
+        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN users u ON u.id = vs.user_id
+        WHERE vsa.activity = 'Development'
+          AND vsa.sub_activity IN ('Ground Support', 'Rehab')
+          AND ($1::text IS NULL OR vs.site = $1)
+          AND ($2::date IS NULL OR vs.date >= $2::date)
+          AND ($3::date IS NULL OR vs.date <= $3::date)
+      )
+      SELECT
+        activity_id,
+        validated_shift_id,
+        date,
+        dn,
+        site,
+        user_id,
+        user_email,
+        user_name,
+        activity,
+        sub_activity,
+
+        NULLIF(TRIM(vals->>'Equipment'), '') AS equipment,
+        NULLIF(TRIM(vals->>'Location'), '') AS location,
+
+        NULLIF(TRIM(vals->>'Bolt Type'), '') AS bolt_type,
+        NULLIF(regexp_replace(COALESCE(vals->>'Bolt Length',''), '[^0-9.\-]', '', 'g'), '')::numeric AS bolt_length_m,
+        NULLIF(regexp_replace(COALESCE(vals->>'No. of Bolts',''), '[^0-9.\-]', '', 'g'), '')::numeric AS bolts,
+        NULLIF(regexp_replace(COALESCE(vals->>'Agi Volume',''), '[^0-9.\-]', '', 'g'), '')::numeric AS agi_volume,
+        NULLIF(regexp_replace(COALESCE(vals->>'Spray Volume',''), '[^0-9.\-]', '', 'g'), '')::numeric AS spray_volume,
+
+        (
+          NULLIF(regexp_replace(COALESCE(vals->>'No. of Bolts',''), '[^0-9.\-]', '', 'g'), '')::numeric
+          * NULLIF(regexp_replace(COALESCE(vals->>'Bolt Length',''), '[^0-9.\-]', '', 'g'), '')::numeric
+        ) AS gs_drill_m
+      FROM base
+      ORDER BY date, dn, user_email, activity_id;
+    `;
+
+    const r = await pool.query(sql, [site, from, to]);
+    res.json(r.rows);
+  } catch (e: any) {
+    console.error('[powerbi] validated/fact-ground-support failed', e?.message || e);
+    res.status(500).json({ error: 'powerbi_validated_fact_ground_support_failed' });
+  }
+});
+
+/**
+ * GET /api/powerbi/validated/fact-production-drilling
+ * One row per validated Production Drilling activity.
+ */
+router.get('/validated/fact-production-drilling', async (req, res) => {
+  try {
+    const { site, from, to } = parseCommonFilters(req);
+
+    const sql = `
+      WITH base AS (
+        SELECT
+          vsa.id AS activity_id,
+          vs.id AS validated_shift_id,
+          vs.date::date AS date,
+          vs.dn,
+          vs.site,
+          vs.user_id,
+          COALESCE(u.email, vs.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vs.user_email, '') AS user_name,
+          vsa.activity,
+          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
+        FROM validated_shift_activities vsa
+        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN users u ON u.id = vs.user_id
+        WHERE vsa.activity = 'Production Drilling'
+          AND vsa.sub_activity IN ('Stope','Service Hole')
+          AND ($1::text IS NULL OR vs.site = $1)
+          AND ($2::date IS NULL OR vs.date >= $2::date)
+          AND ($3::date IS NULL OR vs.date <= $3::date)
+      )
+      SELECT
+        activity_id,
+        validated_shift_id,
+        date,
+        dn,
+        site,
+        user_id,
+        user_email,
+        user_name,
+        activity,
+        sub_activity,
+
+        NULLIF(TRIM(vals->>'Equipment'), '') AS equipment,
+        NULLIF(TRIM(vals->>'Location'), '') AS location,
+
+        NULLIF(regexp_replace(COALESCE(vals->>'Metres Drilled',''), '[^0-9.\-]', '', 'g'), '')::numeric AS metres_drilled_m,
+        NULLIF(regexp_replace(COALESCE(vals->>'Cleanouts Drilled',''), '[^0-9.\-]', '', 'g'), '')::numeric AS cleanouts_drilled_m,
+        NULLIF(regexp_replace(COALESCE(vals->>'Redrills',''), '[^0-9.\-]', '', 'g'), '')::numeric AS redrills_m
+      FROM base
+      ORDER BY date, dn, user_email, activity_id;
+    `;
+
+    const r = await pool.query(sql, [site, from, to]);
+    res.json(r.rows);
+  } catch (e: any) {
+    console.error('[powerbi] validated/fact-production-drilling failed', e?.message || e);
+    res.status(500).json({ error: 'powerbi_validated_fact_production_drilling_failed' });
+  }
+});
+
+/**
+ * GET /api/powerbi/validated/fact-charging
+ * One row per validated Charging activity (dev + prod).
+ */
+router.get('/validated/fact-charging', async (req, res) => {
+  try {
+    const { site, from, to } = parseCommonFilters(req);
+
+    const sql = `
+      WITH base AS (
+        SELECT
+          vsa.id AS activity_id,
+          vs.id AS validated_shift_id,
+          vs.date::date AS date,
+          vs.dn,
+          vs.site,
+          vs.user_id,
+          COALESCE(u.email, vs.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vs.user_email, '') AS user_name,
+          vsa.activity,
+          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
+        FROM validated_shift_activities vsa
+        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN users u ON u.id = vs.user_id
+        WHERE vsa.activity = 'Charging'
+          AND ($1::text IS NULL OR vs.site = $1)
+          AND ($2::date IS NULL OR vs.date >= $2::date)
+          AND ($3::date IS NULL OR vs.date <= $3::date)
+      )
+      SELECT
+        activity_id,
+        validated_shift_id,
+        date,
+        dn,
+        site,
+        user_id,
+        user_email,
+        user_name,
+        activity,
+        sub_activity,
+
+        NULLIF(TRIM(vals->>'Equipment'), '') AS equipment,
+        NULLIF(TRIM(vals->>'Location'), '') AS location,
+
+        NULLIF(regexp_replace(COALESCE(vals->>'No of Holes',''), '[^0-9.\-]', '', 'g'), '')::numeric AS holes,
+        NULLIF(regexp_replace(COALESCE(vals->>'Charge Metres',''), '[^0-9.\-]', '', 'g'), '')::numeric AS charge_metres,
+        NULLIF(regexp_replace(COALESCE(vals->>'Charge kg',''), '[^0-9.\-]', '', 'g'), '')::numeric AS charge_kg,
+        NULLIF(regexp_replace(COALESCE(vals->>'Cut Length',''), '[^0-9.\-]', '', 'g'), '')::numeric AS cut_length_m,
+        NULLIF(regexp_replace(COALESCE(vals->>'Tonnes Fired',''), '[^0-9.\-]', '', 'g'), '')::numeric AS tonnes_fired
+      FROM base
+      ORDER BY date, dn, user_email, activity_id;
+    `;
+
+    const r = await pool.query(sql, [site, from, to]);
+    res.json(r.rows);
+  } catch (e: any) {
+    console.error('[powerbi] validated/fact-charging failed', e?.message || e);
+    res.status(500).json({ error: 'powerbi_validated_fact_charging_failed' });
+  }
+});
+
+/**
+ * GET /api/powerbi/validated/fact-hoisting
+ * One row per validated Hoisting activity.
+ */
+router.get('/validated/fact-hoisting', async (req, res) => {
+  try {
+    const { site, from, to } = parseCommonFilters(req);
+
+    const sql = `
+      WITH base AS (
+        SELECT
+          vsa.id AS activity_id,
+          vs.id AS validated_shift_id,
+          vs.date::date AS date,
+          vs.dn,
+          vs.site,
+          vs.user_id,
+          COALESCE(u.email, vs.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vs.user_email, '') AS user_name,
+          vsa.activity,
+          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
+        FROM validated_shift_activities vsa
+        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN users u ON u.id = vs.user_id
+        WHERE vsa.activity = 'Hoisting'
+          AND ($1::text IS NULL OR vs.site = $1)
+          AND ($2::date IS NULL OR vs.date >= $2::date)
+          AND ($3::date IS NULL OR vs.date <= $3::date)
+      )
+      SELECT
+        activity_id,
+        validated_shift_id,
+        date,
+        dn,
+        site,
+        user_id,
+        user_email,
+        user_name,
+        activity,
+        sub_activity,
+
+        NULLIF(regexp_replace(COALESCE(vals->>'Ore Tonnes',''), '[^0-9.\-]', '', 'g'), '')::numeric AS ore_tonnes,
+        NULLIF(regexp_replace(COALESCE(vals->>'Waste Tonnes',''), '[^0-9.\-]', '', 'g'), '')::numeric AS waste_tonnes,
+        (
+          NULLIF(regexp_replace(COALESCE(vals->>'Ore Tonnes',''), '[^0-9.\-]', '', 'g'), '')::numeric
+          + NULLIF(regexp_replace(COALESCE(vals->>'Waste Tonnes',''), '[^0-9.\-]', '', 'g'), '')::numeric
+        ) AS total_tonnes
+      FROM base
+      ORDER BY date, dn, user_email, activity_id;
+    `;
+
+    const r = await pool.query(sql, [site, from, to]);
+    res.json(r.rows);
+  } catch (e: any) {
+    console.error('[powerbi] validated/fact-hoisting failed', e?.message || e);
+    res.status(500).json({ error: 'powerbi_validated_fact_hoisting_failed' });
+  }
+});
+
 
 export default router;
