@@ -583,7 +583,7 @@ function parseCommonFilters(req: any) {
 }
 
 // helper used in SQL blocks (numeric parsing)
-// NULLIF(regexp_replace(txt,'[^0-9.\-]','','g'),'')::numeric
+// NULLIF(regexp_replace(txt,'[^0-9.\-]','','g'),'')::double precision
 
 /**
  * GET /api/powerbi/validated/fact-hauling
@@ -672,35 +672,35 @@ router.get('/validated/fact-hauling', async (req, res) => {
           ELSE NULLIF(regexp_replace(COALESCE(vals->>'Trucks',''), '[^0-9]', '', 'g'), '')::int
         END AS trucks,
 
-        NULLIF(regexp_replace(COALESCE(vals->>'Distance',''), '[^0-9.\-]', '', 'g'), '')::numeric AS distance_km,
+        NULLIF(regexp_replace(COALESCE(vals->>'Distance',''), '[^0-9.\-]', '', 'g'), '')::double precision AS distance_km,
 
         -- tonnes_hauled: prefer explicit "Tonnes Hauled" key, else fall back to Trucks*Weight when parseable
         COALESCE(
-          NULLIF(regexp_replace(COALESCE(vals->>'Tonnes Hauled',''), '[^0-9.\-]', '', 'g'), '')::numeric,
+          NULLIF(regexp_replace(COALESCE(vals->>'Tonnes Hauled',''), '[^0-9.\-]', '', 'g'), '')::double precision,
           (
-            (NULLIF(regexp_replace(COALESCE(vals->>'Trucks',''), '[^0-9]', '', 'g'), '')::numeric)
-            * (NULLIF(regexp_replace(COALESCE(vals->>'Weight',''), '[^0-9.\-]', '', 'g'), '')::numeric)
+            (NULLIF(regexp_replace(COALESCE(vals->>'Trucks',''), '[^0-9]', '', 'g'), '')::double precision)
+            * (NULLIF(regexp_replace(COALESCE(vals->>'Weight',''), '[^0-9.\-]', '', 'g'), '')::double precision)
           )
         ) AS tonnes_hauled,
 
         CASE
           WHEN jsonb_typeof(loads) = 'array' AND jsonb_array_length(loads) > 0 THEN
             (
-              SELECT AVG(NULLIF(regexp_replace(COALESCE(lw->>'weight',''), '[^0-9.\-]', '', 'g'), '')::numeric)
+              SELECT AVG(NULLIF(regexp_replace(COALESCE(lw->>'weight',''), '[^0-9.\-]', '', 'g'), '')::double precision)
               FROM jsonb_array_elements(loads) lw
             )
-          ELSE NULLIF(regexp_replace(COALESCE(vals->>'Weight',''), '[^0-9.\-]', '', 'g'), '')::numeric
+          ELSE NULLIF(regexp_replace(COALESCE(vals->>'Weight',''), '[^0-9.\-]', '', 'g'), '')::double precision
         END AS avg_load_weight_t,
 
         (
           COALESCE(
-            NULLIF(regexp_replace(COALESCE(vals->>'Tonnes Hauled',''), '[^0-9.\-]', '', 'g'), '')::numeric,
+            NULLIF(regexp_replace(COALESCE(vals->>'Tonnes Hauled',''), '[^0-9.\-]', '', 'g'), '')::double precision,
             (
-              (NULLIF(regexp_replace(COALESCE(vals->>'Trucks',''), '[^0-9]', '', 'g'), '')::numeric)
-              * (NULLIF(regexp_replace(COALESCE(vals->>'Weight',''), '[^0-9.\-]', '', 'g'), '')::numeric)
+              (NULLIF(regexp_replace(COALESCE(vals->>'Trucks',''), '[^0-9]', '', 'g'), '')::double precision)
+              * (NULLIF(regexp_replace(COALESCE(vals->>'Weight',''), '[^0-9.\-]', '', 'g'), '')::double precision)
             )
           )
-          * NULLIF(regexp_replace(COALESCE(vals->>'Distance',''), '[^0-9.\-]', '', 'g'), '')::numeric
+          * NULLIF(regexp_replace(COALESCE(vals->>'Distance',''), '[^0-9.\-]', '', 'g'), '')::double precision
         ) AS tkm
       FROM x
       ORDER BY date, dn, user_email, activity_id;
@@ -764,7 +764,7 @@ router.get('/validated/fact-hauling-loads', async (req, res) => {
         NULLIF(TRIM(b.vals->>'Material'), '') AS material,
 
         (x.ord - 1) AS load_index,
-        NULLIF(regexp_replace(COALESCE(x.lw->>'weight',''), '[^0-9.\-]', '', 'g'), '')::numeric AS load_weight_t
+        NULLIF(regexp_replace(COALESCE(x.lw->>'weight',''), '[^0-9.\-]', '', 'g'), '')::double precision AS load_weight_t
       FROM base b
       CROSS JOIN LATERAL jsonb_array_elements(b.loads) WITH ORDINALITY AS x(lw, ord)
       ORDER BY b.date, b.dn, b.user_email, b.activity_id, load_index;
@@ -824,14 +824,14 @@ router.get('/validated/fact-loading', async (req, res) => {
         NULLIF(TRIM(vals->>'Source'), '') AS source,
         NULLIF(TRIM(vals->>'Material'), '') AS material,
 
-        NULLIF(regexp_replace(COALESCE(vals->>'Stope to Truck',''), '[^0-9.\-]', '', 'g'), '')::numeric AS stope_to_truck,
-        NULLIF(regexp_replace(COALESCE(vals->>'Stope to SP',''), '[^0-9.\-]', '', 'g'), '')::numeric AS stope_to_sp,
+        NULLIF(regexp_replace(COALESCE(vals->>'Stope to Truck',''), '[^0-9.\-]', '', 'g'), '')::double precision AS stope_to_truck,
+        NULLIF(regexp_replace(COALESCE(vals->>'Stope to SP',''), '[^0-9.\-]', '', 'g'), '')::double precision AS stope_to_sp,
 
-        NULLIF(regexp_replace(COALESCE(vals->>'Heading to Truck',''), '[^0-9.\-]', '', 'g'), '')::numeric AS heading_to_truck,
-        NULLIF(regexp_replace(COALESCE(vals->>'Heading to SP',''), '[^0-9.\-]', '', 'g'), '')::numeric AS heading_to_sp,
+        NULLIF(regexp_replace(COALESCE(vals->>'Heading to Truck',''), '[^0-9.\-]', '', 'g'), '')::double precision AS heading_to_truck,
+        NULLIF(regexp_replace(COALESCE(vals->>'Heading to SP',''), '[^0-9.\-]', '', 'g'), '')::double precision AS heading_to_sp,
 
-        NULLIF(regexp_replace(COALESCE(vals->>'SP to Truck',''), '[^0-9.\-]', '', 'g'), '')::numeric AS sp_to_truck,
-        NULLIF(regexp_replace(COALESCE(vals->>'SP to SP',''), '[^0-9.\-]', '', 'g'), '')::numeric AS sp_to_sp
+        NULLIF(regexp_replace(COALESCE(vals->>'SP to Truck',''), '[^0-9.\-]', '', 'g'), '')::double precision AS sp_to_truck,
+        NULLIF(regexp_replace(COALESCE(vals->>'SP to SP',''), '[^0-9.\-]', '', 'g'), '')::double precision AS sp_to_sp
       FROM base
       ORDER BY date, dn, user_email, activity_id;
     `;
@@ -890,13 +890,13 @@ router.get('/validated/fact-dev-face-drilling', async (req, res) => {
         NULLIF(TRIM(vals->>'Equipment'), '') AS equipment,
         NULLIF(TRIM(vals->>'Location'), '') AS location,
 
-        NULLIF(regexp_replace(COALESCE(vals->>'No of Reamers',''), '[^0-9.\-]', '', 'g'), '')::numeric AS reamers,
-        NULLIF(regexp_replace(COALESCE(vals->>'No of Holes',''), '[^0-9.\-]', '', 'g'), '')::numeric AS holes,
-        NULLIF(regexp_replace(COALESCE(vals->>'Cut Length',''), '[^0-9.\-]', '', 'g'), '')::numeric AS cut_length_m,
+        NULLIF(regexp_replace(COALESCE(vals->>'No of Reamers',''), '[^0-9.\-]', '', 'g'), '')::double precision AS reamers,
+        NULLIF(regexp_replace(COALESCE(vals->>'No of Holes',''), '[^0-9.\-]', '', 'g'), '')::double precision AS holes,
+        NULLIF(regexp_replace(COALESCE(vals->>'Cut Length',''), '[^0-9.\-]', '', 'g'), '')::double precision AS cut_length_m,
 
         (
-          NULLIF(regexp_replace(COALESCE(vals->>'No of Holes',''), '[^0-9.\-]', '', 'g'), '')::numeric
-          * NULLIF(regexp_replace(COALESCE(vals->>'Cut Length',''), '[^0-9.\-]', '', 'g'), '')::numeric
+          NULLIF(regexp_replace(COALESCE(vals->>'No of Holes',''), '[^0-9.\-]', '', 'g'), '')::double precision
+          * NULLIF(regexp_replace(COALESCE(vals->>'Cut Length',''), '[^0-9.\-]', '', 'g'), '')::double precision
         ) AS dev_drill_m
       FROM base
       ORDER BY date, dn, user_email, activity_id;
@@ -957,14 +957,14 @@ router.get('/validated/fact-ground-support', async (req, res) => {
         NULLIF(TRIM(vals->>'Location'), '') AS location,
 
         NULLIF(TRIM(vals->>'Bolt Type'), '') AS bolt_type,
-        NULLIF(regexp_replace(COALESCE(vals->>'Bolt Length',''), '[^0-9.\-]', '', 'g'), '')::numeric AS bolt_length_m,
-        NULLIF(regexp_replace(COALESCE(vals->>'No. of Bolts',''), '[^0-9.\-]', '', 'g'), '')::numeric AS bolts,
-        NULLIF(regexp_replace(COALESCE(vals->>'Agi Volume',''), '[^0-9.\-]', '', 'g'), '')::numeric AS agi_volume,
-        NULLIF(regexp_replace(COALESCE(vals->>'Spray Volume',''), '[^0-9.\-]', '', 'g'), '')::numeric AS spray_volume,
+        NULLIF(regexp_replace(COALESCE(vals->>'Bolt Length',''), '[^0-9.\-]', '', 'g'), '')::double precision AS bolt_length_m,
+        NULLIF(regexp_replace(COALESCE(vals->>'No. of Bolts',''), '[^0-9.\-]', '', 'g'), '')::double precision AS bolts,
+        NULLIF(regexp_replace(COALESCE(vals->>'Agi Volume',''), '[^0-9.\-]', '', 'g'), '')::double precision AS agi_volume,
+        NULLIF(regexp_replace(COALESCE(vals->>'Spray Volume',''), '[^0-9.\-]', '', 'g'), '')::double precision AS spray_volume,
 
         (
-          NULLIF(regexp_replace(COALESCE(vals->>'No. of Bolts',''), '[^0-9.\-]', '', 'g'), '')::numeric
-          * NULLIF(regexp_replace(COALESCE(vals->>'Bolt Length',''), '[^0-9.\-]', '', 'g'), '')::numeric
+          NULLIF(regexp_replace(COALESCE(vals->>'No. of Bolts',''), '[^0-9.\-]', '', 'g'), '')::double precision
+          * NULLIF(regexp_replace(COALESCE(vals->>'Bolt Length',''), '[^0-9.\-]', '', 'g'), '')::double precision
         ) AS gs_drill_m
       FROM base
       ORDER BY date, dn, user_email, activity_id;
@@ -1024,9 +1024,9 @@ router.get('/validated/fact-production-drilling', async (req, res) => {
         NULLIF(TRIM(vals->>'Equipment'), '') AS equipment,
         NULLIF(TRIM(vals->>'Location'), '') AS location,
 
-        NULLIF(regexp_replace(COALESCE(vals->>'Metres Drilled',''), '[^0-9.\-]', '', 'g'), '')::numeric AS metres_drilled_m,
-        NULLIF(regexp_replace(COALESCE(vals->>'Cleanouts Drilled',''), '[^0-9.\-]', '', 'g'), '')::numeric AS cleanouts_drilled_m,
-        NULLIF(regexp_replace(COALESCE(vals->>'Redrills',''), '[^0-9.\-]', '', 'g'), '')::numeric AS redrills_m
+        NULLIF(regexp_replace(COALESCE(vals->>'Metres Drilled',''), '[^0-9.\-]', '', 'g'), '')::double precision AS metres_drilled_m,
+        NULLIF(regexp_replace(COALESCE(vals->>'Cleanouts Drilled',''), '[^0-9.\-]', '', 'g'), '')::double precision AS cleanouts_drilled_m,
+        NULLIF(regexp_replace(COALESCE(vals->>'Redrills',''), '[^0-9.\-]', '', 'g'), '')::double precision AS redrills_m
       FROM base
       ORDER BY date, dn, user_email, activity_id;
     `;
@@ -1084,11 +1084,11 @@ router.get('/validated/fact-charging', async (req, res) => {
         NULLIF(TRIM(vals->>'Equipment'), '') AS equipment,
         NULLIF(TRIM(vals->>'Location'), '') AS location,
 
-        NULLIF(regexp_replace(COALESCE(vals->>'No of Holes',''), '[^0-9.\-]', '', 'g'), '')::numeric AS holes,
-        NULLIF(regexp_replace(COALESCE(vals->>'Charge Metres',''), '[^0-9.\-]', '', 'g'), '')::numeric AS charge_metres,
-        NULLIF(regexp_replace(COALESCE(vals->>'Charge kg',''), '[^0-9.\-]', '', 'g'), '')::numeric AS charge_kg,
-        NULLIF(regexp_replace(COALESCE(vals->>'Cut Length',''), '[^0-9.\-]', '', 'g'), '')::numeric AS cut_length_m,
-        NULLIF(regexp_replace(COALESCE(vals->>'Tonnes Fired',''), '[^0-9.\-]', '', 'g'), '')::numeric AS tonnes_fired
+        NULLIF(regexp_replace(COALESCE(vals->>'No of Holes',''), '[^0-9.\-]', '', 'g'), '')::double precision AS holes,
+        NULLIF(regexp_replace(COALESCE(vals->>'Charge Metres',''), '[^0-9.\-]', '', 'g'), '')::double precision AS charge_metres,
+        NULLIF(regexp_replace(COALESCE(vals->>'Charge kg',''), '[^0-9.\-]', '', 'g'), '')::double precision AS charge_kg,
+        NULLIF(regexp_replace(COALESCE(vals->>'Cut Length',''), '[^0-9.\-]', '', 'g'), '')::double precision AS cut_length_m,
+        NULLIF(regexp_replace(COALESCE(vals->>'Tonnes Fired',''), '[^0-9.\-]', '', 'g'), '')::double precision AS tonnes_fired
       FROM base
       ORDER BY date, dn, user_email, activity_id;
     `;
@@ -1143,11 +1143,11 @@ router.get('/validated/fact-hoisting', async (req, res) => {
         activity,
         sub_activity,
 
-        NULLIF(regexp_replace(COALESCE(vals->>'Ore Tonnes',''), '[^0-9.\-]', '', 'g'), '')::numeric AS ore_tonnes,
-        NULLIF(regexp_replace(COALESCE(vals->>'Waste Tonnes',''), '[^0-9.\-]', '', 'g'), '')::numeric AS waste_tonnes,
+        NULLIF(regexp_replace(COALESCE(vals->>'Ore Tonnes',''), '[^0-9.\-]', '', 'g'), '')::double precision AS ore_tonnes,
+        NULLIF(regexp_replace(COALESCE(vals->>'Waste Tonnes',''), '[^0-9.\-]', '', 'g'), '')::double precision AS waste_tonnes,
         (
-          NULLIF(regexp_replace(COALESCE(vals->>'Ore Tonnes',''), '[^0-9.\-]', '', 'g'), '')::numeric
-          + NULLIF(regexp_replace(COALESCE(vals->>'Waste Tonnes',''), '[^0-9.\-]', '', 'g'), '')::numeric
+          NULLIF(regexp_replace(COALESCE(vals->>'Ore Tonnes',''), '[^0-9.\-]', '', 'g'), '')::double precision
+          + NULLIF(regexp_replace(COALESCE(vals->>'Waste Tonnes',''), '[^0-9.\-]', '', 'g'), '')::double precision
         ) AS total_tonnes
       FROM base
       ORDER BY date, dn, user_email, activity_id;
