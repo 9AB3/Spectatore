@@ -372,169 +372,165 @@ router.get('/validated/activity-payloads', async (req, res) => {
  */
 router.get('/validated/activity-metrics', async (req, res) => {
   try {
-    const site = String(req.query.site || '').trim();
-    const from = String(req.query.from || '').trim(); // YYYY-MM-DD
-    const to = String(req.query.to || '').trim();     // YYYY-MM-DD
 
-    const params: any[] = [
-      site || null,
-      isYmd(from) ? from : null,
-      isYmd(to) ? to : null,
-    ];
+    const site = String(req.query.site || '').trim() || null;
+    const from = isYmd(String(req.query.from || '').trim()) ? String(req.query.from || '').trim() : null;
+    const to = isYmd(String(req.query.to || '').trim()) ? String(req.query.to || '').trim() : null;
 
-// We flatten payload_json in a robust "1- or 2-level" way:
-    // - If payload_json is { "Production": {...}, "Development": {...} } → group=Production, metric_key from inner object.
-    // - If payload_json is { "Trucks": 5, "Weight": 45 } → group="(No Group)", metric_key from top-level.
-    //
-    // We also pull "context" fields out when present (equipment/location/from/to/source/destination).
-    //
-    // NOTE: context fields may be stored in payload_json alongside metrics. We exclude common context keys from metric flattening.
-    const sql = `WITH base AS (
-  SELECT
-    vsa.id AS activity_id,
-    vs.id AS validated_shift_id,
-    vs.date::date AS date_ymd,
-    vs.date::timestamptz AS date,
-    vs.dn AS dn,
-    vs.site AS site,
-    vs.user_id AS user_id,
-    u.email AS user_email,
-    u.name  AS user_name,
-    vsa.activity AS activity,
-    COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
-    vsa.payload_json AS payload
-  FROM validated_shift_activities vsa
-  JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
-  LEFT JOIN users u ON u.id = vs.user_id
-  WHERE vs.site = $1
-    AND vs.date >= $2::date
-    AND vs.date <= $3::date
-),
-activity_rows AS (
-  SELECT
-    b.*,
-    COALESCE(b.payload->'values', '{}'::jsonb) AS vals,
-    COALESCE(
-      NULLIF(TRIM(COALESCE(b.payload->>'equipment','')),''),
-      NULLIF(TRIM(COALESCE((b.payload->'values'->>'Equipment'),'')),'')
-    ) AS equipment,
-    COALESCE(
-      NULLIF(TRIM(COALESCE(b.payload->>'location','')),''),
-      NULLIF(TRIM(COALESCE((b.payload->'values'->>'Location'),'')),'')
-    ) AS location,
-    COALESCE(
-      NULLIF(TRIM(COALESCE(b.payload->>'from_location','')),''),
-      NULLIF(TRIM(COALESCE((b.payload->'values'->>'From'),'')),'')
-    ) AS from_location,
-    COALESCE(
-      NULLIF(TRIM(COALESCE(b.payload->>'to_location','')),''),
-      NULLIF(TRIM(COALESCE((b.payload->'values'->>'To'),'')),'')
-    ) AS to_location,
-    COALESCE(
-      NULLIF(TRIM(COALESCE(b.payload->>'source','')),''),
-      NULLIF(TRIM(COALESCE((b.payload->'values'->>'Source'),'')),''),
-      NULLIF(TRIM(COALESCE((b.payload->'values'->>'From'),'')),'')
-    ) AS source
-  FROM base b
-),
-typed_metrics AS (
-  SELECT
-    ar.activity_id AS task_row_id,
-    ar.validated_shift_id AS task_id,
-    NULL::int AS task_item_index,
-    'metric'::text AS task_item_type,
-    ar.date,
-    ar.date_ymd,
-    ar.dn,
-    ar.site,
-    ar.user_id,
-    ar.user_email,
-    ar.user_name,
-    ar.activity,
-    ar.sub_activity,
-    ar.equipment,
-    ar.location,
-    ar.from_location,
-    ar.to_location,
-    ar.source,
-    kv.key::text AS metric_key,
-    kv.value::text AS value_text,
-    CASE
-      WHEN kv.value::text ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (kv.value::text)::double precision
-      ELSE NULL
-    END AS value_num
-  FROM activity_rows ar
-  JOIN LATERAL jsonb_each(ar.vals) AS kv(key, value) ON true
-  WHERE kv.key IS NOT NULL
-    AND kv.key NOT IN ('From','To','Source','Destination','Location','Equipment','Material')
-),
-load_weights AS (
-  SELECT
-    ar.activity_id AS task_row_id,
-    ar.validated_shift_id AS task_id,
-    lw.ord::int AS task_item_index,
-    'load'::text AS task_item_type,
-    ar.date,
-    ar.date_ymd,
-    ar.dn,
-    ar.site,
-    ar.user_id,
-    ar.user_email,
-    ar.user_name,
-    ar.activity,
-    ar.sub_activity,
-    ar.equipment,
-    ar.location,
-    ar.from_location,
-    ar.to_location,
-    ar.source,
-    'Load Weight'::text AS metric_key,
-    (lw.elem->>'weight') AS value_text,
-    CASE
-      WHEN (lw.elem->>'weight') ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (lw.elem->>'weight')::double precision
-      ELSE NULL
-    END AS value_num
-  FROM activity_rows ar
-  JOIN LATERAL jsonb_array_elements(COALESCE(ar.payload->'loads','[]'::jsonb)) WITH ORDINALITY AS lw(elem, ord) ON true
-  WHERE lw.elem ? 'weight'
-)
-SELECT
-  task_id,
-  task_row_id,
-  task_item_index,
-  task_item_type,
-  date,
-  date_ymd,
-  dn,
-  site,
-  user_id,
-  user_email,
-  user_name,
-  activity,
-  sub_activity,
-  equipment,
-  location,
-  from_location,
-  to_location,
-  source,
-  metric_key,
-  value_text AS metric_text,
-  value_num  AS metric_value,
-  value_text,
-  value_num
-FROM (
-  SELECT * FROM typed_metrics
-  UNION ALL
-  SELECT * FROM load_weights
-) x
-ORDER BY date, dn, user_email, activity, sub_activity, task_row_id, task_item_type, task_item_index NULLS FIRST, metric_key
-`;
+    // Long-format metrics table:
+    // - one row per metric (Distance, Tonnes Hauled, etc.)
+    // - one row per UNIQUE load weight (deduped) with a load_count column
+    // - task_id groups all metric rows that belong to the same underlying task (validated_shift_activity id)
+    const sql = `
+      WITH base AS (
+        SELECT
+          vsa.id AS task_id,
+          vs.id  AS validated_shift_id,
+          vs.date::timestamptz AS date,
+          vs.date::date AS date_ymd,
+          vs.dn,
+          vs.site,
+          vs.user_id,
+          u.email AS user_email,
+          u.name  AS user_name,
+          vsa.activity,
+          vsa.sub_activity,
+          vsa.payload_json
+        FROM validated_shift_activities vsa
+        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN users u ON u.id = vs.user_id
+        WHERE ($1::text IS NULL OR vs.site = $1)
+          AND ($2::date IS NULL OR vs.date::date >= $2::date)
+          AND ($3::date IS NULL OR vs.date::date <= $3::date)
+      ),
+      dims AS (
+        SELECT
+          b.*,
+          NULLIF(TRIM(b.payload_json->'values'->>'Source'), '') AS source,
+          NULLIF(TRIM(b.payload_json->'values'->>'From'), '')   AS from_location,
+          NULLIF(TRIM(b.payload_json->'values'->>'To'), '')     AS to_location,
+          NULLIF(TRIM(b.payload_json->>'equipment'), '')        AS equipment,
+          NULLIF(TRIM(b.payload_json->>'location'), '')         AS location
+        FROM base b
+      ),
+      value_metrics AS (
+        SELECT
+          d.task_id,
+          d.validated_shift_id,
+          d.date,
+          d.date_ymd,
+          d.dn,
+          d.site,
+          d.user_id,
+          d.user_email,
+          d.user_name,
+          d.activity,
+          d.sub_activity,
+          d.equipment,
+          d.location,
+          d.from_location,
+          d.to_location,
+          d.source,
+          kv.key::text AS metric_key,
+          kv.value::text AS value_text,
+          CASE
+            WHEN kv.value ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (kv.value)::numeric
+            ELSE NULL
+          END AS value_num,
+          NULL::int AS task_item_index,
+          'metric'::text AS task_item_type,
+          NULL::int AS load_count
+        FROM dims d
+        JOIN LATERAL jsonb_each_text(COALESCE(d.payload_json->'values', '{}'::jsonb)) kv ON true
+        WHERE kv.key IS NOT NULL
+          AND kv.key NOT IN ('Source','From','To')
+          AND kv.value ~ '^-?[0-9]+(\\.[0-9]+)?$'
+      ),
+      load_weights_raw AS (
+        SELECT
+          d.task_id,
+          d.validated_shift_id,
+          d.date,
+          d.date_ymd,
+          d.dn,
+          d.site,
+          d.user_id,
+          d.user_email,
+          d.user_name,
+          d.activity,
+          d.sub_activity,
+          d.equipment,
+          d.location,
+          d.from_location,
+          d.to_location,
+          d.source,
+          (lw->>'weight')::text AS weight_text,
+          CASE
+            WHEN (lw->>'weight') ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (lw->>'weight')::numeric
+            ELSE NULL
+          END AS weight_num
+        FROM dims d
+        JOIN LATERAL jsonb_array_elements(COALESCE(d.payload_json->'loads', '[]'::jsonb)) lw ON true
+        WHERE lw ? 'weight'
+      ),
+      load_weights AS (
+        SELECT
+          lwr.task_id,
+          lwr.validated_shift_id,
+          lwr.date,
+          lwr.date_ymd,
+          lwr.dn,
+          lwr.site,
+          lwr.user_id,
+          lwr.user_email,
+          lwr.user_name,
+          lwr.activity,
+          lwr.sub_activity,
+          lwr.equipment,
+          lwr.location,
+          lwr.from_location,
+          lwr.to_location,
+          lwr.source,
+          'Load Weight'::text AS metric_key,
+          MIN(lwr.weight_text) AS value_text,
+          lwr.weight_num AS value_num,
+          NULL::int AS task_item_index,
+          'load_weight'::text AS task_item_type,
+          COUNT(*)::int AS load_count
+        FROM load_weights_raw lwr
+        WHERE lwr.weight_num IS NOT NULL
+        GROUP BY
+          lwr.task_id,
+          lwr.validated_shift_id,
+          lwr.date,
+          lwr.date_ymd,
+          lwr.dn,
+          lwr.site,
+          lwr.user_id,
+          lwr.user_email,
+          lwr.user_name,
+          lwr.activity,
+          lwr.sub_activity,
+          lwr.equipment,
+          lwr.location,
+          lwr.from_location,
+          lwr.to_location,
+          lwr.source,
+          lwr.weight_num
+      )
+      SELECT *
+      FROM value_metrics
+      UNION ALL
+      SELECT *
+      FROM load_weights
+      ORDER BY date_ymd DESC, task_id DESC, task_item_type, metric_key;
+    `;
 
-    const r = await pool.query(sql, params);
-    res.json(r.rows);
+    const r = await pool.query(sql, [site, from, to]);
+    return res.json(r.rows);
   } catch (e: any) {
     console.error('[powerbi] validated/activity-metrics failed', e?.message || e);
-    res.status(500).json({ error: 'server_error' });
+    return res.status(500).json({ error: 'internal', message: String(e?.message || e) });
   }
 });
 
