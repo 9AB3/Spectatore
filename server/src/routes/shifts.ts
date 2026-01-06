@@ -444,11 +444,12 @@ for (const it of activities) {
     if (!p.activity) continue;
 
     await client.query(
-      `INSERT INTO validated_shift_activities (site, date, dn, user_email, user_name, user_id, activity, sub_activity, payload_json)
-       VALUES ($1,$2::date,$3,$4,$5,$6,$7,$8,$9::jsonb)`,
+      `INSERT INTO validated_shift_activities
+        (validated_shift_id, shift_key, site, date, dn, user_email, user_name, user_id, activity, sub_activity, payload_json)
+       VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11::jsonb)`,
       [validated_shift_id, shiftKey, site, date, dn, user_email, user_name, user_id, p.activity, p.sub, JSON.stringify(p)],
     );
-  }
+}
 }
 
 await client.query('COMMIT');
