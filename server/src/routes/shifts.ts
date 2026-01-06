@@ -429,20 +429,24 @@ if (!existingV.rows?.length) {
     [site, date, dn, user_email],
   );
 
-	  await client.query(
-	    `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, user_id, validated, totals_json)
-	     VALUES ($1,$2::date,$3,COALESCE($4,''),$5,$6,0,$7::jsonb)`,
-	    [site, date, dn, user_email, user_name, user_id, JSON.stringify(totals || {})],
-	  );
+	  const shiftKey = `${site}|${date}|${dn}|${(user_id ?? user_email ?? '').toString()}`;
 
-  for (const it of activities) {
+const insShift = await client.query(
+  `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, user_id, validated, totals_json, shift_key)
+   VALUES ($1,$2::date,$3,COALESCE($4,''),$5,$6,0,$7::jsonb,$8)
+   RETURNING id, shift_key`,
+  [site, date, dn, user_email, user_name, user_id, JSON.stringify(totals || {}), shiftKey],
+);
+
+const validated_shift_id = insShift.rows?.[0]?.id as number;
+for (const it of activities) {
     const p = normaliseItem(it);
     if (!p.activity) continue;
 
     await client.query(
       `INSERT INTO validated_shift_activities (site, date, dn, user_email, user_name, user_id, activity, sub_activity, payload_json)
        VALUES ($1,$2::date,$3,$4,$5,$6,$7,$8,$9::jsonb)`,
-      [site, date, dn, user_email, user_name, user_id, p.activity, p.sub, JSON.stringify(p)],
+      [validated_shift_id, shiftKey, site, date, dn, user_email, user_name, user_id, p.activity, p.sub, JSON.stringify(p)],
     );
   }
 }

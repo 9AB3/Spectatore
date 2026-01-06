@@ -373,3 +373,81 @@ SET user_id = u.id,
 FROM users u
 WHERE vsa.user_id IS NULL
   AND vsa.user_email = u.email;
+
+-- POWER BI / VALIDATED SCHEMA UPGRADES
+-- Goal: add stable keys and FK relationships so Power BI can model a star schema.
+-- This block is idempotent and safe to run on existing DBs.
+
+-- 1) validated_shifts: add shift_key + timestamps
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS shift_key TEXT;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
+-- Backfill shift_key (site|YYYY-MM-DD|dn|user_id_or_email)
+UPDATE validated_shifts
+SET shift_key = site || '|' || to_char(date,'YYYY-MM-DD') || '|' || dn || '|' ||
+  COALESCE(user_id::text, NULLIF(user_email,''), '')
+WHERE shift_key IS NULL OR shift_key = '';
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_validated_shifts_shift_key ON validated_shifts(shift_key);
+CREATE INDEX IF NOT EXISTS idx_validated_shifts_site_date ON validated_shifts(site, date);
+CREATE INDEX IF NOT EXISTS idx_validated_shifts_user_id ON validated_shifts(user_id);
+CREATE INDEX IF NOT EXISTS idx_validated_shifts_user_email ON validated_shifts(user_email);
+
+-- 2) validated_shift_activities: add validated_shift_id FK + shift_key mirror + timestamps
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS validated_shift_id INTEGER;
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS shift_key TEXT;
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
+-- Backfill validated_shift_id using user_id first (preferred)
+UPDATE validated_shift_activities vsa
+SET validated_shift_id = vs.id
+FROM validated_shifts vs
+WHERE vsa.validated_shift_id IS NULL
+  AND vsa.site = vs.site
+  AND vsa.date = vs.date
+  AND vsa.dn = vs.dn
+  AND vsa.user_id IS NOT NULL
+  AND vs.user_id = vsa.user_id;
+
+-- Fallback backfill by email (if user_id missing)
+UPDATE validated_shift_activities vsa
+SET validated_shift_id = vs.id
+FROM validated_shifts vs
+WHERE vsa.validated_shift_id IS NULL
+  AND vsa.site = vs.site
+  AND vsa.date = vs.date
+  AND vsa.dn = vs.dn
+  AND COALESCE(vsa.user_email,'') <> ''
+  AND COALESCE(vs.user_email,'') = COALESCE(vsa.user_email,'');
+
+-- Backfill shift_key mirror from validated_shifts once validated_shift_id set
+UPDATE validated_shift_activities vsa
+SET shift_key = vs.shift_key
+FROM validated_shifts vs
+WHERE vsa.validated_shift_id = vs.id
+  AND (vsa.shift_key IS NULL OR vsa.shift_key = '');
+
+-- Indexes for BI queries
+CREATE INDEX IF NOT EXISTS idx_vsa_validated_shift_id ON validated_shift_activities(validated_shift_id);
+CREATE INDEX IF NOT EXISTS idx_vsa_shift_key ON validated_shift_activities(shift_key);
+CREATE INDEX IF NOT EXISTS idx_vsa_activity ON validated_shift_activities(activity);
+CREATE INDEX IF NOT EXISTS idx_vsa_site_date ON validated_shift_activities(site, date);
+
+-- Add FK constraint (NOT VALID then validate to avoid long locks)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_vsa_validated_shift'
+  ) THEN
+    ALTER TABLE validated_shift_activities
+      ADD CONSTRAINT fk_vsa_validated_shift
+      FOREIGN KEY (validated_shift_id)
+      REFERENCES validated_shifts(id)
+      ON DELETE CASCADE
+      NOT VALID;
+  END IF;
+END$$;
+
+ALTER TABLE validated_shift_activities VALIDATE CONSTRAINT fk_vsa_validated_shift;

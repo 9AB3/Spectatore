@@ -20,7 +20,7 @@ function requirePowerBiAuth(req: any, res: any, next: any) {
   if (!token) {
     // Open only for local development/testing.
     if ((process.env.NODE_ENV || 'development') !== 'production') return next();
-    return res.status(500).json({ error: 'POWERBI_TOKEN not configured' });
+    return res.status(500).json({ error: 'POWERBI_TOKEN not configured', detail: (err as any)?.message || String(err) });
   }
 
   // Power BI Desktop's "From Web" connector often doesn't allow custom headers like
@@ -101,7 +101,7 @@ router.get('/shift-totals', async (req, res) => {
     res.json(r.rows);
   } catch (e: any) {
     console.error('[powerbi] shift-totals failed', e?.message || e);
-    res.status(500).json({ error: 'powerbi_shift_totals_failed' });
+    res.status(500).json({ error: 'powerbi_shift_totals_failed', detail: (err as any)?.message || String(err) });
   }
 });
 
@@ -266,7 +266,7 @@ router.get('/activity-payloads', async (req, res) => {
     res.json(r.rows);
   } catch (e: any) {
     console.error('[powerbi] activity-payloads failed', e?.message || e);
-    res.status(500).json({ error: 'powerbi_activity_payloads_failed' });
+    res.status(500).json({ error: 'powerbi_activity_payloads_failed', detail: (err as any)?.message || String(err) });
   }
 });
 
@@ -314,7 +314,7 @@ router.get('/validated/shift-totals', async (req, res) => {
     res.json(r.rows);
   } catch (e: any) {
     console.error('[powerbi] validated shift-totals failed', e?.message || e);
-    res.status(500).json({ error: 'powerbi_validated_shift_totals_failed' });
+    res.status(500).json({ error: 'powerbi_validated_shift_totals_failed', detail: (err as any)?.message || String(err) });
   }
 });
 
@@ -355,7 +355,7 @@ router.get('/validated/activity-payloads', async (req, res) => {
     res.json(r.rows);
   } catch (e: any) {
     console.error('[powerbi] validated activity-payloads failed', e?.message || e);
-    res.status(500).json({ error: 'powerbi_validated_activity_payloads_failed' });
+    res.status(500).json({ error: 'powerbi_validated_activity_payloads_failed', detail: (err as any)?.message || String(err) });
   }
 });
 /**
@@ -404,7 +404,7 @@ router.get('/validated/activity-metrics', async (req, res) => {
     COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
     vsa.payload_json AS payload
   FROM validated_shift_activities vsa
-  JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+  LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
   LEFT JOIN users u ON u.id = vs.user_id
   WHERE vs.site = $1
     AND vs.date >= $2::date
@@ -534,7 +534,7 @@ ORDER BY date, dn, user_email, activity, sub_activity, task_row_id, task_item_ty
     res.json(r.rows);
   } catch (e: any) {
     console.error('[powerbi] validated/activity-metrics failed', e?.message || e);
-    res.status(500).json({ error: 'server_error' });
+    res.status(500).json({ error: 'server_error', detail: (err as any)?.message || String(err) });
   }
 });
 
@@ -555,7 +555,7 @@ router.get('/dim/sites', async (_req, res) => {
     res.json(r.rows);
   } catch (e: any) {
     console.error('[powerbi] dim/sites failed', e?.message || e);
-    res.status(500).json({ error: 'powerbi_dim_sites_failed' });
+    res.status(500).json({ error: 'powerbi_dim_sites_failed', detail: (err as any)?.message || String(err) });
   }
 });
 
@@ -607,7 +607,7 @@ router.get('/validated/fact-hauling', async (req, res) => {
           COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
           vsa.payload_json AS payload
         FROM validated_shift_activities vsa
-        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Hauling'
           AND ($1::text IS NULL OR vs.site = $1)
@@ -681,7 +681,7 @@ router.get('/validated/fact-hauling', async (req, res) => {
     res.json(r.rows);
   } catch (e: any) {
     console.error('[powerbi] validated/fact-hauling failed', e?.message || e);
-    res.status(500).json({ error: 'powerbi_validated_fact_hauling_failed' });
+    res.status(500).json({ error: 'powerbi_validated_fact_hauling_failed', detail: (err as any)?.message || String(err) });
   }
 });
 
@@ -709,7 +709,7 @@ router.get('/validated/fact-hauling-loads', async (req, res) => {
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals,
           vsa.payload_json->'loads' AS loads
         FROM validated_shift_activities vsa
-        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Hauling'
           AND ($1::text IS NULL OR vs.site = $1)
@@ -745,7 +745,7 @@ router.get('/validated/fact-hauling-loads', async (req, res) => {
     res.json(r.rows);
   } catch (e: any) {
     console.error('[powerbi] validated/fact-hauling-loads failed', e?.message || e);
-    res.status(500).json({ error: 'powerbi_validated_fact_hauling_loads_failed' });
+    res.status(500).json({ error: 'powerbi_validated_fact_hauling_loads_failed', detail: (err as any)?.message || String(err) });
   }
 });
 
@@ -772,7 +772,7 @@ router.get('/validated/fact-loading', async (req, res) => {
           COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
-        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Loading'
           AND ($1::text IS NULL OR vs.site = $1)
@@ -811,7 +811,7 @@ router.get('/validated/fact-loading', async (req, res) => {
     res.json(r.rows);
   } catch (e: any) {
     console.error('[powerbi] validated/fact-loading failed', e?.message || e);
-    res.status(500).json({ error: 'powerbi_validated_fact_loading_failed' });
+    res.status(500).json({ error: 'powerbi_validated_fact_loading_failed', detail: (err as any)?.message || String(err) });
   }
 });
 
@@ -838,7 +838,7 @@ router.get('/validated/fact-dev-face-drilling', async (req, res) => {
           COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
-        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Development'
           AND vsa.sub_activity = 'Face Drilling'
@@ -877,7 +877,7 @@ router.get('/validated/fact-dev-face-drilling', async (req, res) => {
     res.json(r.rows);
   } catch (e: any) {
     console.error('[powerbi] validated/fact-dev-face-drilling failed', e?.message || e);
-    res.status(500).json({ error: 'powerbi_validated_fact_dev_face_drilling_failed' });
+    res.status(500).json({ error: 'powerbi_validated_fact_dev_face_drilling_failed', detail: (err as any)?.message || String(err) });
   }
 });
 
@@ -904,7 +904,7 @@ router.get('/validated/fact-ground-support', async (req, res) => {
           COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
-        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Development'
           AND vsa.sub_activity IN ('Ground Support', 'Rehab')
@@ -945,7 +945,7 @@ router.get('/validated/fact-ground-support', async (req, res) => {
     res.json(r.rows);
   } catch (e: any) {
     console.error('[powerbi] validated/fact-ground-support failed', e?.message || e);
-    res.status(500).json({ error: 'powerbi_validated_fact_ground_support_failed' });
+    res.status(500).json({ error: 'powerbi_validated_fact_ground_support_failed', detail: (err as any)?.message || String(err) });
   }
 });
 
@@ -972,7 +972,7 @@ router.get('/validated/fact-production-drilling', async (req, res) => {
           COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
-        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Production Drilling'
           AND vsa.sub_activity IN ('Stope','Service Hole')
@@ -1006,7 +1006,7 @@ router.get('/validated/fact-production-drilling', async (req, res) => {
     res.json(r.rows);
   } catch (e: any) {
     console.error('[powerbi] validated/fact-production-drilling failed', e?.message || e);
-    res.status(500).json({ error: 'powerbi_validated_fact_production_drilling_failed' });
+    res.status(500).json({ error: 'powerbi_validated_fact_production_drilling_failed', detail: (err as any)?.message || String(err) });
   }
 });
 
@@ -1033,7 +1033,7 @@ router.get('/validated/fact-charging', async (req, res) => {
           COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
-        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Charging'
           AND ($1::text IS NULL OR vs.site = $1)
@@ -1068,7 +1068,7 @@ router.get('/validated/fact-charging', async (req, res) => {
     res.json(r.rows);
   } catch (e: any) {
     console.error('[powerbi] validated/fact-charging failed', e?.message || e);
-    res.status(500).json({ error: 'powerbi_validated_fact_charging_failed' });
+    res.status(500).json({ error: 'powerbi_validated_fact_charging_failed', detail: (err as any)?.message || String(err) });
   }
 });
 
@@ -1095,7 +1095,7 @@ router.get('/validated/fact-hoisting', async (req, res) => {
           COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
-        JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Hoisting'
           AND ($1::text IS NULL OR vs.site = $1)
@@ -1128,7 +1128,7 @@ router.get('/validated/fact-hoisting', async (req, res) => {
     res.json(r.rows);
   } catch (e: any) {
     console.error('[powerbi] validated/fact-hoisting failed', e?.message || e);
-    res.status(500).json({ error: 'powerbi_validated_fact_hoisting_failed' });
+    res.status(500).json({ error: 'powerbi_validated_fact_hoisting_failed', detail: (err as any)?.message || String(err) });
   }
 });
 
