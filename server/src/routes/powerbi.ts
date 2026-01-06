@@ -394,7 +394,7 @@ router.get('/validated/activity-metrics', async (req, res) => {
   SELECT
     vsa.id AS activity_id,
     vs.id AS validated_shift_id,
-    vs.date::date AS date_ymd,
+    COALESCE(vs.date::date, vsa.date) AS date_ymd,
     vs.date::timestamptz AS date,
     vs.dn AS dn,
     vs.site AS site,
@@ -582,39 +582,6 @@ function parseCommonFilters(req: any) {
   return { site, from, to };
 }
 
-
-/**
- * GET /api/powerbi/validated/activity-summary?site=<name>&from=YYYY-MM-DD&to=YYYY-MM-DD
- * Quick diagnostic endpoint: shows exactly what activity/sub_activity strings exist in validated data.
- */
-router.get('/validated/activity-summary', async (req, res) => {
-  try {
-    const { site, from, to } = parseCommonFilters(req);
-
-    const r = await pool.query(
-      `
-      SELECT
-        vsa.activity,
-        COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
-        COUNT(*)::int AS rows
-      FROM validated_shift_activities vsa
-      WHERE ($1::text IS NULL OR vsa.site = $1)
-        AND ($2::date IS NULL OR vsa.date >= $2::date)
-        AND ($3::date IS NULL OR vsa.date <= $3::date)
-      GROUP BY 1,2
-      ORDER BY rows DESC, activity, sub_activity;
-      `,
-      [site, from, to]
-    );
-
-    return res.json(r.rows);
-  } catch (err: any) {
-    console.error('[powerbi] validated/activity-summary failed', err?.message || err);
-    return res.status(500).json({ error: 'powerbi_validated_activity_summary_failed', detail: ((err as any)?.message || String(err)) });
-  }
-});
-
-
 // helper used in SQL blocks (numeric parsing)
 // NULLIF(regexp_replace(txt,'[^0-9.\-]','','g'),'')::numeric
 
@@ -622,6 +589,34 @@ router.get('/validated/activity-summary', async (req, res) => {
  * GET /api/powerbi/validated/fact-hauling
  * One row per validated hauling activity.
  */
+
+/**
+ * GET /api/powerbi/validated/activity-summary
+ * Debug helper: shows which activity/sub_activity labels exist and their counts.
+ */
+router.get('/validated/activity-summary', async (req, res) => {
+  try {
+    const { site, from, to } = parseCommonFilters(req);
+    const sql = `
+      SELECT
+        COALESCE(NULLIF(TRIM(activity), ''), '(blank)') AS activity,
+        COALESCE(NULLIF(TRIM(sub_activity), ''), '(blank)') AS sub_activity,
+        COUNT(*)::int AS rows
+      FROM validated_shift_activities
+      WHERE ($1::text IS NULL OR site = $1)
+        AND ($2::date IS NULL OR date >= $2::date)
+        AND ($3::date IS NULL OR date <= $3::date)
+      GROUP BY 1,2
+      ORDER BY rows DESC, activity, sub_activity
+    `;
+    const r = await pool.query(sql, [site, from, to]);
+    res.json(r.rows);
+  } catch (err: any) {
+    console.error('[powerbi] validated/activity-summary failed', err?.message || err);
+    res.status(500).json({ error: 'powerbi_validated_activity_summary_failed', detail: ((err as any)?.message || String(err)) });
+  }
+});
+
 router.get('/validated/fact-hauling', async (req, res) => {
   try {
     const { site, from, to } = parseCommonFilters(req);
@@ -631,20 +626,20 @@ router.get('/validated/fact-hauling', async (req, res) => {
         SELECT
           vsa.id AS activity_id,
           vs.id AS validated_shift_id,
-          COALESCE(vs.date, vsa.date)::date AS date,
+          COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(NULLIF(vsa.user_email,''), NULLIF(vs.user_email,''), u.email, '') AS user_email,
-          COALESCE(NULLIF(vsa.user_name,''), NULLIF(vs.user_name,''), NULLIF(vsa.user_email,''), NULLIF(vs.user_email,''), u.name, '') AS user_name,
+          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
           COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
           vsa.payload_json AS payload
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
-        LEFT JOIN users u ON u.id = COALESCE(vs.user_id, vsa.user_id)
+        LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Hauling'
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(COALESCE(vs.site, vsa.site) AS site, vsa.site) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
       ), x AS (
@@ -732,21 +727,21 @@ router.get('/validated/fact-hauling-loads', async (req, res) => {
         SELECT
           vsa.id AS activity_id,
           vs.id AS validated_shift_id,
-          COALESCE(vs.date, vsa.date)::date AS date,
+          COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(NULLIF(vsa.user_email,''), NULLIF(vs.user_email,''), u.email, '') AS user_email,
-          COALESCE(NULLIF(vsa.user_name,''), NULLIF(vs.user_name,''), NULLIF(vsa.user_email,''), NULLIF(vs.user_email,''), u.name, '') AS user_name,
+          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           COALESCE(vsa.sub_activity,'(No Sub Activity)') AS sub_activity,
           vsa.payload_json AS payload,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals,
           vsa.payload_json->'loads' AS loads
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
-        LEFT JOIN users u ON u.id = COALESCE(vs.user_id, vsa.user_id)
+        LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Hauling'
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(COALESCE(vs.site, vsa.site) AS site, vsa.site) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
           AND jsonb_typeof(vsa.payload_json->'loads') = 'array'
@@ -796,20 +791,20 @@ router.get('/validated/fact-loading', async (req, res) => {
         SELECT
           vsa.id AS activity_id,
           vs.id AS validated_shift_id,
-          COALESCE(vs.date, vsa.date)::date AS date,
+          COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(NULLIF(vsa.user_email,''), NULLIF(vs.user_email,''), u.email, '') AS user_email,
-          COALESCE(NULLIF(vsa.user_name,''), NULLIF(vs.user_name,''), NULLIF(vsa.user_email,''), NULLIF(vs.user_email,''), u.name, '') AS user_name,
+          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
           COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
-        LEFT JOIN users u ON u.id = COALESCE(vs.user_id, vsa.user_id)
+        LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Loading'
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(COALESCE(vs.site, vsa.site) AS site, vsa.site) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
       )
@@ -862,21 +857,21 @@ router.get('/validated/fact-dev-face-drilling', async (req, res) => {
         SELECT
           vsa.id AS activity_id,
           vs.id AS validated_shift_id,
-          COALESCE(vs.date, vsa.date)::date AS date,
+          COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(NULLIF(vsa.user_email,''), NULLIF(vs.user_email,''), u.email, '') AS user_email,
-          COALESCE(NULLIF(vsa.user_name,''), NULLIF(vs.user_name,''), NULLIF(vsa.user_email,''), NULLIF(vs.user_email,''), u.name, '') AS user_name,
+          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
           COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
-        LEFT JOIN users u ON u.id = COALESCE(vs.user_id, vsa.user_id)
+        LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Development'
           AND vsa.sub_activity = 'Face Drilling'
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(COALESCE(vs.site, vsa.site) AS site, vsa.site) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
       )
@@ -928,21 +923,21 @@ router.get('/validated/fact-ground-support', async (req, res) => {
         SELECT
           vsa.id AS activity_id,
           vs.id AS validated_shift_id,
-          COALESCE(vs.date, vsa.date)::date AS date,
+          COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(NULLIF(vsa.user_email,''), NULLIF(vs.user_email,''), u.email, '') AS user_email,
-          COALESCE(NULLIF(vsa.user_name,''), NULLIF(vs.user_name,''), NULLIF(vsa.user_email,''), NULLIF(vs.user_email,''), u.name, '') AS user_name,
+          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
           COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
-        LEFT JOIN users u ON u.id = COALESCE(vs.user_id, vsa.user_id)
+        LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Development'
           AND vsa.sub_activity IN ('Ground Support', 'Rehab')
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(COALESCE(vs.site, vsa.site) AS site, vsa.site) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
       )
@@ -996,21 +991,21 @@ router.get('/validated/fact-production-drilling', async (req, res) => {
         SELECT
           vsa.id AS activity_id,
           vs.id AS validated_shift_id,
-          COALESCE(vs.date, vsa.date)::date AS date,
+          COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(NULLIF(vsa.user_email,''), NULLIF(vs.user_email,''), u.email, '') AS user_email,
-          COALESCE(NULLIF(vsa.user_name,''), NULLIF(vs.user_name,''), NULLIF(vsa.user_email,''), NULLIF(vs.user_email,''), u.name, '') AS user_name,
+          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
           COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
-        LEFT JOIN users u ON u.id = COALESCE(vs.user_id, vsa.user_id)
+        LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Production Drilling'
           AND vsa.sub_activity IN ('Stope','Service Hole')
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(COALESCE(vs.site, vsa.site) AS site, vsa.site) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
       )
@@ -1057,20 +1052,20 @@ router.get('/validated/fact-charging', async (req, res) => {
         SELECT
           vsa.id AS activity_id,
           vs.id AS validated_shift_id,
-          COALESCE(vs.date, vsa.date)::date AS date,
+          COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(NULLIF(vsa.user_email,''), NULLIF(vs.user_email,''), u.email, '') AS user_email,
-          COALESCE(NULLIF(vsa.user_name,''), NULLIF(vs.user_name,''), NULLIF(vsa.user_email,''), NULLIF(vs.user_email,''), u.name, '') AS user_name,
+          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
           COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
-        LEFT JOIN users u ON u.id = COALESCE(vs.user_id, vsa.user_id)
+        LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Charging'
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(COALESCE(vs.site, vsa.site) AS site, vsa.site) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
       )
@@ -1119,20 +1114,20 @@ router.get('/validated/fact-hoisting', async (req, res) => {
         SELECT
           vsa.id AS activity_id,
           vs.id AS validated_shift_id,
-          COALESCE(vs.date, vsa.date)::date AS date,
+          COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(NULLIF(vsa.user_email,''), NULLIF(vs.user_email,''), u.email, '') AS user_email,
-          COALESCE(NULLIF(vsa.user_name,''), NULLIF(vs.user_name,''), NULLIF(vsa.user_email,''), NULLIF(vs.user_email,''), u.name, '') AS user_name,
+          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
           COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
-        LEFT JOIN users u ON u.id = COALESCE(vs.user_id, vsa.user_id)
+        LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Hoisting'
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(COALESCE(vs.site, vsa.site) AS site, vsa.site) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
       )

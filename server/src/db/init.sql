@@ -351,6 +351,60 @@ CREATE TABLE IF NOT EXISTS validated_shift_activities (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+
+-- --- Power BI scalability upgrades (idempotent) ---
+-- Add relational linkage between validated_shift_activities and validated_shifts
+ALTER TABLE IF EXISTS validated_shifts
+  ADD COLUMN IF NOT EXISTS shift_key TEXT;
+
+ALTER TABLE IF EXISTS validated_shift_activities
+  ADD COLUMN IF NOT EXISTS validated_shift_id INTEGER;
+
+ALTER TABLE IF EXISTS validated_shift_activities
+  ADD COLUMN IF NOT EXISTS shift_key TEXT;
+
+ALTER TABLE IF EXISTS validated_shift_activities
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
+-- Helpful indexes
+CREATE INDEX IF NOT EXISTS idx_validated_shifts_shift_key ON validated_shifts(shift_key);
+CREATE INDEX IF NOT EXISTS idx_validated_acts_validated_shift_id ON validated_shift_activities(validated_shift_id);
+CREATE INDEX IF NOT EXISTS idx_validated_acts_shift_key ON validated_shift_activities(shift_key);
+
+-- Best-effort backfill keys (safe if data exists; if not, no harm)
+UPDATE validated_shifts
+SET shift_key = site || '|' || to_char(date,'YYYY-MM-DD') || '|' || dn || '|' || COALESCE(user_id::text, user_email, '')
+WHERE shift_key IS NULL OR shift_key = '';
+
+UPDATE validated_shift_activities vsa
+SET shift_key = COALESCE(vsa.shift_key, vs.shift_key, vsa.site || '|' || to_char(vsa.date,'YYYY-MM-DD') || '|' || vsa.dn || '|' || COALESCE(vsa.user_id::text, vsa.user_email, '')),
+    validated_shift_id = COALESCE(vsa.validated_shift_id, vs.id)
+FROM validated_shifts vs
+WHERE (vsa.validated_shift_id IS NULL OR vsa.shift_key IS NULL OR vsa.shift_key = '')
+  AND vsa.site = vs.site
+  AND vsa.date = vs.date
+  AND vsa.dn = vs.dn
+  AND (
+    (vsa.user_id IS NOT NULL AND vs.user_id = vsa.user_id)
+    OR (COALESCE(vsa.user_email,'') <> '' AND COALESCE(vs.user_email,'') = COALESCE(vsa.user_email,''))
+  );
+
+-- Foreign key (NOT VALID first to avoid deploy-time lock). Validate later if desired.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_validated_shift_activities_shift'
+  ) THEN
+    ALTER TABLE validated_shift_activities
+      ADD CONSTRAINT fk_validated_shift_activities_shift
+      FOREIGN KEY (validated_shift_id)
+      REFERENCES validated_shifts(id)
+      ON DELETE CASCADE
+      NOT VALID;
+  END IF;
+END $$;
+
+
 CREATE INDEX IF NOT EXISTS idx_validated_acts_site_date ON validated_shift_activities(site, date);
 CREATE INDEX IF NOT EXISTS idx_validated_acts_site_date_dn_email ON validated_shift_activities(site, date, dn, COALESCE(user_email,''));
 
