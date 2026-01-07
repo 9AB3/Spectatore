@@ -369,13 +369,13 @@ export default function Landing() {
                       <div className="text-xs font-semibold text-slate-800">Power BI examples (month view)</div>
                       <div className="mt-3 grid grid-cols-1 gap-3">
                         <img
-                          src="/powerbi-ore-mtd.png"
+                          src="/oremtd.png"
                           alt="Power BI monthly chart example"
                           className="w-full rounded-xl border border-slate-200"
                           loading="lazy"
                         />
                         <img
-                          src="/powerbi-ore-mtd.png"
+                          src="/devmtd.png"
                           alt="Power BI monthly chart example (alternate)"
                           className="w-full rounded-xl border border-slate-200"
                           loading="lazy"
