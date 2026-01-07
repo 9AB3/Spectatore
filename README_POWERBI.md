@@ -157,3 +157,9 @@ curl "https://spectatore.com/api/powerbi/validated/fact-hauling?token=$POWERBI_T
 - The **FACT** endpoints are the easiest to model in Power BI (clean columns).
 - The older “long” endpoints (`*-totals`, `*-payloads`, `validated/activity-metrics`) are still available when you want maximum flexibility without column definitions.
 - For large datasets, consider creating materialized views or adding pagination.
+
+
+## Backfilling
+
+- Validated fact endpoint:
+  - `/api/powerbi/validated/fact-backfilling?token=...`

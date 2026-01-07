@@ -29,6 +29,9 @@ export default function Landing() {
   type DemoCard = 'you' | 'network' | 'crew';
   const [demoCard, setDemoCard] = useState<DemoCard>('you');
 
+  type LandingTab = 'operators' | 'sites';
+  const [activeTab, setActiveTab] = useState<LandingTab>('operators');
+
   useEffect(() => {
     const order: DemoCard[] = ['you', 'network', 'crew'];
     const ms = 4500;
@@ -108,219 +111,284 @@ export default function Landing() {
             </div>
 
             <h1 className="mt-6 text-4xl md:text-5xl font-black tracking-tight">
-              Operator-owned performance data — <span className="text-amber-700">clean and comparable</span>.
+              Operator-owned performance data — <span className="text-amber-700">back yourself with numbers</span>.
             </h1>
 
-            <p className="mt-4 text-base md:text-lg text-slate-700 leading-relaxed">
-              Spectatore is the operator-first shift capture app built for underground crews. Operators stay in control of their own
-              data—on their own phone—so you can see trends over time (not just raw entries).
-              <span className="block mt-3">
-                Spectatore does exactly two things: <strong>individual operator tracking</strong>, and <strong>clean integration</strong> into site data
-                management (Power BI-ready).
-              </span>
-              <span className="block mt-3">
-                It deliberately does <strong>not</strong> replace TUMs, shift planning, or safety cards (Take 5s, etc.) — those are better handled
-                elsewhere.
-              </span>
-            </p>
+            <div className="mt-4 text-base md:text-lg text-slate-700 leading-relaxed space-y-3">
+              <p>
+                Track your shift performance with <strong>Spectatore</strong> — a web app that captures your shift data on your device.
+              </p>
+              <p>Chase your best shift, compare your progress and compete with your crew.</p>
+              <p className="font-semibold text-slate-900">
+                <span className="text-amber-700">Get inducted now</span> and become a certified meter eater!
+              </p>
+              <p className="text-slate-700">
+                Speak to us today if you want to learn more about our <strong>clean integration</strong> for site data management (Power BI-ready).
+                With Spectatore, the focus is on the key mining physicals and getting them right with a simple validation process.
+              </p>
+              <p className="text-slate-600">
+                Operator timelines, pre-starts, Take 5&apos;s and shift planning — that&apos;s better handled elsewhere.
+              </p>
+            </div>
           </div>
 
           {/* Visual card */}
           <div className="relative">
             <div className="absolute -inset-4 bg-amber-300/10 blur-3xl rounded-full" />
             <div className="relative rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold text-slate-800">Example shift snapshot</div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="inline-flex items-center rounded-2xl border border-slate-200 bg-slate-50 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('operators')}
+                    className={
+                      'px-3 py-2 rounded-xl text-sm font-semibold transition ' +
+                      (activeTab === 'operators'
+                        ? 'bg-slate-900 text-white'
+                        : 'text-slate-700 hover:bg-white')
+                    }
+                  >
+                    For Operators
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('sites')}
+                    className={
+                      'px-3 py-2 rounded-xl text-sm font-semibold transition ' +
+                      (activeTab === 'sites' ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-white')
+                    }
+                  >
+                    For Sites
+                  </button>
+                </div>
+
                 <div className="text-xs text-slate-500">Daily • MTD • YTD</div>
               </div>
 
               <div className="mt-4">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  {demoCard === 'you' ? (
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <div className="text-sm font-semibold">You vs You</div>
-                        <div className="text-xs text-slate-600">Personal trends</div>
-                      </div>
+                {activeTab === 'operators' ? (
+                  <>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      {demoCard === 'you' ? (
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm font-semibold">You vs You</div>
+                            <div className="text-xs text-slate-600">Personal trends</div>
+                          </div>
 
-                      <div className="mt-3 grid grid-cols-3 gap-3 text-center">
-                        <div className="rounded-xl border border-slate-200 bg-white p-3">
-                          <div className="text-xs text-slate-600">GS Drillm</div>
-                          <div className="mt-1 text-lg font-black">184</div>
-                          <div className="text-xs text-emerald-700">+12% MTD</div>
-                        </div>
-                        <div className="rounded-xl border border-slate-200 bg-white p-3">
-                          <div className="text-xs text-slate-600">Tonnes Hauled</div>
-                          <div className="mt-1 text-lg font-black">1,240</div>
-                          <div className="text-xs text-slate-600">Rolling 30d</div>
-                        </div>
-                        <div className="rounded-xl border border-slate-200 bg-white p-3">
-                          <div className="text-xs text-slate-600">TKMs</div>
-                          <div className="mt-1 text-lg font-black">96</div>
-                          <div className="text-xs text-slate-600">Daily / MTD / YTD</div>
-                        </div>
-                      </div>
+                          <div className="mt-3 grid grid-cols-3 gap-3 text-center">
+                            <div className="rounded-xl border border-slate-200 bg-white p-3">
+                              <div className="text-xs text-slate-600">GS Drillm</div>
+                              <div className="mt-1 text-lg font-black">184</div>
+                              <div className="text-xs text-emerald-700">+12% MTD</div>
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-white p-3">
+                              <div className="text-xs text-slate-600">Tonnes Hauled</div>
+                              <div className="mt-1 text-lg font-black">1,240</div>
+                              <div className="text-xs text-slate-600">Rolling 30d</div>
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-white p-3">
+                              <div className="text-xs text-slate-600">TKMs</div>
+                              <div className="mt-1 text-lg font-black">96</div>
+                              <div className="text-xs text-slate-600">Daily / MTD / YTD</div>
+                            </div>
+                          </div>
 
-                      <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
-                        <div className="flex items-center justify-between">
-                          <div className="text-xs font-semibold text-slate-800">Trend preview</div>
-                          <div className="text-[11px] text-slate-600">Tap metric → chart</div>
-                        </div>
+                          <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                            <div className="flex items-center justify-between">
+                              <div className="text-xs font-semibold text-slate-800">Trend preview</div>
+                              <div className="text-[11px] text-slate-600">Tap metric → chart</div>
+                            </div>
 
-                        <div className="mt-2 grid grid-cols-10 gap-1 items-end h-14">
-                          {[18,26,22,30,28,40,38,46,42,52].map((h, i) => (
-                            <div
-                              key={i}
-                              className="w-full rounded-md bg-amber-300/35 border border-amber-300/30"
-                              style={{ height: `${h}%` }}
-                            />
-                          ))}
-                        </div>
+                            <div className="mt-2 grid grid-cols-10 gap-1 items-end h-14">
+                              {[18, 26, 22, 30, 28, 40, 38, 46, 42, 52].map((h, i) => (
+                                <div
+                                  key={i}
+                                  className="w-full rounded-md bg-amber-300/35 border border-amber-300/30"
+                                  style={{ height: `${h}%` }}
+                                />
+                              ))}
+                            </div>
 
-                        <div className="mt-2 text-[11px] text-slate-600">
-                          PBs, rolling averages, date filters, and per-metric drilldowns.
+                            <div className="mt-2 text-[11px] text-slate-600">
+                              PBs, rolling averages, date filters, and per-metric drilldowns.
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  ) : demoCard === 'network' ? (
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <div className="text-sm font-semibold">You vs Network</div>
-                        <div className="text-xs text-slate-600">Optional sharing</div>
-                      </div>
+                      ) : demoCard === 'network' ? (
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm font-semibold">You vs Network</div>
+                            <div className="text-xs text-slate-600">Optional sharing</div>
+                          </div>
 
-                      <div className="mt-3 grid grid-cols-3 gap-3 text-center">
-                        <div className="rounded-xl border border-slate-200 bg-white p-3">
-                          <div className="text-xs text-slate-600">Rank</div>
-                          <div className="mt-1 text-lg font-black">#3</div>
-                          <div className="text-xs text-slate-600">of 18</div>
-                        </div>
-                        <div className="rounded-xl border border-slate-200 bg-white p-3">
-                          <div className="text-xs text-slate-600">Best metric</div>
-                          <div className="mt-1 text-lg font-black">GS</div>
-                          <div className="text-xs text-emerald-700">Top 10%</div>
-                        </div>
-                        <div className="rounded-xl border border-slate-200 bg-white p-3">
-                          <div className="text-xs text-slate-600">Delta</div>
-                          <div className="mt-1 text-lg font-black">+8%</div>
-                          <div className="text-xs text-slate-600">vs avg</div>
-                        </div>
-                      </div>
+                          <div className="mt-3 grid grid-cols-3 gap-3 text-center">
+                            <div className="rounded-xl border border-slate-200 bg-white p-3">
+                              <div className="text-xs text-slate-600">Rank</div>
+                              <div className="mt-1 text-lg font-black">#3</div>
+                              <div className="text-xs text-slate-600">of 18</div>
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-white p-3">
+                              <div className="text-xs text-slate-600">Best metric</div>
+                              <div className="mt-1 text-lg font-black">GS</div>
+                              <div className="text-xs text-emerald-700">Top 10%</div>
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-white p-3">
+                              <div className="text-xs text-slate-600">Delta</div>
+                              <div className="mt-1 text-lg font-black">+8%</div>
+                              <div className="text-xs text-slate-600">vs avg</div>
+                            </div>
+                          </div>
 
-                      <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
-                        <div className="flex items-center justify-between">
-                          <div className="text-xs font-semibold text-slate-800">Leaderboard snapshot</div>
-                          <div className="text-[11px] text-slate-600">Private by default</div>
-                        </div>
+                          <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                            <div className="flex items-center justify-between">
+                              <div className="text-xs font-semibold text-slate-800">Leaderboard snapshot</div>
+                              <div className="text-[11px] text-slate-600">Private by default</div>
+                            </div>
 
-                        <div className="mt-2 space-y-2">
-                          {[
-                            ['1', 'M. Smith', '204 GS'],
-                            ['2', 'J. Brown', '196 GS'],
-                            ['3', 'You', '184 GS'],
-                            ['4', 'A. Lee', '179 GS'],
-                          ].map(([rank, who, val]) => (
-                            <div key={rank} className="flex items-center justify-between text-xs">
-                              <div className="flex items-center gap-2">
-                                <div className="w-5 text-slate-600">{rank}</div>
-                                <div className={who === 'You' ? 'font-semibold text-slate-900' : 'text-slate-700'}>{who}</div>
+                            <div className="mt-2 space-y-2">
+                              {[
+                                ['1', 'M. Smith', '204 GS'],
+                                ['2', 'J. Brown', '196 GS'],
+                                ['3', 'You', '184 GS'],
+                                ['4', 'A. Lee', '179 GS'],
+                              ].map(([rank, who, val]) => (
+                                <div key={rank} className="flex items-center justify-between text-xs">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-5 text-slate-600">{rank}</div>
+                                    <div className={who === 'You' ? 'font-semibold text-slate-900' : 'text-slate-700'}>{who}</div>
+                                  </div>
+                                  <div className={who === 'You' ? 'font-semibold text-amber-700' : 'text-slate-600'}>{val}</div>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="mt-2 text-[11px] text-slate-600">Compare by role, site, or your selected network.</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm font-semibold">You vs Crew member</div>
+                            <div className="text-xs text-slate-600">1:1 comparison</div>
+                          </div>
+
+                          <div className="mt-3 grid grid-cols-2 gap-3">
+                            <div className="rounded-xl border border-slate-200 bg-white p-3">
+                              <div className="text-xs text-slate-600">Metric</div>
+                              <div className="mt-1 text-sm font-semibold text-slate-900">Tonnes hauled</div>
+                              <div className="mt-3 space-y-2 text-xs">
+                                <div className="flex items-center justify-between">
+                                  <div className="text-slate-700">You</div>
+                                  <div className="font-semibold text-amber-700">1,240</div>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <div className="text-slate-700">Crew mate</div>
+                                  <div className="font-semibold text-slate-700">1,110</div>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <div className="text-slate-700">Delta</div>
+                                  <div className="font-semibold text-emerald-700">+12%</div>
+                                </div>
                               </div>
-                              <div className={who === 'You' ? 'font-semibold text-amber-700' : 'text-slate-600'}>{val}</div>
+                              <div className="mt-2 text-[11px] text-slate-600">Swap metrics instantly.</div>
                             </div>
+
+                            <div className="rounded-xl border border-slate-200 bg-white p-3">
+                              <div className="text-xs text-slate-600">Timeframe</div>
+                              <div className="mt-1 text-sm font-semibold text-slate-900">Last 30 days</div>
+                              <div className="mt-3 space-y-2 text-xs">
+                                <div className="flex items-center justify-between">
+                                  <div className="text-slate-700">Best day</div>
+                                  <div className="font-semibold text-slate-900">Fri</div>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <div className="text-slate-700">Consistency</div>
+                                  <div className="font-semibold text-emerald-700">High</div>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <div className="text-slate-700">PB flags</div>
+                                  <div className="font-semibold text-slate-900">On</div>
+                                </div>
+                              </div>
+                              <div className="mt-2 text-[11px] text-slate-600">Change crew mate with one tap.</div>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 text-[11px] text-slate-600">Sharing is optional — you control what’s visible and to who.</div>
+                        </div>
+                      )}
+
+                      <div className="mt-3 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          {[
+                            ['you', 'You vs You'],
+                            ['network', 'You vs Network'],
+                            ['crew', 'You vs Crew member'],
+                          ].map(([key, label]) => (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={() => setDemoCard(key as any)}
+                              className={
+                                'px-2 py-1 rounded-full text-[11px] border ' +
+                                (demoCard === (key as any)
+                                  ? 'border-amber-300/50 bg-amber-300/20 text-slate-900'
+                                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50')
+                              }
+                            >
+                              {label}
+                            </button>
                           ))}
                         </div>
 
-                        <div className="mt-2 text-[11px] text-slate-600">
-                          Compare by role, site, or your selected network.
-                        </div>
+                        <div className="text-[11px] text-slate-600">Auto-rotates</div>
                       </div>
                     </div>
-                  ) : (
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <div className="text-sm font-semibold">You vs Crew member</div>
-                        <div className="text-xs text-slate-600">1:1 comparison</div>
+
+                    <div className="mt-4 flex items-center justify-between text-xs text-slate-600">
+                      <div>Fast entry • Clean totals • Consistent metrics</div>
+                      <div className="px-2 py-1 rounded-full border border-slate-200">PWA</div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="text-sm font-semibold text-slate-900">Data process flow</div>
+                      <div className="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-2 text-sm">
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center font-semibold">Operator form input</div>
+                        <div className="text-slate-500 text-center">→</div>
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center font-semibold">Daily site validation process</div>
+                        <div className="text-slate-500 text-center">→</div>
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center font-semibold">End of month reconciliation</div>
                       </div>
+                      <div className="mt-3 text-[11px] text-slate-600">Clean inputs → simple validation → Power BI-ready reporting.</div>
+                    </div>
 
-                      <div className="mt-3 grid grid-cols-2 gap-3">
-                        <div className="rounded-xl border border-slate-200 bg-white p-3">
-                          <div className="text-xs text-slate-600">Metric</div>
-                          <div className="mt-1 text-sm font-semibold text-slate-900">Tonnes hauled</div>
-                          <div className="mt-3 space-y-2 text-xs">
-                            <div className="flex items-center justify-between">
-                              <div className="text-slate-700">You</div>
-                              <div className="font-semibold text-amber-700">1,240</div>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <div className="text-slate-700">Crew mate</div>
-                              <div className="font-semibold text-slate-700">1,110</div>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <div className="text-slate-700">Delta</div>
-                              <div className="font-semibold text-emerald-700">+12%</div>
-                            </div>
-                          </div>
-                          <div className="mt-2 text-[11px] text-slate-600">Swap metrics instantly.</div>
-                        </div>
-
-                        <div className="rounded-xl border border-slate-200 bg-white p-3">
-                          <div className="text-xs text-slate-600">Timeframe</div>
-                          <div className="mt-1 text-sm font-semibold text-slate-900">Last 30 days</div>
-                          <div className="mt-3 space-y-2 text-xs">
-                            <div className="flex items-center justify-between">
-                              <div className="text-slate-700">Best day</div>
-                              <div className="font-semibold text-slate-900">Fri</div>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <div className="text-slate-700">Consistency</div>
-                              <div className="font-semibold text-emerald-700">High</div>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <div className="text-slate-700">PB flags</div>
-                              <div className="font-semibold text-slate-900">On</div>
-                            </div>
-                          </div>
-                          <div className="mt-2 text-[11px] text-slate-600">Change crew mate with one tap.</div>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 text-[11px] text-slate-600">
-                        Sharing is optional — you control what’s visible and to who.
+                    <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                      <div className="text-xs font-semibold text-slate-800">Power BI examples (month view)</div>
+                      <div className="mt-3 grid grid-cols-1 gap-3">
+                        <img
+                          src="/powerbi-ore-mtd.png"
+                          alt="Power BI monthly chart example"
+                          className="w-full rounded-xl border border-slate-200"
+                          loading="lazy"
+                        />
+                        <img
+                          src="/powerbi-ore-mtd.png"
+                          alt="Power BI monthly chart example (alternate)"
+                          className="w-full rounded-xl border border-slate-200"
+                          loading="lazy"
+                        />
                       </div>
                     </div>
-                  )}
-                </div>
 
-                <div className="mt-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {[
-                      ['you', 'You vs You'],
-                      ['network', 'You vs Network'],
-                      ['crew', 'You vs Crew member'],
-                    ].map(([key, label]) => (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setDemoCard(key as any)}
-                        className={
-                          'px-2 py-1 rounded-full text-[11px] border ' +
-                          (demoCard === (key as any)
-                            ? 'border-amber-300/50 bg-amber-300/20 text-slate-900'
-                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50')
-                        }
-                      >
-                        {label}
-                      </button>
-                    ))}
+                    <div className="flex items-center justify-between text-xs text-slate-600">
+                      <div>Validated daily → reconciled monthly</div>
+                      <div className="px-2 py-1 rounded-full border border-slate-200">Power BI-ready</div>
+                    </div>
                   </div>
-
-                  <div className="text-[11px] text-slate-600">Auto-rotates</div>
-                </div>
-              </div>
-
-              <div className="mt-4 flex items-center justify-between text-xs text-slate-600">
-                <div>Fast entry • Clean totals • Consistent metrics</div>
-                <div className="px-2 py-1 rounded-full border border-slate-200">PWA</div>
+                )}
               </div>
             </div>
           </div>
