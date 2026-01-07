@@ -2187,7 +2187,9 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                                 const inList = optsEq.includes(String(cur || ''));
                                                                 return (
                                                                   <select
-                                                                    className={`input w-full ${(isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))) ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
+                                                                    // NOTE: In this Backfilling (Volume/Buckets) branch, `c` is narrowed to
+                                                                    // "Volume" | "Buckets"; keep readonly styling based on `isReadonly` only.
+                                                                    className={`input w-full ${isReadonly ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
                                                                     title={`Validated: ${String(curVal ?? '')} | Original: ${String(
                                                                       (hasLive ? liveVal : baselineVal) ?? '',
                                                                     )}`}
@@ -2226,12 +2228,12 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                                 const inList = optsLoc.includes(String(cur || ''));
                                                                 return (
                                                                   <select
-                                                                    className={`input w-full ${(isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))) ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
+                                                                    className={`input w-full ${isReadonly ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
                                                                     title={`Validated: ${String(curVal ?? '')} | Original: ${String(
                                                                       (hasLive ? liveVal : baselineVal) ?? '',
                                                                     )}`}
                                                                     value={String(cur || '')}
-                disabled={isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))}
+                disabled={isReadonly || (actName === "Production Drilling" && (String(c) === "Metres Drilled" || String(c) === "Cleanouts Drilled" || String(c) === "Redrills"))}
                       onChange={(e) => {
                                                                       const v = e.target.value;
                                                                       setEditedActs((prev) => ({
@@ -2272,10 +2274,10 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                                   const inList = opts.includes(curStr);
                                                                   return (
                                                                     <select
-                                                                      className={`input w-full ${(isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))) ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
+                                                                      className={`input w-full `}
                                                                       title={`Shift: ${String(hasLive ? liveVal : baselineVal)} | Validated: ${String(cur ?? '')}`}
                                                                       value={curStr}
-                                                                      disabled={isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))}
+                                                                      disabled={isReadonly || (actName === "Production Drilling" && (String(c) === "Metres Drilled" || String(c) === "Cleanouts Drilled" || String(c) === "Redrills"))}
                                                                       onChange={(e) => {
                                                                         const v = e.target.value;
                                                                         setEditedActs((prev) => ({
@@ -2304,12 +2306,12 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                                   curStr === 'ore' || curStr === 'waste' ? curStr : curStr ? curStr : '';
                                                                 return (
                                                                   <select
-                                                                    className={`input w-full ${(isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))) ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
+                                                                    className={`input w-full ${isReadonly ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
                                                                     title={`Shift: ${String(hasLive ? liveVal : baselineVal)} | Validated: ${String(
                                                                       cur ?? '',
                                                                     )}`}
                                                                     value={normalized}
-                disabled={isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))}
+                disabled={isReadonly || (actName === "Production Drilling" && (String(c) === "Metres Drilled" || String(c) === "Cleanouts Drilled" || String(c) === "Redrills"))}
                       onChange={(e) => {
                                                                       const v = e.target.value;
                                                                       setEditedActs((prev) => ({
@@ -2363,7 +2365,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                                     min={min}
                                                                     max={max}
                                                                     step={1}
-                                                                    className={`input w-full ${(isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))) ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
+                                                                    className={`input w-full `}
                                                                     title={`Validated: ${String(curVal ?? '')} | Original: ${String((hasLive ? liveVal : baselineVal) ?? '')}`}
                                                                     value={String(cur ?? '')}
                                                                     disabled={isReadonly}
@@ -2384,12 +2386,12 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
 
                                                               return (
                                                                 <input
-                                                                  className={`input w-full ${(isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))) ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
+                                                                  className={`input w-full `}
                                                                   title={`Validated: ${String(curVal ?? '')} | Original: ${String(
                                                                     (hasLive ? liveVal : baselineVal) ?? '',
                                                                   )}`}
                                                                   value={String(cur ?? '')}
-                disabled={isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))}
+                disabled={isReadonly || (actName === "Production Drilling" && (String(c) === "Metres Drilled" || String(c) === "Cleanouts Drilled" || String(c) === "Redrills"))}
                       onChange={(e) => {
                                                                     const v = e.target.value;
                                                                     setEditedActs((prev) => ({
