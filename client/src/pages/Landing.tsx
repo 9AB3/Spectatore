@@ -401,7 +401,7 @@ export default function Landing() {
           <div className="grid grid-cols-1 lg:grid-cols-2">
             <div className="p-8">
               <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs text-slate-700">
-                Book a demo
+                Contact Us
               </div>
               <div className="mt-3 text-3xl font-black tracking-tight">See Spectatore in action</div>
               <div className="mt-3 text-sm text-slate-700 leading-relaxed">
