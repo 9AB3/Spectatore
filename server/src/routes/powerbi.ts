@@ -1026,9 +1026,9 @@ router.get('/validated/fact-production-drilling', async (req, res) => {
         NULLIF(TRIM(vals->>'Equipment'), '') AS equipment,
         NULLIF(TRIM(vals->>'Location'), '') AS location,
 
-        NULLIF(regexp_replace(COALESCE(vals->>'Metres Drilled',''), '[^0-9.\-]', '', 'g'), '')::double precision AS metres_drilled_m,
-        NULLIF(regexp_replace(COALESCE(vals->>'Cleanouts Drilled',''), '[^0-9.\-]', '', 'g'), '')::double precision AS cleanouts_drilled_m,
-        NULLIF(regexp_replace(COALESCE(vals->>'Redrills',''), '[^0-9.\-]', '', 'g'), '')::double precision AS redrills_m
+        NULLIF(regexp_replace(COALESCE(vals->>'Metres Drilled',''), '[^0-9.\\-]', '', 'g'), '')::double precision AS metres_drilled_m,
+        NULLIF(regexp_replace(COALESCE(vals->>'Cleanouts Drilled',''), '[^0-9.\\-]', '', 'g'), '')::double precision AS cleanouts_drilled_m,
+        NULLIF(regexp_replace(COALESCE(vals->>'Redrills',''), '[^0-9.\\-]', '', 'g'), '')::double precision AS redrills_m
       FROM base
       ORDER BY date, dn, user_email, activity_id;
     `;
@@ -1037,8 +1037,12 @@ router.get('/validated/fact-production-drilling', async (req, res) => {
     res.json(r.rows);
   } catch (err: any) {
     console.error('[powerbi] validated/fact-production-drilling failed', err?.message || err);
-    res.status(500).json({ error: 'powerbi_validated_fact_production_drilling_failed', detail: ((err as any)?.message || String(err)) });
-
+    res.status(500).json({
+      error: 'powerbi_validated_fact_production_drilling_failed',
+      detail: (err as any)?.message || String(err),
+    });
+  }
+});
 
 /**
  * GET /api/powerbi/validated/fact-production-drilling-holes
@@ -1076,6 +1080,7 @@ router.get('/validated/fact-production-drilling-holes', async (req, res) => {
           AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
+          AND jsonb_typeof(vsa.payload_json->'holes') IN ('object','array')
       )
       SELECT
         b.activity_id,
@@ -1100,19 +1105,29 @@ router.get('/validated/fact-production-drilling-holes', async (req, res) => {
         NULLIF(TRIM(x.hole->>'diameter'), '') AS diameter,
         NULLIF(TRIM(x.hole->>'diameter_other'), '') AS diameter_other,
 
-        NULLIF(regexp_replace(COALESCE(x.hole->>'length_m',''), '[^0-9.\-]', '', 'g'), '')::double precision AS hole_length_m
+        NULLIF(regexp_replace(COALESCE(x.hole->>'length_m',''), '[^0-9.\\-]', '', 'g'), '')::double precision AS hole_length_m
       FROM base b
-      CROSS JOIN LATERAL jsonb_each(b.holes_json) AS bh(bucket, holes_arr)
-      CROSS JOIN LATERAL jsonb_array_elements(bh.holes_arr) WITH ORDINALITY AS x(hole, ord)
+      CROSS JOIN LATERAL jsonb_each(
+        CASE
+          WHEN jsonb_typeof(b.holes_json) = 'object' THEN b.holes_json
+          ELSE '{}'::jsonb
+        END
+      ) AS bh(bucket, holes_arr)
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE
+          WHEN jsonb_typeof(bh.holes_arr) = 'array' THEN bh.holes_arr
+          ELSE '[]'::jsonb
+        END
+      ) WITH ORDINALITY AS x(hole, ord)
       ORDER BY b.date, b.dn, b.user_email, b.activity_id, bh.bucket, hole_index;
     `;
 
     const r = await pool.query(sql, [site, from, to]);
     res.json(r.rows);
-    } catch (err: any) {
-    console.error('[powerbi] validated/fact-production-drilling failed', err?.message || err);
+  } catch (err: any) {
+    console.error('[powerbi] validated/fact-production-drilling-holes failed', err?.message || err);
     res.status(500).json({
-      error: 'powerbi_validated_fact_production_drilling_failed',
+      error: 'powerbi_validated_fact_production_drilling_holes_failed',
       detail: (err as any)?.message || String(err),
     });
   }
