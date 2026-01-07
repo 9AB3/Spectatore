@@ -1107,6 +1107,64 @@ router.get('/validated/fact-charging', async (req, res) => {
  * GET /api/powerbi/validated/fact-firing
  * One row per validated Firing activity (dev + prod).
  */
+
+router.get('/validated/fact-backfilling', async (req, res) => {
+  try {
+    const { site, from, to } = parseCommonFilters(req);
+
+    const sql = `
+      WITH base AS (
+        SELECT
+          vsa.id AS activity_id,
+          vs.id AS validated_shift_id,
+          COALESCE(vs.date::date, vsa.date) AS date,
+          COALESCE(vs.dn, vsa.dn) AS dn,
+          COALESCE(vs.site, vsa.site) AS site,
+          COALESCE(vs.user_id, vsa.user_id) AS user_id,
+          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
+          vsa.activity,
+          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
+        FROM validated_shift_activities vsa
+        LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN users u ON u.id = vs.user_id
+        WHERE vsa.activity = 'Backfilling'
+          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
+          AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
+      )
+      SELECT
+        activity_id,
+        validated_shift_id,
+        date,
+        dn,
+        site,
+        user_id,
+        user_email,
+        user_name,
+        activity,
+        sub_activity,
+
+        NULLIF(TRIM(vals->>'To'), '') AS "to",
+        NULLIF(TRIM(vals->>'Material'), '') AS material,
+        NULLIF(TRIM(vals->>'Equipment'), '') AS equipment,
+
+        NULLIF(regexp_replace(COALESCE(vals->>'Volume',''), '[^0-9.\-]', '', 'g'), '')::double precision AS volume_m3,
+        NULLIF(regexp_replace(COALESCE(vals->>'Buckets',''), '[^0-9.\-]', '', 'g'), '')::double precision AS buckets
+      FROM base
+      ORDER BY date DESC, activity_id DESC
+    `;
+
+    const { rows } = await pool.query(sql, [site, from, to]);
+    res.json(rows);
+  } catch (err: any) {
+    console.error('[powerbi] validated/fact-backfilling failed', err?.message || err);
+    res.status(500).json({ error: 'powerbi_validated_fact_backfilling_failed' });
+  }
+});
+
+
 router.get('/validated/fact-firing', async (req, res) => {
   try {
     const { site, from, to } = parseCommonFilters(req);
