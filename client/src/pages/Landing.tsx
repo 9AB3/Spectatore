@@ -463,7 +463,7 @@ export default function Landing() {
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     className="w-full min-h-[110px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-200"
-                    placeholder="What do you want to track? (e.g. drill metres, tonnes, loads, TKMs)"
+                    placeholder="Leave your message here and we'll be in touch."
                   />
                 </label>
 
