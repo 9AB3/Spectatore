@@ -405,7 +405,7 @@ export default function Landing() {
               </div>
               <div className="mt-3 text-3xl font-black tracking-tight">See Spectatore in action</div>
               <div className="mt-3 text-sm text-slate-700 leading-relaxed">
-                Tell us your site and the key metrics you care about — we’ll reply with a short demo and the cleanest rollout approach.
+                
               </div>
 
               <div className="mt-6 text-xs text-slate-600">
