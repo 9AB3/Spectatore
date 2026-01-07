@@ -1109,15 +1109,15 @@ router.get('/validated/fact-production-drilling-holes', async (req, res) => {
 
     const r = await pool.query(sql, [site, from, to]);
     res.json(r.rows);
-  } catch (err: any) {
-    console.error('[powerbi] validated/fact-production-drilling-holes failed', err?.message || err);
-    res.status(500).json({ error: 'powerbi_validated_fact_production_drilling_holes_failed', detail: ((err as any)?.message || String(err)) });
+    } catch (err: any) {
+    console.error('[powerbi] validated/fact-production-drilling failed', err?.message || err);
+    res.status(500).json({
+      error: 'powerbi_validated_fact_production_drilling_failed',
+      detail: (err as any)?.message || String(err),
+    });
   }
 });
 
-
-  }
-});
 
 /**
  * GET /api/powerbi/validated/fact-charging
