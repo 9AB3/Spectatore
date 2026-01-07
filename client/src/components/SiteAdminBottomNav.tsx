@@ -97,6 +97,7 @@ export default function SiteAdminBottomNav() {
   const [canManageMembers, setCanManageMembers] = useState(false);
   const [canManageSites, setCanManageSites] = useState(false);
   const [canUseTools, setCanUseTools] = useState(false);
+  const [canReconcile, setCanReconcile] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -106,13 +107,31 @@ export default function SiteAdminBottomNav() {
         setCanUseTools(!!me?.ok);
         setCanManageMembers(!!me?.is_super || !!me?.can_manage);
         setCanManageSites(!!me?.is_super);
+        // Reconciliation is available to validators + admins (any SiteAdmin-authorized user)
+        setCanReconcile(!!me?.ok);
       } catch {
         setCanManageMembers(false);
         setCanManageSites(false);
         setCanUseTools(false);
+        setCanReconcile(false);
       }
     })();
   }, []);
+
+  function IconCalc(props: React.SVGProps<SVGSVGElement>) {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
+        <path d="M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+        <path d="M8 7h8" />
+        <path d="M8 11h2" />
+        <path d="M12 11h2" />
+        <path d="M16 11h0" />
+        <path d="M8 15h2" />
+        <path d="M12 15h2" />
+        <path d="M8 19h8" />
+      </svg>
+    );
+  }
 
 
   return (
@@ -127,7 +146,7 @@ export default function SiteAdminBottomNav() {
       <div
         className={cx('max-w-2xl mx-auto px-2 py-1 grid text-[var(--text)]')}
         style={{
-          gridTemplateColumns: `repeat(${2 + (canManageSites ? 1 : 0) + (canManageMembers ? 1 : 0) + (canUseTools ? 1 : 0) + (IS_DEV && canManageSites ? 1 : 0)}, minmax(0, 1fr))`,
+          gridTemplateColumns: `repeat(${2 + (canManageSites ? 1 : 0) + (canManageMembers ? 1 : 0) + (canReconcile ? 1 : 0) + (canUseTools ? 1 : 0) + (IS_DEV && canManageSites ? 1 : 0)}, minmax(0, 1fr))`,
         }}
       >
         <Item to="/SiteAdmin" label="Home" icon={<IconHome className="h-6 w-6" />} />
@@ -136,6 +155,9 @@ export default function SiteAdminBottomNav() {
         )}
         {canManageMembers && (<Item to="/SiteAdmin/People" label={'People'} icon={<IconUsers className="h-6 w-6" />} />)}
         <Item to="/SiteAdmin/Validate" label="Validate" icon={<IconCheck className="h-6 w-6" />} />
+        {canReconcile && (
+          <Item to="/SiteAdmin/Reconciliation" label="Reconcile" icon={<IconCalc className="h-6 w-6" />} />
+        )}
         {IS_DEV && canManageSites && (
           <Item to="/SiteAdmin/Seed" label="Seed" icon={<IconSeed className="h-6 w-6" />} />
         )}

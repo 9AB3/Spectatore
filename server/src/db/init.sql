@@ -345,6 +345,7 @@ CREATE TABLE IF NOT EXISTS validated_shift_activities (
   dn TEXT NOT NULL,
   user_email TEXT,
   user_name TEXT,
+  user_id INTEGER,
   activity TEXT,
   sub_activity TEXT,
   payload_json JSONB DEFAULT '{}'::jsonb,
@@ -370,6 +371,13 @@ ALTER TABLE IF EXISTS validated_shift_activities
 CREATE INDEX IF NOT EXISTS idx_validated_shifts_shift_key ON validated_shifts(shift_key);
 CREATE INDEX IF NOT EXISTS idx_validated_acts_validated_shift_id ON validated_shift_activities(validated_shift_id);
 CREATE INDEX IF NOT EXISTS idx_validated_acts_shift_key ON validated_shift_activities(shift_key);
+
+-- Ensure validated user_id columns exist BEFORE any updates reference them
+ALTER TABLE IF EXISTS validated_shifts
+  ADD COLUMN IF NOT EXISTS user_id INTEGER;
+
+ALTER TABLE IF EXISTS validated_shift_activities
+  ADD COLUMN IF NOT EXISTS user_id INTEGER;
 
 -- Best-effort backfill keys (safe if data exists; if not, no harm)
 UPDATE validated_shifts
@@ -505,3 +513,52 @@ BEGIN
 END$$;
 
 ALTER TABLE validated_shift_activities VALIDATE CONSTRAINT fk_vsa_validated_shift;
+
+-- =============================
+-- RECONCILIATION LAYER (Option A)
+-- =============================
+-- Stores month-level reconciliation targets entered by Site Admins.
+-- These DO NOT modify validated_shifts / validated_shift_activities.
+-- Instead, reporting can union/apply daily allocations from validated_reconciliation_days.
+
+CREATE TABLE IF NOT EXISTS validated_reconciliations (
+  id SERIAL PRIMARY KEY,
+  site TEXT NOT NULL,
+  -- Month key stored as 'YYYY-MM' (e.g. '2026-03')
+  month_ym TEXT NOT NULL,
+  metric_key TEXT NOT NULL,
+  reconciled_total NUMERIC NOT NULL DEFAULT 0,
+  -- 'validated_only' (default) or 'captured_all'
+  basis TEXT NOT NULL DEFAULT 'validated_only',
+  -- 'spread_daily' (default), 'month_end', 'custom'
+  method TEXT NOT NULL DEFAULT 'spread_daily',
+  notes TEXT,
+  is_locked BOOLEAN NOT NULL DEFAULT false,
+  created_by_user_id INTEGER,
+  -- Audit snapshots of what the system computed when saved/recalculated
+  actual_total_snapshot NUMERIC,
+  delta_snapshot NUMERIC,
+  computed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(site, month_ym, metric_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vr_site_month ON validated_reconciliations(site, month_ym);
+CREATE INDEX IF NOT EXISTS idx_vr_metric ON validated_reconciliations(metric_key);
+
+CREATE TABLE IF NOT EXISTS validated_reconciliation_days (
+  id SERIAL PRIMARY KEY,
+  reconciliation_id INTEGER NOT NULL REFERENCES validated_reconciliations(id) ON DELETE CASCADE,
+  site TEXT NOT NULL,
+  month_ym TEXT NOT NULL,
+  metric_key TEXT NOT NULL,
+  date DATE NOT NULL,
+  allocated_value NUMERIC NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(reconciliation_id, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vrd_site_date ON validated_reconciliation_days(site, date);
+CREATE INDEX IF NOT EXISTS idx_vrd_metric ON validated_reconciliation_days(metric_key);
+CREATE INDEX IF NOT EXISTS idx_vrd_month ON validated_reconciliation_days(month_ym);

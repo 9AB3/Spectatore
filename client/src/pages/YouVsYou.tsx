@@ -92,7 +92,19 @@ function subOf(p0: any): string {
 function locOf(p0: any): string {
   const p: any = p0 || {};
   const v = vOf(p);
-  return String(p.location ?? p.Location ?? p.payload_json?.location ?? v.Location ?? v.location ?? '').trim();
+  // Most activities store Location, but some (e.g. Firing) store Heading/Stope.
+  return String(
+    p.location ??
+      p.Location ??
+      p.payload_json?.location ??
+      v.Location ??
+      v.location ??
+      v.Heading ??
+      v.heading ??
+      v.Stope ??
+      v.stope ??
+      ''
+  ).trim();
 }
 function uniqCount(vals: string[]) {
   const s = new Set<string>();
@@ -234,14 +246,35 @@ function stopeChargeMetres(payloadsAll: any[]): number {
   return sum;
 }
 function tonnesFired(payloadsAll: any[]): number {
+  // Production firing tonnes (Firing -> Production)
   let sum = 0;
   for (const p0 of payloadsAll || []) {
-    if (actOf(p0) !== 'Charging') continue;
+    if (actOf(p0) !== 'Firing') continue;
     if (subOf(p0) !== 'Production') continue;
     const v = vOf(p0);
     sum += n2(v['Tonnes Fired'] ?? v['tonnes fired']);
   }
   return sum;
+}
+function headingsFired(payloadsAll: any[]): number {
+  // Development firing headings (Firing -> Development)
+  const locs: string[] = [];
+  for (const p0 of payloadsAll || []) {
+    if (actOf(p0) !== 'Firing') continue;
+    if (subOf(p0) !== 'Development') continue;
+    locs.push(locOf(p0));
+  }
+  return uniqCount(locs);
+}
+function stopesFired(payloadsAll: any[]): number {
+  // Production firing stopes (Firing -> Production)
+  const locs: string[] = [];
+  for (const p0 of payloadsAll || []) {
+    if (actOf(p0) !== 'Firing') continue;
+    if (subOf(p0) !== 'Production') continue;
+    locs.push(locOf(p0));
+  }
+  return uniqCount(locs);
 }
 
 
@@ -768,8 +801,20 @@ export default function YouVsYou() {
           get: (r: ShiftRow) => stopesCharged(payloads(r)),
         },
         {
-          id: 'tonnes_fired',
-          title: 'Tonnes Fired',
+          id: 'headings_fired',
+          title: 'Headings fired',
+          unit: 'hdgs',
+          get: (r: ShiftRow) => headingsFired(payloads(r)),
+        },
+        {
+          id: 'stopes_fired',
+          title: 'Stopes fired',
+          unit: 'stopes',
+          get: (r: ShiftRow) => stopesFired(payloads(r)),
+        },
+        {
+          id: 'stope_tonnes_fired',
+          title: 'Stope tonnes fired',
           unit: 't',
           get: (r: ShiftRow) => tonnesFired(payloads(r)),
         },

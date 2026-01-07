@@ -12,7 +12,7 @@ type LocationRow = { id?: number; name: string; type: 'Heading' | 'Stope' | 'Sto
 // Authoritative equipment → activity mapping (MUST mirror Activity.tsx)
 const EQUIPMENT_ACTIVITY_MAP: Record<string, string[]> = {
   Truck: ['Hauling'],
-  Loader: ['Loading'],
+  Loader: ['Loading', 'Backfilling'],
   Jumbo: ['Development'],
   'Production Drill': ['Production Drilling'],
   'Spray Rig': ['Development'],
@@ -86,6 +86,12 @@ function allowedLocationTypes(
       if (f === 'To') return ['Stockpile'];
       return ['Stope', 'Stockpile'];
     }
+  }
+
+  // Backfilling: always "To" a stope (both Surface and Underground)
+  if (a === 'Backfilling') {
+    if (f === 'To') return ['Stope'];
+    return ['Stope'];
   }
   // Default: allow any (so we don't block other future forms)
   return ['Heading', 'Stope', 'Stockpile'];

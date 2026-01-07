@@ -35,6 +35,7 @@ import SiteAdminSites from './pages/SiteAdminSites';
 import SiteAdminPeople from './pages/SiteAdminPeople';
 import SiteAdminFeedbackApproval from './pages/SiteAdminFeedbackApproval';
 import SiteAdminSeed from './pages/SiteAdminSeed';
+import SiteAdminReconciliation from './pages/SiteAdminReconciliation';
 import { useEffect, useState } from 'react';
 import { getDB } from './lib/idb';
 import ProtectedLayout from './components/ProtectedLayout';
@@ -176,6 +177,8 @@ export default function App() {
       >
         <Route index element={<SiteAdmin />} />
         <Route path="Validate" element={<SiteAdminValidate />} />
+        {/* Reconciliation is available to validators + admins (any SiteAdmin-authorized user) */}
+        <Route path="Reconciliation" element={<SiteAdminReconciliation />} />
         <Route path="AddActivity" element={<SiteAdminAddActivity />} />
         {/* Validators must be able to access Equipment & Locations */}
         <Route path="Equipment&Locations" element={<RequireSiteAdmin><SiteAdminEquipmentLocations /></RequireSiteAdmin>} />

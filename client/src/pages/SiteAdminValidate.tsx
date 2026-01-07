@@ -347,6 +347,12 @@ function allowedLocationTypes(activity: string, sub: string, fieldName: string) 
     }
   }
 
+  // Backfilling (Surface + Underground): always "To" a stope.
+  if (a === 'Backfilling') {
+    if (f === 'To' || f === 'Location') return ['Stope'];
+    return ['Stope'];
+  }
+
   return ['Heading', 'Stope', 'Stockpile'];
 }
 
@@ -565,7 +571,19 @@ export default function SiteAdminValidate() {
 
   function getLocationFromValues(values: any) {
     const v = values || {};
-    return String(v.Location ?? v.location ?? v.Heading ?? v.heading ?? v.Area ?? v.area ?? '').trim();
+    return String(
+      v.Location ??
+        v.location ??
+        v.To ??
+        v.to ??
+        v.Heading ??
+        v.heading ??
+        v.Stope ??
+        v.stope ??
+        v.Area ??
+        v.area ??
+        '',
+    ).trim();
   }
 
   function getSourceFromValues(values: any) {
@@ -587,15 +605,16 @@ export default function SiteAdminValidate() {
       objOrValues && typeof objOrValues === 'object'
         ? act === 'hauling' || act === 'loading'
           ? (objOrValues as any).source
-          : (objOrValues as any).location
+          : act === 'backfilling'
+            ? (objOrValues as any).to ?? (objOrValues as any).To
+            : (objOrValues as any).location
         : null;
 
     if (top != null && String(top) !== '') return top;
 
     // Hauling/Loading group by source instead of location
-    if (act === 'hauling' || act === 'loading') {
-      return getSourceFromValues(values);
-    }
+    if (act === 'hauling' || act === 'loading') return getSourceFromValues(values);
+    // Backfilling groups by "To" (which is included in getLocationFromValues as a fallback)
     return getLocationFromValues(values);
   }
 
@@ -718,7 +737,18 @@ async function deleteValidatedActivity(actId: number) {
     const locOf = (p0: any) => {
       const p: any = p0 || {};
       const v: any = p.values && typeof p.values === 'object' ? p.values : {};
-      return String(p.location ?? p.Location ?? v.Location ?? v.location ?? '').trim();
+      // Most activities store a single Location, but Firing stores Heading/Stope.
+      return String(
+        p.location ??
+          p.Location ??
+          v.Location ??
+          v.location ??
+          v.Heading ??
+          v.heading ??
+          v.Stope ??
+          v.stope ??
+          ''
+      ).trim();
     };
 
     const uniqCount = (vals: string[]) => {
@@ -816,7 +846,7 @@ const tonnes = loads ? loads.reduce((acc: number, l: any) => acc + n2(l?.weight 
       const locs: string[] = [];
       for (const p0 of payloads || []) {
         const p: any = p0 || {};
-        if (String(p.activity || '') !== 'Charging') continue;
+        if (String(p.activity || '') !== 'Firing') continue;
         const sub = String(p.sub || p.sub_activity || '');
         if (sub !== 'Production') continue;
         locs.push(locOf(p));
@@ -828,7 +858,7 @@ const tonnes = loads ? loads.reduce((acc: number, l: any) => acc + n2(l?.weight 
       let sum = 0;
       for (const p0 of payloads || []) {
         const p: any = p0 || {};
-        if (String(p.activity || '') !== 'Charging') continue;
+        if (String(p.activity || '') !== 'Firing') continue;
         const sub = String(p.sub || p.sub_activity || '');
         if (sub !== 'Production') continue;
         const v: any = p.values && typeof p.values === 'object' ? p.values : {};
@@ -842,7 +872,7 @@ const tonnes = loads ? loads.reduce((acc: number, l: any) => acc + n2(l?.weight 
       const locs: string[] = [];
       for (const p0 of payloads || []) {
         const p: any = p0 || {};
-        if (String(p.activity || '') !== 'Charging') continue;
+        if (String(p.activity || '') !== 'Firing') continue;
         const sub = String(p.sub || p.sub_activity || '');
         if (sub !== 'Development') continue;
         locs.push(locOf(p));
@@ -854,7 +884,7 @@ const tonnes = loads ? loads.reduce((acc: number, l: any) => acc + n2(l?.weight 
       let sum = 0;
       for (const p0 of payloads || []) {
         const p: any = p0 || {};
-        if (String(p.activity || '') !== 'Charging') continue;
+        if (String(p.activity || '') !== 'Firing') continue;
         const sub = String(p.sub || p.sub_activity || '');
         if (sub !== 'Development') continue;
         const v: any = p.values && typeof p.values === 'object' ? p.values : {};
@@ -863,7 +893,34 @@ const tonnes = loads ? loads.reduce((acc: number, l: any) => acc + n2(l?.weight 
       return sum;
     }
 
-    function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
+    
+    function backfillVolume(payloads: any[]) {
+      let sum = 0;
+      for (const p0 of payloads || []) {
+        const p: any = p0 || {};
+        if (String(p.activity || '') !== 'Backfilling') continue;
+        const sub = String(p.sub || p.sub_activity || '');
+        if (sub !== 'Surface') continue;
+        const v: any = p.values && typeof p.values === 'object' ? p.values : {};
+        sum += n2(v['Volume']);
+      }
+      return sum;
+    }
+
+    function backfillBuckets(payloads: any[]) {
+      let sum = 0;
+      for (const p0 of payloads || []) {
+        const p: any = p0 || {};
+        if (String(p.activity || '') !== 'Backfilling') continue;
+        const sub = String(p.sub || p.sub_activity || '');
+        if (sub !== 'Underground') continue;
+        const v: any = p.values && typeof p.values === 'object' ? p.values : {};
+        sum += n2(v['Buckets']);
+      }
+      return sum;
+    }
+
+function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
       const locs: string[] = [];
       for (const p0 of payloads || []) {
         const p: any = p0 || {};
@@ -1099,6 +1156,26 @@ const tonnes = loads ? loads.reduce((acc: number, l: any) => acc + n2(l?.weight 
       { activity: 'Development', sub: '', metric: 'Face Drillm', ds: faceDS, ns: faceNS, total: faceAll },
       { activity: 'Development', sub: '', metric: 'Total Drillm', ds: gsDS + faceDS, ns: gsNS + faceNS, total: gsAll + faceAll },
       { activity: 'Development', sub: '', metric: 'Shotcrete', ds: shotcrete(payloadsDS), ns: shotcrete(payloadsNS), total: shotcrete(payloadsAll) },
+    );
+
+    // ---- Backfilling ----
+    rows.push(
+      {
+        activity: 'Backfilling',
+        sub: 'Surface',
+        metric: 'Backfill volume',
+        ds: backfillVolume(payloadsDS),
+        ns: backfillVolume(payloadsNS),
+        total: backfillVolume(payloadsAll),
+      },
+      {
+        activity: 'Backfilling',
+        sub: 'Underground',
+        metric: 'Backfill buckets',
+        ds: backfillBuckets(payloadsDS),
+        ns: backfillBuckets(payloadsNS),
+        total: backfillBuckets(payloadsAll),
+      },
     );
 
     return rows;
@@ -1478,7 +1555,7 @@ const tonnes = loads ? loads.reduce((acc: number, l: any) => acc + n2(l?.weight 
                             <>
                               {renderTable(['Hoisting'])}
                               <div className="grid md:grid-cols-2 gap-3">
-                                {renderTable(['Haulage', 'Loading'])}
+                                {renderTable(['Haulage', 'Loading', 'Backfilling'])}
                                 {renderTable(['Production', 'Development'])}
                               </div>
                             </>
@@ -1510,7 +1587,7 @@ const tonnes = loads ? loads.reduce((acc: number, l: any) => acc + n2(l?.weight 
                       (byAct[activityName] ||= []).push(a);
                     }
 
-                    const desiredOrder = ['Hoisting', 'Hauling', 'Loading', 'Development', 'Production Drilling', 'Charging'];
+                    const desiredOrder = ['Hoisting', 'Hauling', 'Loading', 'Backfilling', 'Development', 'Production Drilling', 'Charging', 'Firing'];
                     const rank = (name: string) => {
                       const i = desiredOrder.indexOf(name);
                       return i === -1 ? 999 : i;
@@ -1529,17 +1606,29 @@ const tonnes = loads ? loads.reduce((acc: number, l: any) => acc + n2(l?.weight 
                           const rowsForAct = byAct[actName] || [];
 
                           const actLc = String(actName || '').toLowerCase();
-                          const groupKey = actLc === 'hoisting' ? '' : actLc === 'hauling' || actLc === 'loading' ? 'Source' : 'Location';
+                          // Grouping column differs by activity:
+                          // - Hauling/Loading: Source
+                          // - Backfilling: To
+                          // - Others (default): Location
+                          const groupKey =
+                            actLc === 'hoisting'
+                              ? ''
+                              : actLc === 'hauling' || actLc === 'loading'
+                                ? 'Source'
+                                : actLc === 'backfilling'
+                                  ? 'To'
+                                  : 'Location';
 
                           // Columns: union across the whole ACTIVITY so headers don't repeat
                           const colSet = new Set<string>();
                           for (const r of rowsForAct) {
                             const objOrig: any = getValidatedActObjOriginal(r) || {};
                             const obj: any = getValidatedActObj(r) || objOrig || {};
-                            const values: any = obj?.values && typeof obj.values === 'object' ? obj.values : {};
+                              const values: any = obj?.values && typeof obj.values === 'object' ? obj.values : {};
                             Object.keys(values || {}).forEach((k) => {
                               const kl = String(k).toLowerCase();
-                              if (kl === 'location' || kl === 'source') return;
+                                // Do not repeat grouping keys as normal columns.
+                                if (kl === 'location' || kl === 'source' || kl === 'from' || kl === 'to') return;
                               colSet.add(k);
                             });
                           }
@@ -2172,6 +2261,44 @@ const tonnes = loads ? loads.reduce((acc: number, l: any) => acc + n2(l?.weight 
                                                                 if (String(actName || '').toLowerCase() === 'hauling' && rowSub === 'production') {
                                                                   return <div className="input bg-slate-50 text-slate-700 cursor-default">ore</div>;
                                                                 }
+
+                                                                // Backfilling has specific material lists by sub-activity.
+                                                                if (String(actName || '').toLowerCase() === 'backfilling') {
+                                                                  const opts =
+                                                                    rowSub === 'surface'
+                                                                      ? ['Cement Paste Fill', 'Cement Aggregate Fill', 'Cement Hydraulic Fill']
+                                                                      : ['Waste Rock Fill', 'Cement Rock Fill', 'Dry Stack Tailings', 'Raisebore Fines'];
+                                                                  const curStr = String(cur || '').trim();
+                                                                  const inList = opts.includes(curStr);
+                                                                  return (
+                                                                    <select
+                                                                      className={`input w-full ${(isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))) ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
+                                                                      title={`Shift: ${String(hasLive ? liveVal : baselineVal)} | Validated: ${String(cur ?? '')}`}
+                                                                      value={curStr}
+                                                                      disabled={isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))}
+                                                                      onChange={(e) => {
+                                                                        const v = e.target.value;
+                                                                        setEditedActs((prev) => ({
+                                                                          ...prev,
+                                                                          [Number((r as any)?.id)]: setValuesKey(currentObj, c, v),
+                                                                        }));
+                                                                      }}
+                                                                    >
+                                                                      <option value="">-</option>
+                                                                      {!inList && curStr ? (
+                                                                        <option value={curStr} disabled>
+                                                                          {curStr} (legacy)
+                                                                        </option>
+                                                                      ) : null}
+                                                                      {opts.map((nm) => (
+                                                                        <option key={nm} value={nm}>
+                                                                          {nm}
+                                                                        </option>
+                                                                      ))}
+                                                                    </select>
+                                                                  );
+                                                                }
+
                                                                 const curStr = String(cur || '').toLowerCase();
                                                                 const normalized =
                                                                   curStr === 'ore' || curStr === 'waste' ? curStr : curStr ? curStr : '';
@@ -2225,6 +2352,36 @@ const tonnes = loads ? loads.reduce((acc: number, l: any) => acc + n2(l?.weight 
                                                               }
 
                                                               // Default: free input (numeric/text)
+                                                              // Backfilling numeric validation parity with user form.
+                                                              if (String(actName || '').toLowerCase() === 'backfilling' && (c === 'Volume' || c === 'Buckets')) {
+                                                                const isVol = c === 'Volume';
+                                                                const min = 0;
+                                                                const max = isVol ? 10000 : 250;
+                                                                return (
+                                                                  <input
+                                                                    type="number"
+                                                                    min={min}
+                                                                    max={max}
+                                                                    step={1}
+                                                                    className={`input w-full ${(isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))) ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
+                                                                    title={`Validated: ${String(curVal ?? '')} | Original: ${String((hasLive ? liveVal : baselineVal) ?? '')}`}
+                                                                    value={String(cur ?? '')}
+                                                                    disabled={isReadonly}
+                                                                    onChange={(e) => {
+                                                                      const raw = e.target.value;
+                                                                      let n = parseFloat(raw);
+                                                                      if (!Number.isFinite(n)) n = 0;
+                                                                      if (n < min) n = min;
+                                                                      if (n > max) n = max;
+                                                                      setEditedActs((prev) => ({
+                                                                        ...prev,
+                                                                        [Number((r as any)?.id)]: setValuesKey(currentObj, c, String(n)),
+                                                                      }));
+                                                                    }}
+                                                                  />
+                                                                );
+                                                              }
+
                                                               return (
                                                                 <input
                                                                   className={`input w-full ${(isReadonly || (actName === "Production Drilling" && (c === "Metres Drilled" || c === "Cleanouts Drilled" || c === "Redrills"))) ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}

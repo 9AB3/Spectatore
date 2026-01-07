@@ -107,7 +107,9 @@ GET /api/powerbi/validated/fact-dev-face-drilling
 GET /api/powerbi/validated/fact-ground-support
 GET /api/powerbi/validated/fact-production-drilling
 GET /api/powerbi/validated/fact-charging
+GET /api/powerbi/validated/fact-firing
 GET /api/powerbi/validated/fact-hoisting
+GET /api/powerbi/validated/fact-reconciliation-days
 ```
 
 Each supports: `site`, `from`, `to`.

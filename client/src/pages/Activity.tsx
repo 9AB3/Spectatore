@@ -34,7 +34,7 @@ function sumHoleLen(holes: DrillHole[]) {
 // Authoritative equipment → activity mapping
 const EQUIPMENT_ACTIVITY_MAP: Record<string, string[]> = {
   Truck: ['Hauling'],
-  Loader: ['Loading'],
+  Loader: ['Loading', 'Backfilling'],
   Jumbo: ['Development'],
   'Production Drill': ['Production Drilling'],
   'Spray Rig': ['Development'],
@@ -86,6 +86,19 @@ function allowedLocationTypes(
   if (a === 'Charging') {
     if (s === 'Development') return ['Heading'];
     if (s === 'Production') return ['Stope'];
+  }
+
+  // Firing
+  if (a === 'Firing') {
+    if (s === 'Development') return ['Heading'];
+    if (s === 'Production') return ['Stope'];
+  }
+
+  // Backfilling
+  if (a === 'Backfilling') {
+    // Backfilling is always placed "to" a stope.
+    if (f === 'To' || f === 'Location') return ['Stope'];
+    return ['Stope'];
   }
 
   // Loading

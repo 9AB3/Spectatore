@@ -421,7 +421,9 @@ activity_rows AS (
     ) AS equipment,
     COALESCE(
       NULLIF(TRIM(COALESCE(b.payload->>'location','')),''),
-      NULLIF(TRIM(COALESCE((b.payload->'values'->>'Location'),'')),'')
+      NULLIF(TRIM(COALESCE((b.payload->'values'->>'Location'),'')),'') ,
+      NULLIF(TRIM(COALESCE((b.payload->'values'->>'Heading'),'')),'') ,
+      NULLIF(TRIM(COALESCE((b.payload->'values'->>'Stope'),'')),'')
     ) AS location,
     COALESCE(
       NULLIF(TRIM(COALESCE(b.payload->>'from_location','')),''),
@@ -467,7 +469,7 @@ typed_metrics AS (
   FROM activity_rows ar
   JOIN LATERAL jsonb_each(ar.vals) AS kv(key, value) ON true
   WHERE kv.key IS NOT NULL
-    AND kv.key NOT IN ('From','To','Source','Destination','Location','Equipment','Material')
+    AND kv.key NOT IN ('From','To','Source','Destination','Location','Heading','Stope','Equipment','Material')
 ),
 load_weights AS (
   SELECT
@@ -1098,6 +1100,95 @@ router.get('/validated/fact-charging', async (req, res) => {
   } catch (err: any) {
     console.error('[powerbi] validated/fact-charging failed', err?.message || err);
     res.status(500).json({ error: 'powerbi_validated_fact_charging_failed', detail: ((err as any)?.message || String(err)) });
+  }
+});
+
+/**
+ * GET /api/powerbi/validated/fact-firing
+ * One row per validated Firing activity (dev + prod).
+ */
+router.get('/validated/fact-firing', async (req, res) => {
+  try {
+    const { site, from, to } = parseCommonFilters(req);
+
+    const sql = `
+      WITH base AS (
+        SELECT
+          vsa.id AS activity_id,
+          vs.id AS validated_shift_id,
+          COALESCE(vs.date::date, vsa.date) AS date,
+          COALESCE(vs.dn, vsa.dn) AS dn,
+          COALESCE(vs.site, vsa.site) AS site,
+          COALESCE(vs.user_id, vsa.user_id) AS user_id,
+          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
+          vsa.activity,
+          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
+        FROM validated_shift_activities vsa
+        LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN users u ON u.id = vs.user_id
+        WHERE vsa.activity = 'Firing'
+          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
+          AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
+      )
+      SELECT
+        activity_id,
+        validated_shift_id,
+        date,
+        dn,
+        site,
+        user_id,
+        user_email,
+        user_name,
+        activity,
+        sub_activity,
+
+        NULLIF(TRIM(vals->>'Equipment'), '') AS equipment,
+        NULLIF(TRIM(COALESCE(vals->>'Location', vals->>'Heading', vals->>'Stope')), '') AS location,
+        NULLIF(regexp_replace(COALESCE(vals->>'Cut Length',''), '[^0-9.\-]', '', 'g'), '')::double precision AS cut_length_m,
+        NULLIF(regexp_replace(COALESCE(vals->>'Tonnes Fired',''), '[^0-9.\-]', '', 'g'), '')::double precision AS tonnes_fired
+      FROM base
+      ORDER BY date, dn, user_email, activity_id;
+    `;
+
+    const r = await pool.query(sql, [site, from, to]);
+    res.json(r.rows);
+  } catch (err: any) {
+    console.error('[powerbi] validated/fact-firing failed', err?.message || err);
+    res.status(500).json({ error: 'powerbi_validated_fact_firing_failed', detail: ((err as any)?.message || String(err)) });
+  }
+});
+
+/**
+ * GET /api/powerbi/validated/fact-reconciliation-days
+ * Returns daily reconciliation allocations (Option A).
+ *
+ * Fields:
+ * - site
+ * - date
+ * - month_ym
+ * - metric_key
+ * - allocated_value
+ */
+router.get('/validated/fact-reconciliation-days', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT
+         site,
+         date::text AS date,
+         month_ym,
+         metric_key,
+         allocated_value
+       FROM validated_reconciliation_days
+       ORDER BY site, date, metric_key`,
+    );
+
+    return res.json(r.rows || []);
+  } catch (err: any) {
+    console.error('[powerbi] validated/fact-reconciliation-days failed', err?.message || err);
+    return res.status(500).json({ error: 'powerbi_validated_fact_reconciliation_days_failed', detail: ((err as any)?.message || String(err)) });
   }
 });
 

@@ -445,6 +445,36 @@
       }
     ]
   },
+  "Firing": {
+    "Development": [
+      {
+        "field": "Heading",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "Cut Length",
+        "required": 1,
+        "unit": "m",
+        "input": "number|0-6|1dp"
+      }
+    ],
+    "Production": [
+      {
+        "field": "Stope",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "Tonnes Fired",
+        "required": 1,
+        "unit": "t",
+        "input": "number|0-250000"
+      }
+    ]
+  },
   "Hoisting": {
     "": [
       {
@@ -458,6 +488,54 @@
         "required": 1,
         "unit": "t",
         "input": "number|0-10000"
+      }
+    ]
+  },
+  "Backfilling": {
+    "Surface": [
+      {
+        "field": "To",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "Material",
+        "required": 1,
+        "unit": "",
+        "input": "select|Cement Paste Fill;Cement Aggregate Fill;Cement Hydraulic Fill"
+      },
+      {
+        "field": "Volume",
+        "required": 1,
+        "unit": "m3",
+        "input": "number|0-10000"
+      }
+    ],
+    "Underground": [
+      {
+        "field": "To",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "Material",
+        "required": 1,
+        "unit": "",
+        "input": "select|Waste Rock Fill;Cement Rock Fill;Dry Stack Tailings;Raisebore Fines"
+      },
+      {
+        "field": "Buckets",
+        "required": 1,
+        "unit": "",
+        "input": "number|0-250"
+      },
+      {
+        "field": "Equipment",
+        "required": 1,
+        "unit": "",
+        "input": "select|equipment"
       }
     ]
   }

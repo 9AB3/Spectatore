@@ -100,7 +100,8 @@ function computeMilestoneMetricMapForShift(
  */
 const EQUIPMENT_ACTIVITY_MAP: Record<string, string[]> = {
   Truck: ['Hauling'],
-  Loader: ['Loading'],
+  // Loaders are used for both Loading and Underground Backfilling.
+  Loader: ['Loading', 'Backfilling'],
   Jumbo: ['Development'],
   'Production Drill': ['Production Drilling'],
   'Spray Rig': ['Development'],

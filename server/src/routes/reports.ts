@@ -84,7 +84,8 @@ function getVal(p: any, field: string) {
 }
 
 function getLoc(p: any) {
-  const loc = String(getVal(p, 'Location') || '').trim();
+  const v = (p && typeof p === 'object' ? (p as any).values : null) || {};
+  const loc = String(v?.Location ?? v?.location ?? v?.Heading ?? v?.heading ?? v?.Stope ?? v?.stope ?? '').trim();
   return loc;
 }
 
@@ -207,13 +208,17 @@ function computeMilestoneMetricMapForShift(
       primDevBuckets += n(getVal(p, 'Heading to SP') || 0);
     }
 
+
     if (activity === 'Charging') {
+      chargeKg += n(getVal(p, 'Charge kg') || 0);
+    }
+
+    if (activity === 'Firing') {
       const loc = getLoc(p);
       if (sub === 'Development' && loc) devChargeLocs.add(loc);
-
-      chargeKg += n(getVal(p, 'Charge kg') || 0);
       if (sub === 'Production') tonnesFired += n(getVal(p, 'Tonnes Fired') || 0);
     }
+
 
     if (activity === 'Hoisting') {
       oreHoisted += n(getVal(p, 'Ore Tonnes') || 0);

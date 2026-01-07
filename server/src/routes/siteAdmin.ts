@@ -1571,6 +1571,385 @@ router.post('/validate', siteAdminMiddleware, async (req: any, res) => {
   }
 });
 
+// =============================
+// RECONCILIATION (Option A)
+// =============================
+// Note:
+// - Reconciliation does NOT create synthetic validated_shifts/activities.
+// - It stores month-level targets and pre-computed daily allocations.
+
+type ReconMetric = {
+  key: string;
+  label: string;
+  unit: string;
+};
+
+const RECON_METRICS: ReconMetric[] = [
+  {
+    key: 'firing|development|cut_length',
+    label: 'Firing → Development → Cut Length',
+    unit: 'm',
+  },
+];
+
+function isYm(s: string) {
+  return /^\d{4}-\d{2}$/.test(s);
+}
+
+function monthBounds(ym: string) {
+  const [yStr, mStr] = ym.split('-');
+  const y = parseInt(yStr, 10);
+  const m = parseInt(mStr, 10);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) throw Object.assign(new Error('invalid month'), { status: 400 });
+  const from = new Date(Date.UTC(y, m - 1, 1));
+  const to = new Date(Date.UTC(y, m, 1)); // exclusive
+  const daysInMonth = Math.round((to.getTime() - from.getTime()) / (24 * 3600 * 1000));
+  const fromYmd = from.toISOString().slice(0, 10);
+  const toYmd = to.toISOString().slice(0, 10);
+  return { fromYmd, toYmd, daysInMonth, y, m };
+}
+
+function roundTo(v: number, dp: number) {
+  const p = Math.pow(10, dp);
+  return Math.round(v * p) / p;
+}
+
+async function computeActualForMetric(opts: {
+  site: string;
+  month_ym: string;
+  metric_key: string;
+  basis: 'validated_only' | 'captured_all';
+}) {
+  const { site, month_ym, metric_key, basis } = opts;
+  const { fromYmd, toYmd } = monthBounds(month_ym);
+
+  if (metric_key !== 'firing|development|cut_length') {
+    throw Object.assign(new Error('unsupported metric_key'), { status: 400 });
+  }
+
+  // Actual = sum(Cut Length) for validated_shift_activities where activity='Firing' and sub_activity='Development'.
+  // If basis=validated_only, include only rows tied to validated_shifts.validated=1.
+  const r = await pool.query(
+    `WITH base AS (
+        SELECT
+          vsa.site,
+          vsa.date,
+          vsa.dn,
+          COALESCE(vsa.user_email,'') AS user_email,
+          vsa.payload_json,
+          vs.validated AS v_validated,
+          vs2.validated AS v2_validated
+        FROM validated_shift_activities vsa
+        LEFT JOIN validated_shifts vs
+          ON vs.id = vsa.validated_shift_id
+        LEFT JOIN validated_shifts vs2
+          ON vs2.site = vsa.site
+         AND vs2.date = vsa.date
+         AND vs2.dn = vsa.dn
+         AND COALESCE(vs2.user_email,'') = COALESCE(vsa.user_email,'')
+        WHERE vsa.site = $1
+          AND vsa.date >= $2::date
+          AND vsa.date <  $3::date
+          AND vsa.activity = 'Firing'
+          AND vsa.sub_activity = 'Development'
+      )
+      SELECT
+        COALESCE(SUM(
+          NULLIF((payload_json->'values'->>'Cut Length')::text, '')::numeric
+        ), 0) AS total
+      FROM base
+      WHERE (
+        $4::text = 'captured_all'
+        OR COALESCE(v_validated, v2_validated, 0) = 1
+      )`,
+    [site, fromYmd, toYmd, basis],
+  );
+
+  const total = Number(r.rows?.[0]?.total ?? 0);
+  return Number.isFinite(total) ? total : 0;
+}
+
+// List supported metrics
+router.get('/reconciliation/metrics', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    // Reconciliation is available to SiteAdmin-authorized users (validators + admins).
+    return res.json({ ok: true, metrics: RECON_METRICS });
+  } catch (e) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
+// Get month summary (actual + existing reconciliation)
+router.get('/reconciliation/month-summary', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    const site = String(req.query?.site || '').trim() || normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+    const month_ym = String(req.query?.month_ym || '').trim();
+    const metric_key = String(req.query?.metric_key || '').trim();
+    const basis = (String(req.query?.basis || 'validated_only').trim() as any) as 'validated_only' | 'captured_all';
+
+    if (!site || site === '*') return res.status(400).json({ ok: false, error: 'missing site' });
+    if (!isYm(month_ym)) return res.status(400).json({ ok: false, error: 'invalid month_ym' });
+    if (!metric_key) return res.status(400).json({ ok: false, error: 'missing metric_key' });
+    if (basis !== 'validated_only' && basis !== 'captured_all') return res.status(400).json({ ok: false, error: 'invalid basis' });
+
+    const actual_total = await computeActualForMetric({ site, month_ym, metric_key, basis });
+
+    const hdr = await pool.query(
+      `SELECT id, reconciled_total, basis, method, notes, is_locked, actual_total_snapshot, delta_snapshot, computed_at
+         FROM validated_reconciliations
+        WHERE site=$1 AND month_ym=$2 AND metric_key=$3`,
+      [site, month_ym, metric_key],
+    );
+    const row = hdr.rows?.[0] || null;
+    const reconciled_total = row ? Number(row.reconciled_total ?? 0) : null;
+    const delta = reconciled_total == null ? null : reconciled_total - actual_total;
+
+    let allocations: any[] = [];
+    if (row?.id) {
+      const d = await pool.query(
+        `SELECT date::text AS date, allocated_value
+           FROM validated_reconciliation_days
+          WHERE reconciliation_id=$1
+          ORDER BY date ASC`,
+        [row.id],
+      );
+      allocations = d.rows || [];
+    }
+
+    return res.json({
+      ok: true,
+      site,
+      month_ym,
+      metric_key,
+      basis,
+      actual_total,
+      reconciliation: row
+        ? {
+            id: row.id,
+            reconciled_total: Number(row.reconciled_total ?? 0),
+            basis: row.basis,
+            method: row.method,
+            notes: row.notes,
+            is_locked: !!row.is_locked,
+            actual_total_snapshot: row.actual_total_snapshot == null ? null : Number(row.actual_total_snapshot),
+            delta_snapshot: row.delta_snapshot == null ? null : Number(row.delta_snapshot),
+            computed_at: row.computed_at,
+          }
+        : null,
+      delta,
+      allocations,
+    });
+  } catch (e) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
+async function upsertReconciliationAndCompute(opts: {
+  site: string;
+  month_ym: string;
+  metric_key: string;
+  basis: 'validated_only' | 'captured_all';
+  method: 'spread_daily' | 'month_end' | 'custom';
+  reconciled_total: number;
+  notes?: string | null;
+  created_by_user_id?: number | null;
+}) {
+  const { site, month_ym, metric_key, basis, method, reconciled_total, notes, created_by_user_id } = opts;
+  const { fromYmd, daysInMonth, y, m } = monthBounds(month_ym);
+
+  const actual_total = await computeActualForMetric({ site, month_ym, metric_key, basis });
+  const delta = reconciled_total - actual_total;
+
+  // Compute per-day allocations.
+  // For now only spread_daily and month_end are supported.
+  const allocations: Array<{ date: string; allocated_value: number }> = [];
+  if (method === 'month_end') {
+    // Allocate everything to last calendar day of the month.
+    const lastDay = new Date(Date.UTC(y, m, 0));
+    allocations.push({ date: lastDay.toISOString().slice(0, 10), allocated_value: delta });
+  } else {
+    // spread_daily (default)
+    const perDayRaw = daysInMonth ? delta / daysInMonth : 0;
+    // Keep 4dp internal for smoothness; ensure exact month sum by adjusting last day.
+    const perDay = roundTo(perDayRaw, 4);
+    let running = 0;
+    for (let i = 0; i < daysInMonth; i++) {
+      const d = new Date(Date.UTC(y, m - 1, 1 + i));
+      const ymd = d.toISOString().slice(0, 10);
+      const v = i === daysInMonth - 1 ? roundTo(delta - running, 4) : perDay;
+      allocations.push({ date: ymd, allocated_value: v });
+      running = roundTo(running + v, 4);
+    }
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const up = await client.query(
+      `INSERT INTO validated_reconciliations (
+          site, month_ym, metric_key, reconciled_total, basis, method, notes,
+          created_by_user_id, actual_total_snapshot, delta_snapshot, computed_at, updated_at
+       )
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),now())
+       ON CONFLICT (site, month_ym, metric_key)
+       DO UPDATE SET
+         reconciled_total=EXCLUDED.reconciled_total,
+         basis=EXCLUDED.basis,
+         method=EXCLUDED.method,
+         notes=EXCLUDED.notes,
+         created_by_user_id=COALESCE(EXCLUDED.created_by_user_id, validated_reconciliations.created_by_user_id),
+         actual_total_snapshot=EXCLUDED.actual_total_snapshot,
+         delta_snapshot=EXCLUDED.delta_snapshot,
+         computed_at=now(),
+         updated_at=now()
+       RETURNING id, is_locked`,
+      [site, month_ym, metric_key, reconciled_total, basis, method, notes || null, created_by_user_id || null, actual_total, delta],
+    );
+
+    const reconId = Number(up.rows?.[0]?.id);
+    const is_locked = !!up.rows?.[0]?.is_locked;
+    if (!reconId) throw new Error('failed to upsert reconciliation');
+    if (is_locked) throw Object.assign(new Error('reconciliation is locked'), { status: 400 });
+
+    // Replace day allocations
+    await client.query(`DELETE FROM validated_reconciliation_days WHERE reconciliation_id=$1`, [reconId]);
+    for (const a of allocations) {
+      await client.query(
+        `INSERT INTO validated_reconciliation_days (reconciliation_id, site, month_ym, metric_key, date, allocated_value)
+         VALUES ($1,$2,$3,$4,$5::date,$6)`,
+        [reconId, site, month_ym, metric_key, a.date, a.allocated_value],
+      );
+    }
+
+    await client.query('COMMIT');
+    return { reconId, actual_total, delta, allocations };
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+// Upsert reconciliation (set reconciled_total) and compute allocations
+router.post('/reconciliation/upsert', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+    const month_ym = String(req.body?.month_ym || '').trim();
+    const metric_key = String(req.body?.metric_key || '').trim();
+    const basis = (String(req.body?.basis || 'validated_only').trim() as any) as 'validated_only' | 'captured_all';
+    const method = (String(req.body?.method || 'spread_daily').trim() as any) as 'spread_daily' | 'month_end' | 'custom';
+    const notes = String(req.body?.notes || '').trim() || null;
+    const reconciled_total = Number(req.body?.reconciled_total);
+
+    if (!site || site === '*') return res.status(400).json({ ok: false, error: 'missing site' });
+    if (!isYm(month_ym)) return res.status(400).json({ ok: false, error: 'invalid month_ym' });
+    if (!metric_key) return res.status(400).json({ ok: false, error: 'missing metric_key' });
+    if (basis !== 'validated_only' && basis !== 'captured_all') return res.status(400).json({ ok: false, error: 'invalid basis' });
+    if (!['spread_daily', 'month_end', 'custom'].includes(method)) return res.status(400).json({ ok: false, error: 'invalid method' });
+    if (!Number.isFinite(reconciled_total)) return res.status(400).json({ ok: false, error: 'invalid reconciled_total' });
+
+    const out = await upsertReconciliationAndCompute({
+      site,
+      month_ym,
+      metric_key,
+      basis,
+      method,
+      reconciled_total,
+      notes,
+      created_by_user_id: req?.site_admin?.user_id || req?.user_id || null,
+    });
+
+    return res.json({ ok: true, ...out });
+  } catch (e) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
+// Recalculate allocations based on current "actual" totals (keeps reconciled_total)
+router.post('/reconciliation/recalculate', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+    const month_ym = String(req.body?.month_ym || '').trim();
+    const metric_key = String(req.body?.metric_key || '').trim();
+
+    if (!site || site === '*') return res.status(400).json({ ok: false, error: 'missing site' });
+    if (!isYm(month_ym)) return res.status(400).json({ ok: false, error: 'invalid month_ym' });
+    if (!metric_key) return res.status(400).json({ ok: false, error: 'missing metric_key' });
+
+    const hdr = await pool.query(
+      `SELECT reconciled_total, basis, method, is_locked
+         FROM validated_reconciliations
+        WHERE site=$1 AND month_ym=$2 AND metric_key=$3`,
+      [site, month_ym, metric_key],
+    );
+    const row = hdr.rows?.[0];
+    if (!row) return res.status(404).json({ ok: false, error: 'reconciliation not found' });
+    if (row.is_locked) return res.status(400).json({ ok: false, error: 'reconciliation is locked' });
+
+    const out = await upsertReconciliationAndCompute({
+      site,
+      month_ym,
+      metric_key,
+      basis: row.basis,
+      method: row.method,
+      reconciled_total: Number(row.reconciled_total ?? 0),
+      notes: null,
+      created_by_user_id: req?.site_admin?.user_id || req?.user_id || null,
+    });
+
+    return res.json({ ok: true, ...out });
+  } catch (e) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
+router.post('/reconciliation/lock', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+    const month_ym = String(req.body?.month_ym || '').trim();
+    const metric_key = String(req.body?.metric_key || '').trim();
+    if (!isYm(month_ym)) return res.status(400).json({ ok: false, error: 'invalid month_ym' });
+    if (!metric_key) return res.status(400).json({ ok: false, error: 'missing metric_key' });
+
+    await pool.query(
+      `UPDATE validated_reconciliations
+          SET is_locked=true, updated_at=now()
+        WHERE site=$1 AND month_ym=$2 AND metric_key=$3`,
+      [site, month_ym, metric_key],
+    );
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
+router.post('/reconciliation/unlock', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+    const month_ym = String(req.body?.month_ym || '').trim();
+    const metric_key = String(req.body?.metric_key || '').trim();
+    if (!isYm(month_ym)) return res.status(400).json({ ok: false, error: 'invalid month_ym' });
+    if (!metric_key) return res.status(400).json({ ok: false, error: 'missing metric_key' });
+
+    await pool.query(
+      `UPDATE validated_reconciliations
+          SET is_locked=false, updated_at=now()
+        WHERE site=$1 AND month_ym=$2 AND metric_key=$3`,
+      [site, month_ym, metric_key],
+    );
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
 
 
 export default router;
