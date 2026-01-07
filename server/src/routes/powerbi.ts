@@ -1038,6 +1038,84 @@ router.get('/validated/fact-production-drilling', async (req, res) => {
   } catch (err: any) {
     console.error('[powerbi] validated/fact-production-drilling failed', err?.message || err);
     res.status(500).json({ error: 'powerbi_validated_fact_production_drilling_failed', detail: ((err as any)?.message || String(err)) });
+
+
+/**
+ * GET /api/powerbi/validated/fact-production-drilling-holes
+ *
+ * Hole-level detail for Production Drilling. Unnests the saved hole entries
+ * (Ring ID / Hole ID / Diameter / Length) that underpin the shift totals.
+ *
+ * Query params:
+ *   ?site=<siteName>&from=YYYY-MM-DD&to=YYYY-MM-DD
+ */
+router.get('/validated/fact-production-drilling-holes', async (req, res) => {
+  try {
+    const { site, from, to } = parseCommonFilters(req);
+
+    const sql = `
+      WITH base AS (
+        SELECT
+          vsa.id AS activity_id,
+          vs.id AS validated_shift_id,
+          COALESCE(vs.date::date, vsa.date) AS date,
+          COALESCE(vs.dn, vsa.dn) AS dn,
+          COALESCE(vs.site, vsa.site) AS site,
+          COALESCE(vs.user_id, vsa.user_id) AS user_id,
+          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
+          vsa.activity,
+          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals,
+          COALESCE(vsa.payload_json->'holes','{}'::jsonb) AS holes_json
+        FROM validated_shift_activities vsa
+        LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        LEFT JOIN users u ON u.id = vs.user_id
+        WHERE vsa.activity = 'Production Drilling'
+          AND vsa.sub_activity IN ('Stope','Service Hole')
+          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
+          AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
+      )
+      SELECT
+        b.activity_id,
+        b.validated_shift_id,
+        b.date,
+        b.dn,
+        b.site,
+        b.user_id,
+        b.user_email,
+        b.user_name,
+        b.activity,
+        b.sub_activity,
+
+        NULLIF(TRIM(b.vals->>'Equipment'), '') AS equipment,
+        NULLIF(TRIM(b.vals->>'Location'), '') AS location,
+
+        bh.bucket AS drill_bucket,
+        (x.ord - 1) AS hole_index,
+
+        NULLIF(TRIM(x.hole->>'ring_id'), '') AS ring_id,
+        NULLIF(TRIM(x.hole->>'hole_id'), '') AS hole_id,
+        NULLIF(TRIM(x.hole->>'diameter'), '') AS diameter,
+        NULLIF(TRIM(x.hole->>'diameter_other'), '') AS diameter_other,
+
+        NULLIF(regexp_replace(COALESCE(x.hole->>'length_m',''), '[^0-9.\-]', '', 'g'), '')::double precision AS hole_length_m
+      FROM base b
+      CROSS JOIN LATERAL jsonb_each(b.holes_json) AS bh(bucket, holes_arr)
+      CROSS JOIN LATERAL jsonb_array_elements(bh.holes_arr) WITH ORDINALITY AS x(hole, ord)
+      ORDER BY b.date, b.dn, b.user_email, b.activity_id, bh.bucket, hole_index;
+    `;
+
+    const r = await pool.query(sql, [site, from, to]);
+    res.json(r.rows);
+  } catch (err: any) {
+    console.error('[powerbi] validated/fact-production-drilling-holes failed', err?.message || err);
+    res.status(500).json({ error: 'powerbi_validated_fact_production_drilling_holes_failed', detail: ((err as any)?.message || String(err)) });
+  }
+});
+
+
   }
 });
 
