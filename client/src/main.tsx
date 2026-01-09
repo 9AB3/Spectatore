@@ -23,10 +23,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     {/*
       React Router v6 shows future-flag warnings in dev. These flags opt-in early
       to the v7 behaviors and silence the warnings.
-      If your installed react-router-dom types don't yet include `future`, TS may
-      complain — in that case, keep this and add the ts-expect-error below.
+      If your installed react-router-dom types don't yet include `future`, update react-router-dom to a recent v6 release.
     */}
-    {/* @ts-expect-error - `future` is supported by react-router-dom at runtime in v6.13+ */}
     <BrowserRouter
       future={{
         v7_startTransition: true,
