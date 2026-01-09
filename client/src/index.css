@@ -49,8 +49,12 @@ body {
 }
 
 /* Buttons */
-.btn {
+ .btn {
   @apply px-4 py-3 rounded-2xl shadow-sm font-semibold tracking-wide border border-transparent;
+  @apply transition-all duration-150 ease-out;
+  @apply hover:-translate-y-0.5 hover:shadow-md;
+  @apply active:translate-y-0 active:shadow-sm;
+  @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300;
   background: var(--brand);
   color: white;
 }
@@ -71,6 +75,10 @@ body {
 
 .btn-secondary {
   @apply bg-slate-700 hover:bg-slate-800;
+  @apply transition-all duration-150 ease-out;
+  @apply hover:-translate-y-0.5 hover:shadow-md;
+  @apply active:translate-y-0 active:shadow-sm;
+  @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300;
 }
 
 /* Header */
@@ -138,4 +146,36 @@ body {
 a.link {
   color: var(--brand);
   text-decoration: underline;
+}
+
+
+/* Segmented tabs (used on You vs You / You vs Crew) */
+.seg-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.06);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+.seg-tab {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 14px;
+  font-weight: 700;
+  font-size: 14px;
+  color: rgba(15, 23, 42, 0.80);
+  background: transparent;
+  transition: transform 150ms ease-out, box-shadow 150ms ease-out, background 150ms ease-out;
+}
+.seg-tab:hover {
+  background: rgba(15, 23, 42, 0.06);
+}
+.seg-tab:active {
+  transform: translateY(1px);
+}
+.seg-tab--active {
+  background: white;
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.08);
+  color: rgba(15, 23, 42, 0.95);
 }

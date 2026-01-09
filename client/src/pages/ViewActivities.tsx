@@ -120,7 +120,10 @@ export default function ViewActivities() {
                                     Truck weights: {(p as any).loads
                                       .map((l: any, ii: number) => {
                                         const w = Number(String(l?.weight ?? l?.Weight ?? '').replace(/[^0-9.]/g, ''));
-                                        return `${ii + 1}:${Number.isFinite(w) ? w : 0}`;
+                                        const ts = l?.time_s ?? l?.time ?? l?.Time;
+                                        const s = typeof ts === 'number' ? ts : parseFloat(String(ts));
+                                        const t = Number.isFinite(s) ? `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.round(s % 60)).padStart(2, '0')}` : '';
+                                        return `${ii + 1}:${Number.isFinite(w) ? w : 0}${t ? `(${t})` : ''}`;
                                       })
                                       .join(', ')}
                                   </div>

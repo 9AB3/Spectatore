@@ -12,7 +12,6 @@ import ConfirmEmail from './pages/ConfirmEmail';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import EquipmentLocations from './pages/EquipmentLocations';
-import PerformanceReview from './pages/PerformanceReview';
 import YouVsYou from './pages/YouVsYou';
 import YouVsNetwork from './pages/YouVsNetwork';
 import Terms from './pages/Terms';
@@ -217,7 +216,6 @@ export default function App() {
 
         <Route path="/Connections" element={<Connections />} />
         <Route path="/Equipment&Locations" element={<EquipmentLocations />} />
-        <Route path="/PerformanceReview" element={<PerformanceReview />} />
         <Route path="/YouVsYou" element={<YouVsYou />} />
         <Route path="/YouVsNetwork" element={<YouVsNetwork />} />
         <Route path="/Settings" element={<Settings />} />

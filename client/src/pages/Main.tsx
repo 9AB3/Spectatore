@@ -124,28 +124,53 @@ export default function Main() {
           <div className="text-sm opacity-70 mt-1">Start a new shift, tag out, or send feedback.</div>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-4">
+        <div className="space-y-3">
           <button
-            className="btn"
+            type="button"
+            className="card w-full flex items-center justify-between gap-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0"
             onClick={() => setOpen(true)}
-            style={{ paddingTop: 20, paddingBottom: 20 }}
           >
-            <div className="flex flex-col items-center justify-center gap-2">
-              <span className="font-semibold">START SHIFT</span>
-              <img src={portalIcon} alt="Portal" className="h-20 w-20 button-icon" />
-              <span className="text-xs opacity-70">Choose date &amp; DS/NS</span>
+            <div className="flex items-center gap-4">
+              <div
+                className="h-14 w-14 rounded-2xl flex items-center justify-center shadow-sm"
+                style={{ background: 'var(--brand)', color: 'white' }}
+                aria-hidden="true"
+              >
+                <img src={portalIcon} alt="" className="h-9 w-9" />
+              </div>
+              <div>
+                <div className="text-xs opacity-70">Shift</div>
+                <div className="text-lg font-bold leading-tight">Start shift</div>
+                <div className="text-sm opacity-70">Choose date &amp; DS/NS</div>
+              </div>
             </div>
+            <svg viewBox="0 0 24 24" className="h-6 w-6 opacity-50" aria-hidden="true">
+              <path d="M9 18l6-6-6-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
+
           <button
-            className="btn"
+            type="button"
+            className="card w-full flex items-center justify-between gap-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0"
             onClick={tagOut}
-            style={{ paddingTop: 20, paddingBottom: 20 }}
           >
-            <div className="flex flex-col items-center justify-center gap-2">
-              <span className="font-semibold">TAG OUT</span>
-              <img src={tagoutIcon} alt="Tag" className="h-20 w-20 button-icon" />
-              <span className="text-xs opacity-70">Sign out of the app</span>
+            <div className="flex items-center gap-4">
+              <div
+                className="h-14 w-14 rounded-2xl flex items-center justify-center shadow-sm"
+                style={{ background: 'rgba(15, 23, 42, 0.08)' }}
+                aria-hidden="true"
+              >
+                <img src={tagoutIcon} alt="" className="h-9 w-9" />
+              </div>
+              <div>
+                <div className="text-xs opacity-70">Session</div>
+                <div className="text-lg font-bold leading-tight">Tag out</div>
+                <div className="text-sm opacity-70">Sign out of the app</div>
+              </div>
             </div>
+            <svg viewBox="0 0 24 24" className="h-6 w-6 opacity-50" aria-hidden="true">
+              <path d="M9 18l6-6-6-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
         </div>
 

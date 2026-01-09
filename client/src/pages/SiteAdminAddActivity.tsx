@@ -1,7 +1,7 @@
 import Header from '../components/Header';
 import SiteAdminBottomNav from '../components/SiteAdminBottomNav';
 import data from '../data/activities.json';
-import { useEffect, useMemo, useState } from 'react';
+import {useEffect, useMemo, useState, useRef} from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 
@@ -67,7 +67,7 @@ function allowedLocationTypes(
   // Loading
   if (a === 'Loading') {
     if (s === 'Development') return ['Heading'];
-    if (s === 'Production') return ['Stope'];
+    if (String(s).startsWith('Production')) return ['Stope'];
   }
 
   // Hauling
@@ -179,6 +179,31 @@ export default function SiteAdminAddActivity() {
   }, [activity, sub]);
 
   const [values, setValues] = useState<Record<string, any>>({});
+
+  // Full-screen +/- count modal (used for Backfilling Underground buckets, etc.)
+  const [countModal, setCountModal] = useState<{ field: string } | null>(null);
+  const countKeyCaptureRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!countModal) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const key = (e.key || '').toLowerCase();
+      if (key !== 'a' && key !== 'b') return;
+      e.preventDefault();
+      e.stopPropagation();
+      const field = countModal.field;
+      setValues((v) => {
+        const cur = Math.max(0, parseInt(String(v[field] ?? 0), 10) || 0);
+        if (key === 'a') return { ...v, [field]: cur + 1 };
+        return { ...v, [field]: Math.max(0, cur - 1) };
+      });
+      window.setTimeout(() => countKeyCaptureRef.current?.focus(), 0);
+    };
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    window.setTimeout(() => countKeyCaptureRef.current?.focus(), 0);
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true } as any);
+  }, [countModal]);
+
 
   // Hauling: per-load weights
   const [haulSameWeight, setHaulSameWeight] = useState<boolean>(true);
@@ -348,10 +373,14 @@ async function submit() {
       if (haulSameWeight) {
         const c = Number(String(haulLoadCount || '').replace(/[^0-9]/g, ''));
         const w = Number(String(haulDefaultWeight || '').replace(/[^0-9.]/g, ''));
-        loads = Array.from({ length: c }, () => ({ weight: w }));
+        loads = Array.from({ length: c }, () => ({ weight: w, time_s: null, kind: 'manual' }));
       } else {
         loads = haulLoads
-          .map((l) => ({ weight: Number(String(l.weight || '').replace(/[^0-9.]/g, '')) }))
+          .map((l) => ({
+            weight: Number(String(l.weight || '').replace(/[^0-9.]/g, '')),
+            time_s: (l as any)?.time_s ?? null,
+            kind: (l as any)?.kind || (typeof (l as any)?.time_s === 'number' ? 'timed' : 'manual'),
+          }))
           .filter((l) => Number.isFinite(l.weight) && l.weight > 0);
       }
       baseValues.Trucks = loads.length;
@@ -400,7 +429,8 @@ async function submit() {
   }, [haulLoads]);
 
   return (
-    <div className="min-h-screen bg-slate-100">
+    <>
+      <div className="min-h-screen bg-slate-100">
       <Header title="Add Validated Activity" showSync={false} showBell={false} />
 
       <div className="max-w-3xl mx-auto p-4 pb-28">
@@ -585,12 +615,23 @@ async function submit() {
               return (
                 <div key={f.field}>
                   <label className="block text-sm font-medium">{label}{f.required ? ' *' : ''}</label>
-                  <input
-                    className="input"
-                    inputMode={isNum ? 'decimal' : 'text'}
-                    value={String(values[f.field] ?? '')}
-                    onChange={(e) => setValues((v) => ({ ...v, [f.field]: e.target.value }))}
-                  />
+                  {(activity === 'Backfilling' && sub === 'Underground' && f.field === 'Buckets') ? (
+                    <button
+                      type="button"
+                      className="input text-left flex items-center justify-between"
+                      onClick={() => setCountModal({ field: f.field })}
+                    >
+                      <span className="opacity-70">Tap to count</span>
+                      <span className="font-semibold">{String(values[f.field] ?? 0)}</span>
+                    </button>
+                  ) : (
+                    <input
+                      className="input"
+                      inputMode={isNum ? 'decimal' : 'text'}
+                      value={String(values[f.field] ?? '')}
+                      onChange={(e) => setValues((v) => ({ ...v, [f.field]: e.target.value }))}
+                    />
+                  )}
                 </div>
               );
             })}
@@ -845,5 +886,67 @@ async function submit() {
 
       <SiteAdminBottomNav />
     </div>
+
+      {countModal ? (
+        <div className="fixed inset-0 z-[1002] bg-black/85">
+          <div className="absolute inset-0 flex flex-col p-4">
+            <div className="flex items-center justify-between">
+              <div className="text-white">
+                <div className="text-sm opacity-80">Count</div>
+                <div className="text-xs opacity-70">A = +1, B = −1</div>
+              </div>
+              <button type="button" className="btn" onClick={() => setCountModal(null)}>
+                Done
+              </button>
+            </div>
+
+            <div className="relative mt-4 flex-1 rounded-2xl bg-white p-4 flex flex-col items-center justify-center">
+              <div className="text-7xl font-extrabold tabular-nums">{String(values[countModal.field] ?? 0)}</div>
+
+              <div className="mt-6 flex w-full gap-3">
+                <button
+                  type="button"
+                  className="btn flex-1 text-2xl py-6"
+                  onClick={() =>
+                    setValues((v) => {
+                      const cur = Math.max(0, parseInt(String(v[countModal.field] ?? 0), 10) || 0);
+                      return { ...v, [countModal.field]: Math.max(0, cur - 1) };
+                    })
+                  }
+                >
+                  −
+                </button>
+
+                <button
+                  type="button"
+                  className="btn flex-1 text-2xl py-6"
+                  onClick={() =>
+                    setValues((v) => {
+                      const cur = Math.max(0, parseInt(String(v[countModal.field] ?? 0), 10) || 0);
+                      return { ...v, [countModal.field]: cur + 1 };
+                    })
+                  }
+                >
+                  +
+                </button>
+              </div>
+
+              <input
+                ref={countKeyCaptureRef}
+                autoFocus
+                inputMode="none"
+                readOnly
+                className="absolute opacity-0 pointer-events-none"
+                aria-hidden="true"
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+
+
+    </>
+
   );
 }

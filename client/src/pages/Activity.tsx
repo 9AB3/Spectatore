@@ -1,6 +1,6 @@
 import Header from '../components/Header';
 import data from '../data/activities.json';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getDB } from '../lib/idb';
 import { useNavigate } from 'react-router-dom';
 import useToast from '../hooks/useToast';
@@ -104,7 +104,7 @@ function allowedLocationTypes(
   // Loading
   if (a === 'Loading') {
     if (s === 'Development') return ['Heading'];
-    if (s === 'Production') return ['Stope'];
+    if (String(s).startsWith('Production')) return ['Stope'];
   }
 
   // Hauling
@@ -161,13 +161,168 @@ export default function Activity() {
   });
   const [pdModal, setPdModal] = useState<null | { bucket: ProdDrillBucket }>(null);
   const [countModal, setCountModal] = useState<null | { field: string }>(null);
+  const [truckModal, setTruckModal] = useState<null | { trucksField: string; weightField: string }>(null);
+  const [truckUseDefaultWeight, setTruckUseDefaultWeight] = useState<boolean>(true);
+  const [truckWeightClickerMode, setTruckWeightClickerMode] = useState<boolean>(false);
+  const [truckWeightDigit, setTruckWeightDigit] = useState<0 | 1>(0);
+  const truckKeyCaptureRef = useRef<HTMLInputElement | null>(null);
+
+  // Robust focus helper for bluetooth HID keypads (some browsers need a focused element).
+  const focusTruckCapture = useCallback(() => {
+    const el = truckKeyCaptureRef.current;
+    if (!el) return;
+    try {
+      (el as any).focus?.({ preventScroll: true });
+    } catch {
+      el.focus();
+    }
+    window.requestAnimationFrame(() => {
+      try {
+        (el as any).focus?.({ preventScroll: true });
+      } catch {
+        el.focus();
+      }
+    });
+    window.setTimeout(() => {
+      try {
+        (el as any).focus?.({ preventScroll: true });
+      } catch {
+        el.focus();
+      }
+    }, 50);
+  }, []);
+
+  const countKeyCaptureRef = useRef<HTMLInputElement | null>(null);
+
+
+  // Bluetooth 2-key keyboard support:
+  // When the loader bucket count modal is open, map:
+  //   A = increment, B = decrement
+  useEffect(() => {
+    if (!countModal) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const key = (e.key || '').toLowerCase();
+      if (key !== 'a' && key !== 'b') return;
+
+      // Prevent the keystroke from typing into inputs or triggering browser shortcuts.
+      e.preventDefault();
+      e.stopPropagation();
+
+      const f = countModal.field;
+      setValues((v) => {
+        const cur = Math.max(0, parseInt(String((v as any)[f] ?? 0), 10) || 0);
+        const next = key === 'a' ? cur + 1 : Math.max(0, cur - 1);
+        return { ...v, [f]: String(next) };
+      });
+    };
+
+    // Use capture so we can intercept before focused inputs consume the key.
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [countModal]);
+
+  // Bluetooth 2-key keyboard support for hauling trucks keypad:
+  // Default: A = +1 truck, B = −1 truck
+  // When weight clicker mode is enabled: A increments selected digit (wrap 0-9), B toggles digit (tens/ones)
+  useEffect(() => {
+    if (!truckModal) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const key = (e.key || '').toLowerCase();
+      if (key !== 'a' && key !== 'b') return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const tf = truckModal.trucksField;
+      const wf = truckModal.weightField;
+
+      if (truckWeightClickerMode) {
+        if (key === 'b') {
+          setTruckWeightDigit((d) => (d === 0 ? 1 : 0));
+          return;
+        }
+
+        // key === 'a' increments selected digit
+        setValues((v) => {
+          const raw = String((v as any)[wf] ?? '').replace(/[^0-9]/g, '');
+          const num = Math.max(0, Math.min(99, parseInt(raw || '0', 10)));
+          const tens = Math.floor(num / 10);
+          const ones = num % 10;
+          const nt = truckWeightDigit === 0 ? (tens + 1) % 10 : tens;
+          const no = truckWeightDigit === 1 ? (ones + 1) % 10 : ones;
+          const next = nt * 10 + no;
+          return { ...v, [wf]: String(next) };
+        });
+        return;
+      }
+
+      // Trucks +/- mode
+      setValues((v) => {
+        const cur = Math.max(0, parseInt(String((v as any)[tf] ?? 0), 10) || 0);
+        const next = key === 'a' ? cur + 1 : Math.max(0, cur - 1);
+        const out: any = { ...v, [tf]: String(next) };
+        if (truckUseDefaultWeight) {
+          const wRaw = String((v as any)[wf] ?? '').trim();
+          if (!wRaw) out[wf] = '0';
+        }
+        return out;
+      });
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [truckModal, truckUseDefaultWeight, truckWeightClickerMode, truckWeightDigit]);
+
+
+  // Auto-focus a hidden input so bluetooth key events are captured even if no visible input is focused.
+  useEffect(() => {
+    if (!countModal) return;
+    const t = window.setTimeout(() => countKeyCaptureRef.current?.focus(), 40);
+    return () => window.clearTimeout(t);
+  }, [countModal]);
+
   const [pdLastDiameter, setPdLastDiameter] = useState<string>('102mm');
 
 // Hauling: allow per-load weights
+type HaulLoad = { id: string; weight: string; time_s: number | null; kind: 'manual' | 'timed' };
+const mkHaulLoad = (kind: 'manual' | 'timed', weight: string, time_s: number | null = null): HaulLoad => ({
+  id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  kind,
+  weight,
+  time_s,
+});
 const [haulSameWeight, setHaulSameWeight] = useState<boolean>(true);
 const [haulDefaultWeight, setHaulDefaultWeight] = useState<string>('');
 const [haulLoadCount, setHaulLoadCount] = useState<string>('');
-const [haulLoads, setHaulLoads] = useState<Array<{ weight: string }>>([]);
+const [haulLoads, setHaulLoads] = useState<HaulLoad[]>([]);
+  const [haulLogTimesOpen, setHaulLogTimesOpen] = useState<boolean>(false);
+  const [haulTimingRunning, setHaulTimingRunning] = useState<boolean>(false);
+  const [haulTimingStartMs, setHaulTimingStartMs] = useState<number>(0);
+  const [haulTimingNowMs, setHaulTimingNowMs] = useState<number>(0);
+  const [haulTimingLoadIndex, setHaulTimingLoadIndex] = useState<number>(-1);
+  const [haulTimingPaused, setHaulTimingPaused] = useState<boolean>(false);
+  const [haulTimingElapsedS, setHaulTimingElapsedS] = useState<number>(0);
+
+// Hauling clicker (Log Times) advanced mode:
+// A starts a new load (timer) then becomes "weight +" while running (hold to ramp weight).
+// B dumps the load (stops timer).
+// Presets are controlled on the hauling form (default 60t max, 1t increments)
+const [haulClickerWeightStep, setHaulClickerWeightStep] = useState<number>(1);
+const [haulClickerWeightMax, setHaulClickerWeightMax] = useState<number>(60);
+
+const [haulClickerSettingsOpen, setHaulClickerSettingsOpen] = useState<boolean>(false);
+const [haulManualWeightOpen, setHaulManualWeightOpen] = useState<boolean>(false);
+const [haulManualWeightDraft, setHaulManualWeightDraft] = useState<string>('');
+const haulManualWeightHoldTimerRef = useRef<number | null>(null);
+const haulWeightHoldIntervalRef = useRef<number | null>(null);
+const haulWeightHoldingRef = useRef<boolean>(false);
+
+// If user accidentally dumps a load, allow a quick "undo dump" (restart timer on the same load)
+const [haulLastDumpedIndex, setHaulLastDumpedIndex] = useState<number>(-1);
+const [haulLastDumpedAtMs, setHaulLastDumpedAtMs] = useState<number>(0);
+
 
 
   // Load equipment/location lists (online -> cache; offline -> cache)
@@ -230,6 +385,184 @@ const [haulLoads, setHaulLoads] = useState<Array<{ weight: string }>>([]);
     ]);
   }, [activity, sub]);
 
+  // Bluetooth 2-key keyboard support for Hauling "Log Times":
+//
+// Default mode (legacy):
+//   A = "Truck loaded" (start timer + create new load)
+//   B = "Load dumped" (stop timer + attach elapsed time)
+//
+// Clicker-weight mode (recommended):
+//   A when idle = start new load (timer) with weight=0
+//   A while running = weight + (hold to ramp; wraps at max)
+//   B = dump load (stop timer + attach elapsed time)
+useEffect(() => {
+  if (!haulLogTimesOpen) return;
+
+  // NOTE: focusTruckCapture is defined above (useCallback) and reused here.
+
+  const stopWeightHold = () => {
+    haulWeightHoldingRef.current = false;
+    if (haulWeightHoldIntervalRef.current) {
+      window.clearInterval(haulWeightHoldIntervalRef.current);
+      haulWeightHoldIntervalRef.current = null;
+    }
+  };
+
+  const bumpWeight = () => {
+    const idx = haulTimingLoadIndex;
+    if (idx < 0) return;
+
+    setHaulLoads((prev) => {
+      if (idx < 0 || idx >= prev.length) return prev;
+      const step = Number(haulClickerWeightStep) || 0.1;
+      const max = Number(haulClickerWeightMax) || 10;
+
+      return prev.map((l, i) => {
+        if (i !== idx) return l;
+        const cur = Math.max(0, Number(String((l as any).weight ?? '').replace(/[^0-9.]/g, '')) || 0);
+        const nextRaw = cur + step;
+        const next = nextRaw > max ? 0 : nextRaw;
+        // Format with dp based on step (0dp if step is whole number, else 1dp).
+        const dp = Number.isInteger(step) ? 0 : 1;
+        const w = next.toFixed(dp);
+        return { ...l, weight: w };
+      });
+    });
+  };
+
+  const startNewLoad = () => {
+    // A in idle/paused: start a brand new load (finalize any paused load as-is).
+    if (haulTimingRunning) return;
+
+    // Starting a new load clears any undo/pause helper state
+    setHaulLastDumpedIndex(-1);
+    setHaulLastDumpedAtMs(0);
+
+    const start = Date.now();
+    setHaulTimingElapsedS(0);
+    setHaulTimingStartMs(start);
+    setHaulTimingNowMs(start);
+    setHaulTimingRunning(true);
+    setHaulTimingPaused(false);
+
+    setHaulLoads((prev) => {
+      const weight =
+        '0';
+      const next = [...prev, mkHaulLoad('timed', weight, null)];
+      setHaulTimingLoadIndex(next.length - 1);
+      return next;
+    });
+
+    window.setTimeout(() => focusTruckCapture(), 0);
+  };
+
+  const pauseLoad = () => {
+    // B while running: pause timer in place (do not advance load index).
+    if (!haulTimingRunning) return;
+
+    stopWeightHold();
+
+    const end = Date.now();
+    const deltaS = Math.max(0, Math.round((end - haulTimingStartMs) / 1000));
+    const elapsedS = Math.max(0, (haulTimingElapsedS || 0) + deltaS);
+    const idx = haulTimingLoadIndex;
+
+    setHaulTimingElapsedS(elapsedS);
+    setHaulTimingRunning(false);
+    setHaulTimingPaused(true);
+    setHaulTimingStartMs(0);
+    setHaulTimingNowMs(0);
+
+    // Persist the paused time onto the load so the form list shows it immediately.
+    setHaulLoads((prev) => {
+      if (idx < 0 || idx >= prev.length) return prev;
+      return prev.map((l, i) => (i === idx ? { ...l, time_s: elapsedS } : l));
+    });
+
+    // Keep focus for clicker
+    window.setTimeout(() => focusTruckCapture(), 0);
+  };
+
+  const continueLoad = () => {
+    // B while paused: resume timer from the paused position (same load index).
+    if (!haulTimingPaused || haulTimingLoadIndex < 0) return;
+
+    const start = Date.now();
+    setHaulTimingStartMs(start);
+    setHaulTimingNowMs(start);
+    setHaulTimingRunning(true);
+    setHaulTimingPaused(false);
+
+    window.setTimeout(() => focusTruckCapture(), 0);
+  };
+
+  const onKeyDown = (e: KeyboardEvent) => {
+    const key = (e.key || '').toLowerCase();
+    if (key !== 'a' && key !== 'b') return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Clicker-weight mode
+    if (key === 'a') {
+      if (!haulTimingRunning) {
+        startNewLoad();
+        return;
+      }
+
+      // While running: treat A as "weight +" (hold to ramp)
+      if (haulWeightHoldingRef.current) return;
+      haulWeightHoldingRef.current = true;
+
+      // immediate bump
+      bumpWeight();
+
+      // ramp while held
+      haulWeightHoldIntervalRef.current = window.setInterval(() => bumpWeight(), 140);
+      return;
+    }
+
+    // key === 'b'
+    if (haulTimingRunning) return pauseLoad();
+    if (haulTimingPaused) return continueLoad();
+    return;
+  };
+
+  const onKeyUp = (e: KeyboardEvent) => {
+    const key = (e.key || '').toLowerCase();
+if (key !== 'a') return;
+    stopWeightHold();
+  };
+
+  // Use boolean capture arg to avoid subtle option-object mismatch on removeEventListener.
+  window.addEventListener('keydown', onKeyDown, true);
+  window.addEventListener('keyup', onKeyUp, true);
+  return () => {
+    window.removeEventListener('keydown', onKeyDown, true);
+    window.removeEventListener('keyup', onKeyUp, true);
+    stopWeightHold();
+  };
+}, [
+  haulLogTimesOpen,
+haulClickerWeightStep,
+  haulClickerWeightMax,
+  haulTimingRunning,
+  haulTimingPaused,
+  haulTimingElapsedS,
+  haulTimingStartMs,
+  haulTimingLoadIndex,
+  haulSameWeight,
+  haulDefaultWeight,
+]);
+
+
+  // Update the visible stopwatch while timing
+  useEffect(() => {
+    if (!haulLogTimesOpen || !haulTimingRunning) return;
+    const id = window.setInterval(() => setHaulTimingNowMs(Date.now()), 200);
+    return () => window.clearInterval(id);
+  }, [haulLogTimesOpen, haulTimingRunning]);
+
   const errors = useMemo(() => {
     const e: Record<string, string> = {};
 
@@ -259,7 +592,7 @@ const [haulLoads, setHaulLoads] = useState<Array<{ weight: string }>>([]);
         const c = Number(String(haulLoadCount || '').replace(/[^0-9]/g, ''));
         const w = Number(String(haulDefaultWeight || '').replace(/[^0-9.]/g, ''));
         if (Number.isFinite(c) && c > 0 && Number.isFinite(w) && w > 0) {
-          return Array.from({ length: c }, () => ({ weight: w }));
+          return Array.from({ length: c }, () => ({ weight: w, time_s: null, kind: 'manual' }));
         }
       }
 
@@ -267,7 +600,7 @@ const [haulLoads, setHaulLoads] = useState<Array<{ weight: string }>>([]);
       const c = Number(String((values as any)['Trucks'] ?? '').replace(/[^0-9]/g, ''));
       const w = Number(String((values as any)['Weight'] ?? '').replace(/[^0-9.]/g, ''));
       if (Number.isFinite(c) && c > 0 && Number.isFinite(w) && w > 0) {
-        return Array.from({ length: c }, () => ({ weight: w }));
+        return Array.from({ length: c }, () => ({ weight: w, time_s: null, kind: 'manual' }));
       }
       return [];
     })();
@@ -470,7 +803,11 @@ if (activity === 'Production Drilling') {
   // Prefer explicit per-load entries
   if (haulLoads.length) {
     loads = haulLoads
-      .map((l) => ({ weight: Number(String(l.weight || '').replace(/[^0-9.]/g, '')) }))
+      .map((l) => ({
+        weight: Number(String(l.weight || '').replace(/[^0-9.]/g, '')),
+        time_s: (l as any)?.time_s ?? null,
+        kind: (l as any)?.kind || (typeof (l as any)?.time_s === 'number' ? 'timed' : 'manual'),
+      }))
       .filter((l) => Number.isFinite(l.weight) && l.weight > 0);
   }
   // If "same weight" is enabled and the user provided a count/weight, generate loads.
@@ -478,7 +815,7 @@ if (activity === 'Production Drilling') {
     const c = Number(String(haulLoadCount || '').replace(/[^0-9]/g, ''));
     const w = Number(String(haulDefaultWeight || '').replace(/[^0-9.]/g, ''));
     if (Number.isFinite(c) && c > 0 && Number.isFinite(w) && w > 0) {
-      loads = Array.from({ length: c }, () => ({ weight: w }));
+      loads = Array.from({ length: c }, () => ({ weight: w, time_s: null, kind: 'manual' }));
     }
   }
   // Back-compat fallback if legacy Trucks/Weight fields are used
@@ -486,7 +823,7 @@ if (activity === 'Production Drilling') {
     const c = Number(String((baseValues as any)['Trucks'] ?? '').replace(/[^0-9]/g, ''));
     const w = Number(String((baseValues as any)['Weight'] ?? '').replace(/[^0-9.]/g, ''));
     if (Number.isFinite(c) && c > 0 && Number.isFinite(w) && w > 0) {
-      loads = Array.from({ length: c }, () => ({ weight: w }));
+      loads = Array.from({ length: c }, () => ({ weight: w, time_s: null, kind: 'manual' }));
     }
   }
 
@@ -644,23 +981,40 @@ if (activity === 'Hauling' && f.field === 'Weight') {
   return null;
 }
 if (activity === 'Hauling' && f.field === 'Trucks') {
-  const totalW = haulLoads.reduce((acc, l) => acc + (Number(String(l.weight||'').replace(/[^0-9.]/g,'')) || 0), 0);
+  const totalW = haulLoads.reduce((acc, l) => acc + (Number(String(l.weight || '').replace(/[^0-9.]/g, '')) || 0), 0);
   const haulErr = errors['Trucks'] || errors['Weight'];
+  const fmtTime = (ts: any) => {
+    if (typeof ts !== 'number' || !Number.isFinite(ts)) return '';
+    const mm = String(Math.floor(ts / 60)).padStart(2, '0');
+    const ss = String(ts % 60).padStart(2, '0');
+    return `${mm}:${ss}`;
+  };
+
   return (
     <div key={idx} className="p-3 rounded-xl border border-slate-200 bg-slate-50">
-      <div className="flex items-center justify-between gap-3">
-        <div className="font-semibold">Truck Loads</div>
-        <div className="text-xs opacity-70">
-          {haulLoads.length} loads • {Math.round(totalW)} t
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="font-semibold">Truck Loads</div>
+          <div className="text-xs opacity-70">{haulLoads.length} loads • {Math.round(totalW)} t</div>
         </div>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => {
+            setHaulLogTimesOpen(true);
+            setHaulTimingRunning(false);
+            setHaulTimingLoadIndex(-1);
+            setHaulTimingStartMs(0);
+            setHaulTimingNowMs(0);
+            window.setTimeout(() => truckKeyCaptureRef.current?.focus(), 0);
+          }}
+        >
+          Log Times
+        </button>
       </div>
 
-      <div className="mt-2 flex items-center gap-2">
-        <input
-          type="checkbox"
-          checked={haulSameWeight}
-          onChange={(e) => setHaulSameWeight(e.target.checked)}
-        />
+      <div className="mt-3 flex items-center gap-2">
+        <input type="checkbox" checked={haulSameWeight} onChange={(e) => setHaulSameWeight(e.target.checked)} />
         <span className="text-sm">Same weight for all loads</span>
       </div>
 
@@ -695,7 +1049,13 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                 const w = Number(String(haulDefaultWeight || '').replace(/[^0-9.]/g, ''));
                 if (!Number.isFinite(c) || c <= 0) return;
                 if (!Number.isFinite(w) || w <= 0) return;
-                setHaulLoads(Array.from({ length: c }, () => ({ weight: String(w) })));
+
+                // Keep any timed loads, but rebuild the manual-load block
+                setHaulLoads((prev) => {
+                  const timed = prev.filter((l) => l.kind === 'timed');
+                  const manual = Array.from({ length: c }, () => mkHaulLoad('manual', String(w), null));
+                  return [...timed, ...manual];
+                });
               }}
             >
               Apply
@@ -703,55 +1063,58 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
           </div>
         </div>
       ) : (
-        <div className="mt-2 space-y-2">
-          <button
-            type="button"
-            className="btn"
-            onClick={() => setHaulLoads((prev) => [...prev, { weight: '' }])}
-          >
+        <div className="mt-2">
+          <button type="button" className="btn" onClick={() => setHaulLoads((prev) => [...prev, mkHaulLoad('manual', '')])}>
             + Add truck
           </button>
-          {haulLoads.length ? (
-            <div className="space-y-2">
-              {haulLoads.map((l, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <div className="text-xs w-12 opacity-70">#{i + 1}</div>
-                  <input
-                    className="input flex-1"
-                    inputMode="decimal"
-                    value={l.weight}
-                    onChange={(e) =>
-                      setHaulLoads((prev) =>
-                        prev.map((x, xi) => (xi === i ? { ...x, weight: e.target.value } : x)),
-                      )
-                    }
-                    placeholder="Weight (t)"
-                  />
-                  <button
-                    type="button"
-                    className="px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50"
-                    onClick={() => setHaulLoads((prev) => prev.filter((_, xi) => xi !== i))}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-xs opacity-70">Add loads to record unique weights.</div>
-          )}
         </div>
       )}
 
-      <div className="mt-2 text-xs opacity-70">
-        Tip: if you leave this empty, the app will fall back to legacy Trucks/Weight fields (if present).
+      {/* Load list on the form (truck #, weight, time) */}
+      <div className="mt-3 rounded-xl border border-slate-200 bg-white overflow-hidden">
+        <div className="px-3 py-2 border-b border-slate-200 text-sm font-semibold">Loads</div>
+        {haulLoads.length ? (
+          <div className="divide-y divide-slate-100">
+            {haulLoads.map((l, i) => (
+              <div key={(l as any).id || i} className="px-3 py-2 flex items-center gap-2">
+                <div className="w-10 text-sm font-bold tabular-nums">#{i + 1}</div>
+                <input
+                  className="input flex-1"
+                  inputMode="decimal"
+                  value={String(l.weight ?? '')}
+                  onChange={(e) => setHaulLoads((prev) => prev.map((x, xi) => (xi === i ? { ...x, weight: e.target.value } : x)))}
+                  placeholder="Weight (t)"
+                />
+                <div className="w-20 text-right text-sm tabular-nums text-slate-700">
+                  {fmtTime((l as any).time_s) || <span className="text-slate-400">—</span>}
+                </div>
+                <button
+                  type="button"
+                  className="px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50"
+                  onClick={() => {
+                    const id = (l as any).id;
+                    if (haulTimingRunning) {
+                      setHaulTimingRunning(false);
+                      setHaulTimingLoadIndex(-1);
+                      setHaulTimingStartMs(0);
+                      setHaulTimingNowMs(0);
+                    }
+                    setHaulLoads((prev) => prev.filter((x, xi) => (id ? (x as any).id !== id : xi !== i)));
+                  }}
+                  aria-label="Delete load"
+                  title="Delete load"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="p-3 text-xs text-slate-500">No loads yet. Use “Log Times” or “+ Add truck”.</div>
+        )}
       </div>
 
-      {haulErr ? (
-        <div className="mt-2 text-sm text-red-600">
-          {haulErr}
-        </div>
-      ) : null}
+      {haulErr ? <div className="mt-2 text-sm text-red-600">{haulErr}</div> : null}
     </div>
   );
 }
@@ -865,7 +1228,23 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                           Add holes
                         </button>
                       </div>
-                    ) : activity === 'Loading' && ['Stope to Truck','Stope to SP','SP to Truck','SP to SP','Heading to Truck','Heading to SP'].includes(f.field) ? (
+                    ) : activity === 'Hauling' && f.field === 'Trucks' ? (
+                      <button
+                        type="button"
+                        className="input text-left flex items-center justify-between"
+                        onClick={() => {
+                          setTruckWeightClickerMode(false);
+                          setTruckWeightDigit(0);
+                          setTruckUseDefaultWeight(true);
+                          setTruckModal({ trucksField: 'Trucks', weightField: 'Weight' });
+                          // focus capture target on next tick
+                          window.setTimeout(() => truckKeyCaptureRef.current?.focus(), 0);
+                        }}
+                      >
+                        <span className="opacity-70">Tap to count</span>
+                        <span className="font-semibold">{String(values['Trucks'] ?? 0)} trucks</span>
+                      </button>
+                    ) : ((activity === 'Loading' && ['Stope to Truck','Stope to SP','SP to Truck','SP to SP','Heading to Truck','Heading to SP'].includes(f.field)) || (activity === 'Backfilling' && sub === 'Underground' && f.field === 'Buckets')) ? (
                       <button
                         type="button"
                         className="input text-left flex items-center justify-between"
@@ -988,22 +1367,34 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
 
       
       {countModal ? (
-        <div
-          className="fixed inset-0 bg-black/40 flex items-start justify-center p-4 z-[1000] overflow-auto pt-6 pb-24"
-          onClick={() => setCountModal(null)}
-        >
-          <div
-            className="w-full max-w-sm rounded-2xl bg-white shadow-xl border border-slate-200 p-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-lg font-semibold">Buckets</div>
-                <div className="text-xs opacity-70">{countModal.field}</div>
+        <div className="fixed inset-0 z-[1000] bg-black/85" onPointerDown={(e) => {
+          // Keep a focus target active so bluetooth key events are captured.
+          // If the user taps into the number input, let them type normally.
+          const el = e.target as HTMLElement | null;
+          const isEditingNumber = !!el && (el.tagName === 'INPUT' || el.getAttribute?.('data-edit-buckets') === '1');
+          if (!isEditingNumber) countKeyCaptureRef.current?.focus();
+        }}>
+          <div className="w-full h-full flex flex-col">
+            {/* Hidden focus target so bluetooth key events are captured without tapping the number */}
+            <input
+              ref={countKeyCaptureRef}
+              autoFocus
+              inputMode="none"
+              readOnly
+              aria-hidden="true"
+              tabIndex={-1}
+              className="absolute opacity-0 w-px h-px -left-[9999px] -top-[9999px]"
+            />
+
+            <div className="p-4 flex items-center justify-between">
+              <div className="text-white">
+                <div className="text-base font-bold">{countModal.field}</div>
+                <div className="text-xs opacity-80">Bluetooth keys: A = +1, B = −1</div>
               </div>
+
               <button
                 type="button"
-                className="w-9 h-9 flex items-start justify-center rounded-xl border border-slate-200 hover:bg-slate-50"
+                className="w-11 h-11 flex items-center justify-center rounded-2xl bg-white/10 text-white border border-white/15 hover:bg-white/15"
                 onClick={() => setCountModal(null)}
                 aria-label="Close"
                 title="Close"
@@ -1012,52 +1403,714 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
               </button>
             </div>
 
-            <div className="mt-4 flex items-center justify-between gap-3">
+            <div className="flex-1 flex items-center justify-center px-4">
+              <div className="w-full max-w-md">
+                <input
+                  data-edit-buckets="1"
+                  className="w-full bg-transparent text-center text-white font-extrabold leading-none outline-none"
+                  style={{ fontSize: '96px' }}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  type="text"
+                  value={String(values[countModal.field] ?? '')}
+                  placeholder="0"
+                  onChange={(e) => {
+                    const f = countModal.field;
+                    // allow blank while editing
+                    const raw = e.target.value.replace(/[^0-9]/g, '');
+                    setValues((v) => ({ ...v, [f]: raw }));
+                  }}
+                  onBlur={() => {
+                    const f = countModal.field;
+                    setValues((v) => {
+                      const cur = parseInt(String((v as any)[f] ?? 0), 10);
+                      const next = Number.isFinite(cur) ? Math.max(0, cur) : 0;
+                      return { ...v, [f]: String(next) };
+                    });
+                    // return focus to capture input after manual typing
+                    window.setTimeout(() => countKeyCaptureRef.current?.focus(), 0);
+                  }}
+                />
+
+                <div className="mt-6 flex gap-4">
+                  <button
+                    type="button"
+                    className="flex-1 h-20 rounded-3xl bg-white text-slate-900 text-4xl font-extrabold shadow-xl active:translate-y-[1px]"
+                    onClick={() => {
+                      const f = countModal.field;
+                      const cur = Math.max(0, parseInt(String(values[f] ?? 0), 10) || 0);
+                      const next = Math.max(0, cur - 1);
+                      setValues((v) => ({ ...v, [f]: String(next) }));
+                      // keep focus so keys keep working
+                      countKeyCaptureRef.current?.focus();
+                    }}
+                  >
+                    −
+                  </button>
+
+                  <button
+                    type="button"
+                    className="flex-1 h-20 rounded-3xl bg-white text-slate-900 text-4xl font-extrabold shadow-xl active:translate-y-[1px]"
+                    onClick={() => {
+                      const f = countModal.field;
+                      const cur = Math.max(0, parseInt(String(values[f] ?? 0), 10) || 0);
+                      const next = cur + 1;
+                      setValues((v) => ({ ...v, [f]: String(next) }));
+                      countKeyCaptureRef.current?.focus();
+                    }}
+                  >
+                    +
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  className="mt-5 w-full h-14 rounded-2xl bg-white/10 text-white border border-white/15 font-bold hover:bg-white/15"
+                  onClick={() => setCountModal(null)}
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+
+{haulLogTimesOpen ? (
+  <div
+    className="fixed inset-0 z-[1002] bg-black/90"
+    onPointerDown={(e) => {
+      const el = e.target as HTMLElement | null;
+      const isEditing = !!el && (el.tagName === 'INPUT' || el.getAttribute?.('data-edit-haul') === '1');
+      if (!isEditing) window.setTimeout(() => truckKeyCaptureRef.current?.focus(), 0);
+    }}
+  >
+    <div className="absolute inset-0 flex flex-col p-4">
+      <div className="flex items-center justify-between">
+        <div className="text-white">
+          <div className="text-xs opacity-75">Hauling · Log Times</div>
+          <div className="text-xs opacity-60">Clicker: A = start new (idle/paused) or weight + (hold while running), B = Dump/Continue</div>
+        </div>
+
+        <button
+          type="button"
+          className="w-20 h-11 rounded-2xl bg-white/10 text-white border border-white/15 hover:bg-white/15 font-bold"
+          onClick={() => {
+            // Before closing, persist any running timer onto the active load so the form shows time.
+            if (haulTimingRunning && haulTimingLoadIndex >= 0) {
+              const end = Date.now();
+              const deltaS = Math.max(0, Math.round((end - haulTimingStartMs) / 1000));
+              const elapsedS = Math.max(0, (haulTimingElapsedS || 0) + deltaS);
+              const idx = haulTimingLoadIndex;
+
+              setHaulLoads((prev) => {
+                if (idx < 0 || idx >= prev.length) return prev;
+                return prev.map((l, i) => (i === idx ? { ...l, time_s: elapsedS } : l));
+              });
+            }
+
+            setHaulLogTimesOpen(false);
+
+            // Reset active timing state (loads remain)
+            setHaulTimingRunning(false);
+            setHaulTimingPaused(false);
+            setHaulTimingElapsedS(0);
+            setHaulTimingLoadIndex(-1);
+            setHaulTimingStartMs(0);
+            setHaulTimingNowMs(0);
+
+            // stop any hold
+            haulWeightHoldingRef.current = false;
+            if (haulWeightHoldIntervalRef.current) {
+              window.clearInterval(haulWeightHoldIntervalRef.current);
+              haulWeightHoldIntervalRef.current = null;
+            }
+          }}
+        >
+          Done
+        </button>
+      </div>
+
+      <div className="flex-1 flex items-center justify-center">
+        <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
+          {/* Load number */}
+          <div className="text-center">
+            <div className="text-slate-500 text-sm font-semibold tracking-wide">LOAD</div>
+            <div className="text-6xl md:text-7xl font-extrabold tabular-nums">
+              {(haulTimingRunning || haulTimingPaused) && haulTimingLoadIndex >= 0 ? haulTimingLoadIndex + 1 : haulLoads.length + 1}
+            </div>
+          </div>
+
+          {/* Stopwatch */}
+          <div className="mt-6 text-center">
+            <div className="text-slate-500 text-sm font-semibold tracking-wide">TIME</div>
+            <div className="mt-2 text-[80px] md:text-[110px] leading-none font-extrabold tabular-nums">
+              {haulTimingRunning
+                ? (() => {
+                    const ms = Math.max(0, (haulTimingNowMs || Date.now()) - haulTimingStartMs);
+                    const s = Math.max(0, (haulTimingElapsedS || 0) + Math.floor(ms / 1000));
+                    const mm = String(Math.floor(s / 60)).padStart(2, '0');
+                    const ss = String(s % 60).padStart(2, '0');
+                    return `${mm}:${ss}`;
+                  })()
+                : haulTimingPaused && haulTimingLoadIndex >= 0
+                  ? (() => {
+                      const s = Math.max(0, haulTimingElapsedS || 0);
+                      const mm = String(Math.floor(s / 60)).padStart(2, '0');
+                      const ss = String(s % 60).padStart(2, '0');
+                      return `${mm}:${ss}`;
+                    })()
+                  : '00:00'}
+            </div>
+          </div>
+          {/* Weight */}
+          <div className="mt-6 text-center select-none">
+            <div className="flex items-center justify-between gap-3">
               <button
                 type="button"
-                className="w-14 h-14 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-2xl font-semibold"
-                onClick={() => {
-                  const f = countModal.field;
-                  const cur = Math.max(0, parseInt(String(values[f] ?? 0), 10) || 0);
-                  const next = Math.max(0, cur - 1);
-                  setValues((v) => ({ ...v, [f]: String(next) }));
+                className="w-20 h-20 md:w-24 md:h-24 rounded-3xl bg-slate-100 text-slate-900 text-5xl font-extrabold shadow active:translate-y-[1px] disabled:opacity-40"
+                disabled={!haulTimingRunning || haulTimingLoadIndex < 0}
+                onPointerDown={() => {
+                  if (!haulTimingRunning || haulTimingLoadIndex < 0) return;
+                  if (haulWeightHoldingRef.current) return;
+                  haulWeightHoldingRef.current = true;
+
+                  const idx = haulTimingLoadIndex;
+                  const bump = () => {
+                    setHaulLoads((prev) =>
+                      prev.map((l, i) => {
+                        if (i !== idx) return l;
+                        const step = Number(haulClickerWeightStep) || 1;
+                        const cur = Math.max(0, Number(String((l as any).weight ?? '').replace(/[^0-9.]/g, '')) || 0);
+                        const next = Math.max(0, cur - step);
+                        const dp = Number.isInteger(step) ? 0 : 1;
+                        return { ...l, weight: next.toFixed(dp) };
+                      }),
+                    );
+                  };
+
+                  bump();
+                  haulWeightHoldIntervalRef.current = window.setInterval(() => bump(), 140);
+                }}
+                onPointerUp={() => {
+                  haulWeightHoldingRef.current = false;
+                  if (haulWeightHoldIntervalRef.current) {
+                    window.clearInterval(haulWeightHoldIntervalRef.current);
+                    haulWeightHoldIntervalRef.current = null;
+                  }
+                }}
+                onPointerCancel={() => {
+                  haulWeightHoldingRef.current = false;
+                  if (haulWeightHoldIntervalRef.current) {
+                    window.clearInterval(haulWeightHoldIntervalRef.current);
+                    haulWeightHoldIntervalRef.current = null;
+                  }
                 }}
               >
                 −
               </button>
 
-              <input
-                className="w-full h-14 text-center rounded-2xl border border-slate-200 text-2xl font-semibold"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={String(values[countModal.field] ?? 0)}
-                onChange={(e) => {
-                  const f = countModal.field;
-                  const raw = String(e.target.value || '').replace(/[^0-9]/g, '');
-                  setValues((v) => ({ ...v, [f]: raw === '' ? '0' : raw }));
-                }}
-              />
+              <div className="flex-1">
+                <div className="text-slate-500 text-sm font-semibold tracking-wide flex items-center justify-center gap-2">
+                  WEIGHT (t)
+                  <button
+                    type="button"
+                    className="px-3 py-1 rounded-xl bg-slate-900 text-white text-xs font-bold"
+                    onClick={() => setHaulClickerSettingsOpen(true)}
+                  >
+                    Clicker weight increments
+                  </button>
+                </div>
+
+                <div
+                  className="mt-2 text-[70px] md:text-[95px] leading-none font-extrabold tabular-nums cursor-pointer"
+                  data-edit-haul="1"
+                  onPointerDown={() => {
+                    if (!haulTimingRunning || haulTimingLoadIndex < 0) return;
+                    // press-and-hold to manually set weight (timer continues running)
+                    if (haulManualWeightHoldTimerRef.current) return;
+                    haulManualWeightHoldTimerRef.current = window.setTimeout(() => {
+                      haulManualWeightHoldTimerRef.current = null;
+                      const cur =
+                        haulTimingLoadIndex >= 0 && haulTimingLoadIndex < haulLoads.length
+                          ? String((haulLoads[haulTimingLoadIndex] as any)?.weight ?? '0')
+                          : '0';
+                      setHaulManualWeightDraft(cur);
+                      setHaulManualWeightOpen(true);
+                    }, 600) as any;
+                  }}
+                  onPointerUp={() => {
+                    if (haulManualWeightHoldTimerRef.current) {
+                      window.clearTimeout(haulManualWeightHoldTimerRef.current);
+                      haulManualWeightHoldTimerRef.current = null;
+                    }
+                  }}
+                  onPointerCancel={() => {
+                    if (haulManualWeightHoldTimerRef.current) {
+                      window.clearTimeout(haulManualWeightHoldTimerRef.current);
+                      haulManualWeightHoldTimerRef.current = null;
+                    }
+                  }}
+                >
+                  {(haulTimingRunning || haulTimingPaused) && haulTimingLoadIndex >= 0 && haulTimingLoadIndex < haulLoads.length
+                    ? String((haulLoads[haulTimingLoadIndex] as any)?.weight ?? '0')
+                    : '0'}
+                </div>
+
+                <div className="mt-2 text-xs text-slate-500">
+                  Tap +/- to adjust while running. Hold the number to set manually.
+                </div>
+              </div>
 
               <button
                 type="button"
-                className="w-14 h-14 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-2xl font-semibold"
-                onClick={() => {
-                  const f = countModal.field;
-                  const cur = Math.max(0, parseInt(String(values[f] ?? 0), 10) || 0);
-                  const next = cur + 1;
-                  setValues((v) => ({ ...v, [f]: String(next) }));
+                className="w-20 h-20 md:w-24 md:h-24 rounded-3xl bg-slate-100 text-slate-900 text-5xl font-extrabold shadow active:translate-y-[1px] disabled:opacity-40"
+                disabled={!haulTimingRunning || haulTimingLoadIndex < 0}
+                onPointerDown={() => {
+                  if (!haulTimingRunning || haulTimingLoadIndex < 0) return;
+                  if (haulWeightHoldingRef.current) return;
+                  haulWeightHoldingRef.current = true;
+
+                  const idx = haulTimingLoadIndex;
+                  const bump = () => {
+                    setHaulLoads((prev) =>
+                      prev.map((l, i) => {
+                        if (i !== idx) return l;
+                        const step = Number(haulClickerWeightStep) || 1;
+                        const max = Number(haulClickerWeightMax) || 60;
+                        const cur = Math.max(0, Number(String((l as any).weight ?? '').replace(/[^0-9.]/g, '')) || 0);
+                        const nextRaw = cur + step;
+                        const next = nextRaw > max ? 0 : nextRaw;
+                        const dp = Number.isInteger(step) ? 0 : 1;
+                        return { ...l, weight: next.toFixed(dp) };
+                      }),
+                    );
+                  };
+
+                  bump();
+                  haulWeightHoldIntervalRef.current = window.setInterval(() => bump(), 140);
+                }}
+                onPointerUp={() => {
+                  haulWeightHoldingRef.current = false;
+                  if (haulWeightHoldIntervalRef.current) {
+                    window.clearInterval(haulWeightHoldIntervalRef.current);
+                    haulWeightHoldIntervalRef.current = null;
+                  }
+                }}
+                onPointerCancel={() => {
+                  haulWeightHoldingRef.current = false;
+                  if (haulWeightHoldIntervalRef.current) {
+                    window.clearInterval(haulWeightHoldIntervalRef.current);
+                    haulWeightHoldIntervalRef.current = null;
+                  }
                 }}
               >
                 +
               </button>
             </div>
+          </div>
 
-            <div className="mt-4">
-              <button type="button" className="btn w-full" onClick={() => setCountModal(null)}>
-                Done
+          {/* Main action */}
+
+          <div className="mt-8">
+            {/* Running: show pause; weight adjust happens via holding A (clicker) or press-and-hold on WEIGHT */}
+            {haulTimingRunning ? (
+              <button
+                type="button"
+                className="w-full h-20 md:h-24 rounded-3xl bg-slate-900 text-white text-3xl md:text-4xl font-extrabold shadow-xl active:translate-y-[1px]"
+                onClick={() => {
+                  // Pause load (do not advance load number)
+                  haulWeightHoldingRef.current = false;
+                  if (haulWeightHoldIntervalRef.current) {
+                    window.clearInterval(haulWeightHoldIntervalRef.current);
+                    haulWeightHoldIntervalRef.current = null;
+                  }
+
+                  const end = Date.now();
+                  const deltaS = Math.max(0, Math.round((end - haulTimingStartMs) / 1000));
+                  const elapsedS = Math.max(0, (haulTimingElapsedS || 0) + deltaS);
+                  const idx = haulTimingLoadIndex;
+
+                  setHaulTimingElapsedS(elapsedS);
+                  setHaulTimingRunning(false);
+                  setHaulTimingPaused(true);
+                  setHaulTimingStartMs(0);
+                  setHaulTimingNowMs(0);
+
+                  setHaulLoads((prev) => {
+                    if (idx < 0 || idx >= prev.length) return prev;
+                    return prev.map((l, i) => (i === idx ? { ...l, time_s: elapsedS } : l));
+                  });
+
+                  window.setTimeout(() => truckKeyCaptureRef.current?.focus(), 0);
+                }}
+              >
+                Dump load
               </button>
-              <div className="mt-2 text-xs opacity-70 text-center">
-                Tip: you can tap the number and type as well.
+            ) : null}
+
+            {/* Idle: only start new load */}
+            {!haulTimingRunning && !haulTimingPaused ? (
+              <button
+                type="button"
+                className="w-full h-20 md:h-24 rounded-3xl bg-slate-900 text-white text-3xl md:text-4xl font-extrabold shadow-xl active:translate-y-[1px]"
+                onClick={() => {
+                  const start = Date.now();
+                  setHaulTimingElapsedS(0);
+                  setHaulTimingStartMs(start);
+                  setHaulTimingNowMs(start);
+                  setHaulTimingRunning(true);
+                  setHaulTimingPaused(false);
+
+                  setHaulLoads((prev) => {
+                    const weight = '0';
+                    const next = [...prev, mkHaulLoad('timed', weight, null)];
+                    setHaulTimingLoadIndex(next.length - 1);
+                    return next;
+                  });
+
+                  window.setTimeout(() => truckKeyCaptureRef.current?.focus(), 0);
+                }}
+              >
+                Start new load
+              </button>
+            ) : null}
+
+            {/* Paused: offer Continue or Start New */}
+            {!haulTimingRunning && haulTimingPaused ? (
+              <div className="grid grid-cols-1 gap-3">
+                <button
+                  type="button"
+                  className="w-full h-20 md:h-24 rounded-3xl bg-slate-900 text-white text-3xl md:text-4xl font-extrabold shadow-xl active:translate-y-[1px]"
+                  onClick={() => {
+                    const start = Date.now();
+                    setHaulTimingStartMs(start);
+                    setHaulTimingNowMs(start);
+                    setHaulTimingRunning(true);
+                    setHaulTimingPaused(false);
+                    window.setTimeout(() => truckKeyCaptureRef.current?.focus(), 0);
+                  }}
+                >
+                  Continue load
+                </button>
+
+                <button
+                  type="button"
+                  className="w-full h-16 md:h-20 rounded-3xl bg-white border border-slate-200 text-slate-900 text-2xl md:text-3xl font-extrabold shadow active:translate-y-[1px]"
+                  onClick={() => {
+                    // Finalize paused load as-is, and start a new one immediately
+                    const start = Date.now();
+                    setHaulTimingElapsedS(0);
+                    setHaulTimingStartMs(start);
+                    setHaulTimingNowMs(start);
+                    setHaulTimingRunning(true);
+                    setHaulTimingPaused(false);
+
+                    setHaulLoads((prev) => {
+                      const weight = '0';
+                      const next = [...prev, mkHaulLoad('timed', weight, null)];
+                      setHaulTimingLoadIndex(next.length - 1);
+                      return next;
+                    });
+
+                    window.setTimeout(() => truckKeyCaptureRef.current?.focus(), 0);
+                  }}
+                >
+                  Start new load
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+
+          
+          {/* Clicker settings overlay */}
+          {haulClickerSettingsOpen ? (
+            <div className="fixed inset-0 z-[1100] bg-black/70 flex items-center justify-center p-4">
+              <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl">
+                <div className="text-lg font-extrabold">Clicker weight increments</div>
+                <div className="mt-1 text-sm text-slate-500">Set the step and max. A-button ramp and +/- use these values.</div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600">Increment (t)</label>
+                    <input
+                      className="input"
+                      inputMode="decimal"
+                      value={String(haulClickerWeightStep)}
+                      onChange={(e) => setHaulClickerWeightStep(Number(e.target.value || 1))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600">Max (t)</label>
+                    <input
+                      className="input"
+                      inputMode="decimal"
+                      value={String(haulClickerWeightMax)}
+                      onChange={(e) => setHaulClickerWeightMax(Number(e.target.value || 60))}
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="mt-5 w-full h-14 rounded-2xl bg-slate-900 text-white font-extrabold text-lg active:translate-y-[1px]"
+                  onClick={() => {
+                    setHaulClickerSettingsOpen(false);
+                    window.setTimeout(() => focusTruckCapture(), 0);
+                  }}
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {/* Manual weight input overlay (press-and-hold weight) */}
+          {haulManualWeightOpen ? (
+            <div className="fixed inset-0 z-[1100] bg-black/70 flex items-center justify-center p-4">
+              <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl">
+                <div className="text-lg font-extrabold">Set weight (t)</div>
+                <div className="mt-1 text-sm text-slate-500">Timer keeps running — enter the weight then save.</div>
+
+                <input
+                  className="input mt-4 text-2xl font-extrabold"
+                  inputMode="decimal"
+                  value={haulManualWeightDraft}
+                  onChange={(e) => setHaulManualWeightDraft(e.target.value)}
+                  autoFocus
+                  data-edit-haul="1"
+                />
+
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    className="h-14 rounded-2xl bg-white border border-slate-200 font-extrabold text-lg active:translate-y-[1px]"
+                    onClick={() => {
+                      setHaulManualWeightOpen(false);
+                      window.setTimeout(() => focusTruckCapture(), 0);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="h-14 rounded-2xl bg-slate-900 text-white font-extrabold text-lg active:translate-y-[1px]"
+                    onClick={() => {
+                      const idx = haulTimingLoadIndex;
+                      if (!haulTimingRunning || idx < 0) {
+                        setHaulManualWeightOpen(false);
+                        return;
+                      }
+                      const step = Number(haulClickerWeightStep) || 1;
+                      const max = Number(haulClickerWeightMax) || 60;
+                      let v = Number(String(haulManualWeightDraft || '').replace(/[^0-9.]/g, ''));
+                      if (!Number.isFinite(v)) v = 0;
+                      v = Math.max(0, Math.min(max, v));
+                      const dp = Number.isInteger(step) ? 0 : 1;
+
+                      setHaulLoads((prev) =>
+                        prev.map((l, i) => (i === idx ? { ...l, weight: v.toFixed(dp) } : l)),
+                      );
+
+                      setHaulManualWeightOpen(false);
+                      window.setTimeout(() => focusTruckCapture(), 0);
+                    }}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+<div className="mt-4 text-center text-xs text-slate-500">
+            Exit to see the load list on the hauling form.
+          </div>
+        </div>
+      </div>
+
+      <input
+        ref={truckKeyCaptureRef}
+        autoFocus
+        inputMode="none"
+        readOnly
+        tabIndex={-1}
+        className="absolute opacity-0 w-px h-px -left-[9999px] -top-[9999px]"
+        aria-hidden="true"
+      />
+    </div>
+  </div>
+) : null}
+
+
+{truckModal ? (
+        <div
+          className="fixed inset-0 z-[1001] bg-black/85"
+          onPointerDown={(e) => {
+            const el = e.target as HTMLElement | null;
+            const isEditing = !!el && (el.tagName === 'INPUT' || el.getAttribute?.('data-edit-trucks') === '1' || el.getAttribute?.('data-edit-weight') === '1');
+            if (!isEditing) truckKeyCaptureRef.current?.focus();
+          }}
+        >
+          {/* Hidden focus target so bluetooth key events are captured without tapping */}
+          <input
+            ref={truckKeyCaptureRef}
+            autoFocus
+            inputMode="none"
+            readOnly
+            aria-hidden="true"
+            tabIndex={-1}
+            className="absolute opacity-0 w-px h-px -left-[9999px] -top-[9999px]"
+          />
+
+          <div className="w-full h-full flex flex-col">
+            <div className="p-4 flex items-center justify-between">
+              <div className="text-white">
+                <div className="text-base font-bold">Trucks</div>
+                <div className="text-xs opacity-80">
+                  {truckWeightClickerMode ? 'Weight clicker mode: A = rotate digit, B = switch digit' : 'Bluetooth keys: A = +1, B = −1'}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="w-11 h-11 flex items-center justify-center rounded-2xl bg-white/10 text-white border border-white/15 hover:bg-white/15"
+                onClick={() => setTruckModal(null)}
+                aria-label="Close"
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 flex flex-col items-center justify-center px-4 pb-6">
+              <div className="w-full max-w-md">
+                <input
+                  data-edit-trucks="1"
+                  className="w-full bg-transparent text-center text-white font-extrabold leading-none outline-none"
+                  style={{ fontSize: '84px' }}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  type="text"
+                  value={String(values[truckModal.trucksField] ?? '')}
+                  placeholder="0"
+                  onChange={(e) => {
+                    const tf = truckModal.trucksField;
+                    const raw = e.target.value.replace(/[^0-9]/g, '');
+                    setValues((v) => ({ ...v, [tf]: raw }));
+                  }}
+                  onFocus={() => setTruckWeightClickerMode(false)}
+                  onBlur={() => {
+                    const tf = truckModal.trucksField;
+                    setValues((v) => {
+                      const cur = parseInt(String((v as any)[tf] ?? 0), 10);
+                      const next = Number.isFinite(cur) ? Math.max(0, cur) : 0;
+                      return { ...v, [tf]: String(next) };
+                    });
+                    window.setTimeout(() => truckKeyCaptureRef.current?.focus(), 0);
+                  }}
+                />
+                <div className="mt-1 text-center text-white/80 text-sm font-semibold">trucks</div>
+
+                <div className="mt-6 flex gap-4">
+                  <button
+                    type="button"
+                    className="flex-1 h-20 rounded-3xl bg-white text-black text-4xl font-extrabold shadow-xl active:translate-y-[1px]"
+                    onClick={() => {
+                      const tf = truckModal.trucksField;
+                      const cur = Math.max(0, parseInt(String(values[tf] ?? 0), 10) || 0);
+                      const next = Math.max(0, cur - 1);
+                      setValues((v) => ({ ...v, [tf]: String(next) }));
+                      window.setTimeout(() => truckKeyCaptureRef.current?.focus(), 0);
+                    }}
+                  >
+                    −
+                  </button>
+                  <button
+                    type="button"
+                    className="flex-1 h-20 rounded-3xl bg-white text-black text-4xl font-extrabold shadow-xl active:translate-y-[1px]"
+                    onClick={() => {
+                      const tf = truckModal.trucksField;
+                      const cur = Math.max(0, parseInt(String(values[tf] ?? 0), 10) || 0);
+                      const next = cur + 1;
+                      setValues((v) => ({ ...v, [tf]: String(next) }));
+                      window.setTimeout(() => truckKeyCaptureRef.current?.focus(), 0);
+                    }}
+                  >
+                    +
+                  </button>
+                </div>
+
+                <div className="mt-6 p-4 rounded-3xl bg-white/10 border border-white/15">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-white font-bold">Default weight</div>
+                    <label className="flex items-center gap-2 text-white/90 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={truckUseDefaultWeight}
+                        onChange={(e) => setTruckUseDefaultWeight(e.target.checked)}
+                      />
+                      Use when counting
+                    </label>
+                  </div>
+
+                  <div className="mt-3 flex items-center gap-3">
+                    <input
+                      data-edit-weight="1"
+                      className="flex-1 input text-center text-lg font-bold"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      type="text"
+                      value={String(values[truckModal.weightField] ?? '')}
+                      placeholder="Weight (t)"
+                      onChange={(e) => {
+                        const wf = truckModal.weightField;
+                        const raw = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
+                        setValues((v) => ({ ...v, [wf]: raw }));
+                      }}
+                      onFocus={() => {
+                        // If the user wants to edit weight manually, disable clicker mode automatically.
+                        setTruckWeightClickerMode(false);
+                      }}
+                      onBlur={() => {
+                        const wf = truckModal.weightField;
+                        setValues((v) => {
+                          const cur = parseInt(String((v as any)[wf] ?? 0), 10);
+                          const next = Number.isFinite(cur) ? Math.max(0, Math.min(99, cur)) : 0;
+                          return { ...v, [wf]: String(next) };
+                        });
+                        window.setTimeout(() => truckKeyCaptureRef.current?.focus(), 0);
+                      }}
+                    />
+
+                    <button
+                      type="button"
+                      className="h-12 px-4 rounded-2xl bg-white/10 text-white border border-white/15 hover:bg-white/15 text-sm font-bold"
+                      onClick={() => {
+                        setTruckWeightClickerMode((x) => !x);
+                        window.setTimeout(() => truckKeyCaptureRef.current?.focus(), 0);
+                      }}
+                      title="Use A/B to edit weight digits"
+                    >
+                      {truckWeightClickerMode ? 'Clicker: ON' : 'Clicker: OFF'}
+                    </button>
+                  </div>
+
+                  {truckWeightClickerMode ? (
+                    <div className="mt-3 text-white/85 text-sm">
+                      Editing digit: <span className="font-bold">{truckWeightDigit === 0 ? 'tens' : 'ones'}</span> (B switches)
+                    </div>
+                  ) : null}
+                </div>
+
+                <button
+                  type="button"
+                  className="mt-6 w-full h-14 rounded-2xl bg-white/10 text-white border border-white/15 font-bold hover:bg-white/15"
+                  onClick={() => setTruckModal(null)}
+                >
+                  Done
+                </button>
               </div>
             </div>
           </div>

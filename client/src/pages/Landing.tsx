@@ -218,7 +218,7 @@ export default function Landing() {
                       ) : demoCard === 'network' ? (
                         <div>
                           <div className="flex items-center justify-between">
-                            <div className="text-sm font-semibold">You vs Network</div>
+                            <div className="text-sm font-semibold">You vs Crew</div>
                             <div className="text-xs text-slate-600">Optional sharing</div>
                           </div>
 
@@ -323,7 +323,7 @@ export default function Landing() {
                         <div className="flex items-center gap-2">
                           {[
                             ['you', 'You vs You'],
-                            ['network', 'You vs Network'],
+                            ['network', 'You vs Crew'],
                             ['crew', 'You vs Crew member'],
                           ].map(([key, label]) => (
                             <button

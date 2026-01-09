@@ -198,7 +198,7 @@ function computeMilestoneMetricMapForShift(
       prodDrillm += n(getVal(p, 'Redrills') || 0);
     }
 
-    if (activity === 'Loading' && sub === 'Production') {
+    if (activity === 'Loading' && String(sub).startsWith('Production')) {
       primProdBuckets += n(getVal(p, 'Stope to Truck') || 0);
       primProdBuckets += n(getVal(p, 'Stope to SP') || 0);
     }
@@ -403,7 +403,19 @@ router.get('/summary', authMiddleware, async (req: any, res: any) => {
 
     const shiftRows = shiftR.rows || [];
     if (shiftRows.length === 0) {
-      return res.json({ rows: [], rollup: {}, milestones: { byMetric: {} } });
+  
+    // Period totals for a simple "crew rank" UI on the client
+    const userPeriodTotal = Array.from(user.daily.values()).reduce((acc, v) => acc + (Number(v) || 0), 0);
+    const crewTotals = crewDailyList
+      .map((cm) => ({
+        id: cm.id,
+        name: cm.name,
+        email: cm.email,
+        total: Array.from(cm.daily.values()).reduce((acc: number, v: any) => acc + (Number(v) || 0), 0),
+      }))
+      .sort((a, b) => (b.total || 0) - (a.total || 0));
+
+    return res.json({ rows: [], rollup: {}, milestones: { byMetric: {} } });
     }
 
     const ids = shiftRows.map((r: any) => r.id);
@@ -674,12 +686,25 @@ router.get('/network', authMiddleware, async (req: any, res: any) => {
       }
     }
 
+    // Period totals (used by the "You vs Crew" ranked list UI)
+    const userPeriodTotal = Array.from(user.daily.values()).reduce((acc, v) => acc + n(v), 0);
+    const crewTotals = crewDailyList
+      .map((cm) => ({
+        id: cm.id,
+        name: cm.name,
+        email: cm.email,
+        total: Array.from(cm.daily.values()).reduce((acc, v) => acc + n(v), 0),
+      }))
+      .sort((a, b) => b.total - a.total);
+
     return res.json({
       metric,
       members: crewDailyList.map((x) => ({ id: x.id, name: x.name, email: x.email })),
       userBest: user.best,
       networkBest,
       compare: compareMember ? { user_id: compareMember.id, name: compareMember.name, email: compareMember.email } : null,
+      userPeriodTotal,
+      crewTotals,
       timeline,
     });
   } catch (err) {

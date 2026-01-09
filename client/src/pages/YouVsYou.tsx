@@ -391,7 +391,9 @@ function LineChart({
     const el = ref.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const x = e.clientX - r.left;
+    const xPx = e.clientX - r.left;
+    // Convert from pixels → SVG viewBox units so hover aligns even when the chart is scaled.
+    const x = (xPx / Math.max(1, r.width)) * w;
     const rel = Math.min(1, Math.max(0, (x - padL) / Math.max(1, w - padL - padR)));
     const idx = Math.round(rel * Math.max(0, points.length - 1));
     setHoverIdx(Number.isFinite(idx) ? idx : null);
@@ -517,8 +519,8 @@ function LineChart({
 
         {hover && (
           <div
-            className="absolute px-3 py-2 rounded-xl border border-slate-200 shadow-sm bg-white text-xs"
-            style={{ left: Math.min(w - 160, Math.max(8, hx - 70)), top: Math.max(8, hy - 42) }}
+            className="absolute pointer-events-none px-3 py-2 rounded-xl border border-slate-200 shadow-sm bg-white text-xs"
+            style={{ left: `${(hx / w) * 100}%`, top: `${(hy / h) * 100}%`, transform: 'translate(-50%, -120%)' }}
           >
             <div className="font-semibold text-slate-900">
               {hover.date} ({hover.label})
@@ -970,10 +972,7 @@ export default function YouVsYou() {
               <button className="btn" onClick={() => nav('/Main')}>
                 Back
               </button>
-              <button className="btn btn-secondary" onClick={() => nav('/PerformanceReview')}>
-                Classic Performance
-              </button>
-            </div>
+</div>
           </div>
         </div>
       </div>
@@ -991,12 +990,12 @@ export default function YouVsYou() {
               <div className="text-2xl font-bold">You vs You</div>
               <div className="text-sm text-slate-600">Trends and benchmarks based on your own logged shifts.</div>
             </div>
-            <div className="flex gap-2">
-              <button className="btn" onClick={() => nav('/YouVsNetwork')} title="Compare to crew">
-                Network
+            <div className="seg-tabs" role="tablist" aria-label="Performance pages">
+              <button role="tab" aria-selected="false" className="seg-tab" onClick={() => nav('/YouVsNetwork')} title="Compare to crew">
+                You vs Crew
               </button>
-              <button className="btn btn-secondary" onClick={() => nav('/PerformanceReview')}>
-                Classic
+              <button role="tab" aria-selected="true" className="seg-tab seg-tab--active" onClick={() => nav('/YouVsYou')}>
+                You vs You
               </button>
             </div>
           </div>

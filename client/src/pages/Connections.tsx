@@ -53,7 +53,7 @@ export default function Connections() {
           </div>
 
           <div className="mt-5 text-xs text-slate-500">
-            Tip: once connected, you can compare against a specific crew member inside <strong>You vs Network</strong>.
+            Tip: once connected, you can compare against a specific crew member inside <strong>You vs Crew</strong>.
           </div>
         </div>
       </div>

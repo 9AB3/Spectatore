@@ -331,7 +331,7 @@ function allowedLocationTypes(activity: string, sub: string, fieldName: string) 
   // Loading
   if (a === 'Loading') {
     if (s === 'Development') return ['Heading'];
-    if (s === 'Production') return ['Stope'];
+    if (String(s).startsWith('Production')) return ['Stope'];
   }
   // Hauling
   if (a === 'Hauling') {
@@ -622,7 +622,10 @@ export default function SiteAdminValidate() {
     return String(obj?.activity || row?.activity || '(No Activity)');
   }
   function getSubNameFromObj(row: any, obj: any) {
-    return String(obj?.sub || obj?.sub_activity || row?.sub_activity || '(No Sub Activity)');
+    const act = String(obj?.activity || row?.activity || '');
+    const sub = String(obj?.sub || obj?.sub_activity || row?.sub_activity || '(No Sub Activity)');
+    if (act === 'Loading' && sub === 'Production') return 'Production - Conventional';
+    return sub;
   }
 
   const validatedActObjByFullKey = useMemo(() => {
@@ -1495,7 +1498,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                       // activity header
                                       out.push(
                                         <tr key={`act|||${a}`} className="border-b border-slate-200 bg-slate-50">
-                                          <td className="p-2 font-semibold" colSpan={3}>
+                                          <td className="p-2 font-semibold" colSpan={4}>
                                             {a}
                                           </td>
                                         </tr>,
@@ -1509,7 +1512,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                               key={`${a}|||sub|||${r.sub}`}
                                               className="border-b border-slate-200 bg-slate-50/60"
                                             >
-                                              <td className="p-2 pl-6 font-semibold" colSpan={3}>
+                                              <td className="p-2 pl-6 font-semibold" colSpan={4}>
                                                 {r.sub}
                                               </td>
                                             </tr>,
@@ -1835,7 +1838,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                               <tbody>
                                                                 {flat.length === 0 ? (
                                                                   <tr>
-                                                                    <td className="p-2 text-xs opacity-70" colSpan={3}>
+                                                                    <td className="p-2 text-xs opacity-70" colSpan={4}>
                                                                       No truck weights found on these rows.
                                                                     </td>
                                                                   </tr>
@@ -1853,6 +1856,16 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                                             onChange={(e) => setTruck(actId, idx, e.target.value)}
                                                                           />
                                                                         </td>
+                                                                    <td className="p-1 text-xs opacity-80">
+                                                                      {(() => {
+                                                                        const ts: any = (t as any).time_s;
+                                                                        const s = typeof ts === 'number' ? ts : parseFloat(String(ts || ''));
+                                                                        if (!Number.isFinite(s)) return <span className="opacity-50">—</span>;
+                                                                        const mm = String(Math.floor(s / 60)).padStart(2, '0');
+                                                                        const ss = String(Math.round(s % 60)).padStart(2, '0');
+                                                                        return `${mm}:${ss}`;
+                                                                      })()}
+                                                                    </td>
                                                                         <td className="p-1">
                                                                           <button
                                                                             type="button"

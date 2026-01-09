@@ -635,7 +635,11 @@ router.get('/validated/fact-hauling', async (req, res) => {
           COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
-          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          CASE
+            WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
+            WHEN vsa.activity = 'Loading' AND vsa.sub_activity = 'Production' THEN 'Production - Conventional'
+            ELSE vsa.sub_activity
+          END AS sub_activity,
           vsa.payload_json AS payload
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
@@ -766,7 +770,9 @@ router.get('/validated/fact-hauling-loads', async (req, res) => {
         NULLIF(TRIM(b.vals->>'Material'), '') AS material,
 
         (x.ord - 1) AS load_index,
-        NULLIF(regexp_replace(COALESCE(x.lw->>'weight',''), '[^0-9.\-]', '', 'g'), '')::double precision AS load_weight_t
+        NULLIF(regexp_replace(COALESCE(x.lw->>'weight',''), '[^0-9.\-]', '', 'g'), '')::double precision AS load_weight_t,
+        NULLIF(regexp_replace(COALESCE(x.lw->>'time_s',''), '[^0-9\-]', '', 'g'), '')::int AS load_time_s,
+        NULLIF(TRIM(x.lw->>'kind'), '') AS load_kind
       FROM base b
       CROSS JOIN LATERAL jsonb_array_elements(b.loads) WITH ORDINALITY AS x(lw, ord)
       ORDER BY b.date, b.dn, b.user_email, b.activity_id, load_index;
@@ -800,7 +806,11 @@ router.get('/validated/fact-loading', async (req, res) => {
           COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
-          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          CASE
+            WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
+            WHEN vsa.activity = 'Loading' AND vsa.sub_activity = 'Production' THEN 'Production - Conventional'
+            ELSE vsa.sub_activity
+          END AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
@@ -866,7 +876,11 @@ router.get('/validated/fact-dev-face-drilling', async (req, res) => {
           COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
-          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          CASE
+            WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
+            WHEN vsa.activity = 'Loading' AND vsa.sub_activity = 'Production' THEN 'Production - Conventional'
+            ELSE vsa.sub_activity
+          END AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
@@ -932,7 +946,11 @@ router.get('/validated/fact-ground-support', async (req, res) => {
           COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
-          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          CASE
+            WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
+            WHEN vsa.activity = 'Loading' AND vsa.sub_activity = 'Production' THEN 'Production - Conventional'
+            ELSE vsa.sub_activity
+          END AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
@@ -1000,7 +1018,11 @@ router.get('/validated/fact-production-drilling', async (req, res) => {
           COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
-          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          CASE
+            WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
+            WHEN vsa.activity = 'Loading' AND vsa.sub_activity = 'Production' THEN 'Production - Conventional'
+            ELSE vsa.sub_activity
+          END AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
@@ -1069,7 +1091,11 @@ router.get('/validated/fact-production-drilling-holes', async (req, res) => {
           COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
-          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          CASE
+            WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
+            WHEN vsa.activity = 'Loading' AND vsa.sub_activity = 'Production' THEN 'Production - Conventional'
+            ELSE vsa.sub_activity
+          END AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals,
           COALESCE(vsa.payload_json->'holes','{}'::jsonb) AS holes_json
         FROM validated_shift_activities vsa
@@ -1154,7 +1180,11 @@ router.get('/validated/fact-charging', async (req, res) => {
           COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
-          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          CASE
+            WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
+            WHEN vsa.activity = 'Loading' AND vsa.sub_activity = 'Production' THEN 'Production - Conventional'
+            ELSE vsa.sub_activity
+          END AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
@@ -1217,7 +1247,11 @@ router.get('/validated/fact-backfilling', async (req, res) => {
           COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
-          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          CASE
+            WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
+            WHEN vsa.activity = 'Loading' AND vsa.sub_activity = 'Production' THEN 'Production - Conventional'
+            ELSE vsa.sub_activity
+          END AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
@@ -1274,7 +1308,11 @@ router.get('/validated/fact-firing', async (req, res) => {
           COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
-          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          CASE
+            WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
+            WHEN vsa.activity = 'Loading' AND vsa.sub_activity = 'Production' THEN 'Production - Conventional'
+            ELSE vsa.sub_activity
+          END AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
@@ -1363,7 +1401,11 @@ router.get('/validated/fact-hoisting', async (req, res) => {
           COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
           vsa.activity,
-          COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
+          CASE
+            WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
+            WHEN vsa.activity = 'Loading' AND vsa.sub_activity = 'Production' THEN 'Production - Conventional'
+            ELSE vsa.sub_activity
+          END AS sub_activity,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id

@@ -228,8 +228,8 @@
       {
         "field": "Distance",
         "required": 1,
-        "unit": "No.",
-        "input": "number|1-50"
+        "unit": "km",
+        "input": "number|1-50|1dp"
       }
     ],
     "Development": [
@@ -272,8 +272,8 @@
       {
         "field": "Distance",
         "required": 1,
-        "unit": "No.",
-        "input": "number|1-50"
+        "unit": "km",
+        "input": "number|1-50|1dp"
       },
       {
         "field": "Material",
@@ -284,7 +284,51 @@
     ]
   },
   "Loading": {
-    "Production": [
+    "Development": [
+      {
+        "field": "Equipment",
+        "required": 1,
+        "unit": "",
+        "input": "select|equipment"
+      },
+      {
+        "field": "Source",
+        "required": 1,
+        "unit": "",
+        "input": "select|location"
+      },
+      {
+        "field": "Material",
+        "required": 1,
+        "unit": "",
+        "input": "select|Ore;Waste"
+      },
+      {
+        "field": "Heading to Truck",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|0-200"
+      },
+      {
+        "field": "Heading to SP",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|0-200"
+      },
+      {
+        "field": "SP to Truck",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|0-200"
+      },
+      {
+        "field": "SP to SP",
+        "required": 1,
+        "unit": "No.",
+        "input": "number|0-200"
+      }
+    ],
+    "Production - Conventional": [
       {
         "field": "Equipment",
         "required": 1,
@@ -322,7 +366,7 @@
         "input": "number|0-200"
       }
     ],
-    "Development": [
+    "Production - Remote": [
       {
         "field": "Equipment",
         "required": 1,
@@ -336,19 +380,13 @@
         "input": "select|location"
       },
       {
-        "field": "Material",
-        "required": 1,
-        "unit": "",
-        "input": "select|Ore;Waste"
-      },
-      {
-        "field": "Heading to Truck",
+        "field": "Stope to Truck",
         "required": 1,
         "unit": "No.",
         "input": "number|0-200"
       },
       {
-        "field": "Heading to SP",
+        "field": "Stope to SP",
         "required": 1,
         "unit": "No.",
         "input": "number|0-200"
