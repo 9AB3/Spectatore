@@ -1,20 +1,34 @@
-# Server Dockerfile (Render-friendly)
+# Server Dockerfile (Render bulletproof)
 FROM node:20-slim
 
 WORKDIR /app
 
+# ---- Hard overrides (stop injected proxy/registry from hijacking npm) ----
+ENV npm_config_registry=https://registry.npmjs.org/
+ENV NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
+
+# If Render/builder injects proxies, blank them (common cause of "internal registry" fetches)
+ENV HTTP_PROXY=
+ENV HTTPS_PROXY=
+ENV http_proxy=
+ENV https_proxy=
+ENV NO_PROXY=
+ENV no_proxy=
+
 # 1) Copy only manifests first for better layer caching
 COPY package.json package-lock.json tsconfig.json ./
 
-# 2) Force public npm registry (prevents proxy/artifactory hijack)
-# 3) Use npm ci for deterministic faster installs
-RUN npm config set registry https://registry.npmjs.org/ \
- && npm ci --include=optional --no-audit --no-fund
+# 2) Install deps deterministically, forcing registry at command level
+#    (command flag overrides most configs)
+RUN node -p "process.version" \
+ && echo "npm registry (env)=$npm_config_registry" \
+ && npm config get registry \
+ && npm ci --registry=https://registry.npmjs.org/ --include=optional --no-audit --no-fund
 
-# 4) Copy source
+# 3) Copy source
 COPY src ./src
 
-# 5) Build TypeScript -> dist
+# 4) Build TypeScript -> dist
 RUN npm run build
 
 ENV PORT=3000
