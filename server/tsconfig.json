@@ -6,7 +6,12 @@
     "esModuleInterop": true,
     "outDir": "dist",
     "strict": false,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*"
+  ]
 }

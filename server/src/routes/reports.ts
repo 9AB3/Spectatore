@@ -403,19 +403,8 @@ router.get('/summary', authMiddleware, async (req: any, res: any) => {
 
     const shiftRows = shiftR.rows || [];
     if (shiftRows.length === 0) {
-  
-    // Period totals for a simple "crew rank" UI on the client
-    const userPeriodTotal = Array.from(user.daily.values()).reduce((acc, v) => acc + (Number(v) || 0), 0);
-    const crewTotals = crewDailyList
-      .map((cm) => ({
-        id: cm.id,
-        name: cm.name,
-        email: cm.email,
-        total: Array.from(cm.daily.values()).reduce((acc: number, v: any) => acc + (Number(v) || 0), 0),
-      }))
-      .sort((a, b) => (b.total || 0) - (a.total || 0));
-
-    return res.json({ rows: [], rollup: {}, milestones: { byMetric: {} } });
+      // No shifts in range
+      return res.json({ rows: [], rollup: {}, milestones: { byMetric: {} } });
     }
 
     const ids = shiftRows.map((r: any) => r.id);
