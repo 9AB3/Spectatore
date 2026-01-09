@@ -35,6 +35,7 @@ import SiteAdminPeople from './pages/SiteAdminPeople';
 import SiteAdminFeedbackApproval from './pages/SiteAdminFeedbackApproval';
 import SiteAdminSeed from './pages/SiteAdminSeed';
 import SiteAdminReconciliation from './pages/SiteAdminReconciliation';
+import SiteAdminPowerBiTokens from './pages/SiteAdminPowerBiTokens';
 import { useEffect, useState } from 'react';
 import { getDB } from './lib/idb';
 import ProtectedLayout from './components/ProtectedLayout';
@@ -181,6 +182,7 @@ export default function App() {
         <Route path="AddActivity" element={<SiteAdminAddActivity />} />
         {/* Validators must be able to access Equipment & Locations */}
         <Route path="Equipment&Locations" element={<RequireSiteAdmin><SiteAdminEquipmentLocations /></RequireSiteAdmin>} />
+        <Route path="PowerBiTokens" element={<RequireSiteAdminManage><SiteAdminPowerBiTokens /></RequireSiteAdminManage>} />
         <Route path="Sites" element={<RequireSiteAdminSuper><SiteAdminSites /></RequireSiteAdminSuper>} />
         <Route path="People" element={<RequireSiteAdminManage><SiteAdminPeople /></RequireSiteAdminManage>} />
         
