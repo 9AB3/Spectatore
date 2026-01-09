@@ -562,3 +562,23 @@ CREATE TABLE IF NOT EXISTS validated_reconciliation_days (
 CREATE INDEX IF NOT EXISTS idx_vrd_site_date ON validated_reconciliation_days(site, date);
 CREATE INDEX IF NOT EXISTS idx_vrd_metric ON validated_reconciliation_days(metric_key);
 CREATE INDEX IF NOT EXISTS idx_vrd_month ON validated_reconciliation_days(month_ym);
+
+-- =============================
+-- POWER BI SITE TOKENS
+-- =============================
+-- Per-site tokens used to secure Power BI web connector endpoints.
+-- A token is bound to a single site. In Power BI, users can append
+-- ?token=<token> to the URL without needing custom headers.
+
+CREATE TABLE IF NOT EXISTS powerbi_site_tokens (
+  id SERIAL PRIMARY KEY,
+  site TEXT NOT NULL,
+  label TEXT,
+  token TEXT NOT NULL UNIQUE,
+  created_by_user_id INTEGER,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  revoked_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_pbst_site ON powerbi_site_tokens(site);
+CREATE INDEX IF NOT EXISTS idx_pbst_token ON powerbi_site_tokens(token);

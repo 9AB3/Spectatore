@@ -8,6 +8,13 @@ import { siteAdminMiddleware } from '../lib/auth.js';
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
+function makePowerBiToken() {
+  // Short, URL-safe token.
+  const rand = crypto.randomBytes(18).toString('base64url');
+  const year = new Date().getFullYear();
+  return `spectatore-powerbi-${year}-${rand}`;
+}
+
 function isManager(req: any) {
   const sites = allowedSites(req);
   if (sites.includes('*')) return true;
@@ -47,6 +54,101 @@ router.get('/admin-sites', siteAdminMiddleware, async (_req, res) => {
     return res.json({ ok: true, sites: r.rows });
   } catch (e) {
     res.status(500).json({ ok: false, error: e?.message || 'Failed to load admin sites' });
+  }
+});
+
+// -----------------------------
+// Power BI site tokens (per-site)
+// -----------------------------
+// Site-admin managers can create and revoke tokens for their allowed sites.
+
+router.get('/powerbi-tokens', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const site = normalizeSiteParam(req);
+    if (site !== '*') assertSiteAccess(req, site);
+
+    const params: any[] = [];
+    let where = 'WHERE revoked_at IS NULL';
+    if (site !== '*') {
+      params.push(site);
+      where += ` AND site = $${params.length}`;
+    }
+
+    const r = await pool.query(
+      `
+      SELECT id, site, label, token, created_at, revoked_at
+      FROM powerbi_site_tokens
+      ${where}
+      ORDER BY site ASC, created_at DESC, id DESC
+      `,
+      params,
+    );
+
+    return res.json({ ok: true, site: site === '*' ? null : site, tokens: r.rows || [] });
+  } catch (e: any) {
+    const status = e?.status || 500;
+    return res.status(status).json({ ok: false, error: e?.message || 'Failed to load tokens' });
+  }
+});
+
+router.post('/powerbi-tokens', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    const label = String(req.body?.label || '').trim() || null;
+    if (!site || site === '*') {
+      return res.status(400).json({ ok: false, error: 'Site is required' });
+    }
+    assertSiteAccess(req, site);
+
+    // Generate a unique token (retry a couple times on the unlikely chance of collision)
+    let token = makePowerBiToken();
+    for (let i = 0; i < 3; i++) {
+      try {
+        const r = await pool.query(
+          `
+          INSERT INTO powerbi_site_tokens(site, label, token, created_by_user_id)
+          VALUES ($1, $2, $3, $4)
+          RETURNING id, site, label, token, created_at, revoked_at
+          `,
+          [site, label, token, req.site_admin?.user_id || null],
+        );
+        return res.json({ ok: true, token: r.rows?.[0] });
+      } catch (e: any) {
+        // Unique violation
+        if (String(e?.code || '') === '23505') {
+          token = makePowerBiToken();
+          continue;
+        }
+        throw e;
+      }
+    }
+
+    return res.status(500).json({ ok: false, error: 'Failed to generate unique token' });
+  } catch (e: any) {
+    const status = e?.status || 500;
+    return res.status(status).json({ ok: false, error: e?.message || 'Failed to create token' });
+  }
+});
+
+router.post('/powerbi-tokens/:id/revoke', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: 'Invalid id' });
+
+    // Ensure the token belongs to a site the requester can manage
+    const r0 = await pool.query('SELECT id, site FROM powerbi_site_tokens WHERE id=$1', [id]);
+    const row = r0.rows?.[0];
+    if (!row) return res.status(404).json({ ok: false, error: 'Not found' });
+    assertSiteAccess(req, String(row.site));
+
+    await pool.query('UPDATE powerbi_site_tokens SET revoked_at = now() WHERE id=$1', [id]);
+    return res.json({ ok: true });
+  } catch (e: any) {
+    const status = e?.status || 500;
+    return res.status(status).json({ ok: false, error: e?.message || 'Failed to revoke token' });
   }
 });
 
@@ -1947,6 +2049,91 @@ router.post('/reconciliation/unlock', siteAdminMiddleware, async (req: any, res)
     return res.json({ ok: true });
   } catch (e) {
     return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
+
+// =============================
+// POWER BI SITE TOKENS (per-site)
+// =============================
+// These are used by Power BI Desktop/Service via Web connector URLs.
+// Security model:
+// - Site Admin managers can create/revoke tokens for their allowed site(s)
+// - Tokens are bound to a specific site
+
+router.get('/powerbi-tokens', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const site = normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+
+    const r = await pool.query(
+      `SELECT id, site, label, token, created_at, revoked_at
+         FROM powerbi_site_tokens
+        WHERE site = $1
+        ORDER BY revoked_at NULLS FIRST, created_at DESC`,
+      [site],
+    );
+    return res.json({ ok: true, site, tokens: r.rows });
+  } catch (e: any) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'Failed to load tokens' });
+  }
+});
+
+router.post('/powerbi-tokens', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    const label = String(req.body?.label || '').trim() || null;
+    if (!site || site === '*') return res.status(400).json({ ok: false, error: 'Site is required' });
+    assertSiteAccess(req, site);
+
+    // Create token (retry on rare collisions)
+    let token = makePowerBiToken();
+    for (let i = 0; i < 3; i++) {
+      try {
+        const r = await pool.query(
+          `INSERT INTO powerbi_site_tokens(site, label, token, created_by_user_id)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id, site, label, token, created_at, revoked_at`,
+          [site, label, token, req.site_admin?.user_id || null],
+        );
+        return res.json({ ok: true, token: r.rows[0] });
+      } catch (err: any) {
+        if (String(err?.code || '') === '23505') {
+          token = makePowerBiToken();
+          continue;
+        }
+        throw err;
+      }
+    }
+    return res.status(500).json({ ok: false, error: 'Failed to create token (collision)' });
+  } catch (e: any) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'Failed to create token' });
+  }
+});
+
+router.post('/powerbi-tokens/:id/revoke', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ ok: false, error: 'Invalid id' });
+
+    const r = await pool.query(
+      `SELECT id, site FROM powerbi_site_tokens WHERE id=$1`,
+      [id],
+    );
+    const row = r.rows?.[0];
+    if (!row) return res.status(404).json({ ok: false, error: 'Token not found' });
+    assertSiteAccess(req, String(row.site));
+
+    await pool.query(
+      `UPDATE powerbi_site_tokens SET revoked_at=now() WHERE id=$1`,
+      [id],
+    );
+    return res.json({ ok: true });
+  } catch (e: any) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'Failed to revoke token' });
   }
 });
 
