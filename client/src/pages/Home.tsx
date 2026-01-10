@@ -108,11 +108,18 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center">
+    <div className="min-h-screen flex items-center justify-center p-4">
       <Toast />
-      <div className="card w-full max-w-sm text-center">
-        <img src="/logo.png" alt="Spectatore" className="mx-auto mb-4 w-56 h-56 object-contain" />
-        <div className="space-y-3">
+      <div className="card w-full max-w-md overflow-hidden">
+        <div className="p-6 md:p-7">
+          <div className="flex items-center gap-4">
+            <img src="/logo.png" alt="Spectatore" className="w-20 h-20 object-contain" />
+            <div className="min-w-0">
+              <div className="text-2xl font-extrabold tracking-tight">Spectatore</div>
+            </div>
+          </div>
+
+          <div className="mt-6 space-y-3">
           <input
             className="input"
             placeholder="Email"
@@ -126,7 +133,7 @@ export default function Home() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-          <label className="flex items-center gap-2">
+          <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--muted)' }}>
             <input
               type="checkbox"
               checked={remember}
@@ -139,23 +146,31 @@ export default function Home() {
             Remember me
           </label>
           {!online && (
-            <div className="text-red-600 text-sm">No connection – Log in requires network</div>
+            <div className="text-sm" style={{ color: 'var(--bad)' }}>
+              No connection – Log in requires network
+            </div>
           )}
-          <button className="btn w-full" onClick={login} disabled={!canLogin}>
-            TAG IN
-          </button>
-          <button className="btn w-full" onClick={() => nav('/Register')}>
-            GET INDUCTED
-          </button>
-          <button className="btn w-full" onClick={() => nav('/ForgotPassword')}>
-            LOST TAG
-          </button>
-          <div
-            className="text-xs text-sky-600 cursor-pointer mt-1"
+          <div className="grid grid-cols-1 gap-2 pt-2">
+            <button className="btn w-full" onClick={login} disabled={!canLogin}>
+              Tag in
+            </button>
+            <button className="btn-secondary w-full px-4 py-3 rounded-2xl font-semibold" onClick={() => nav('/Register')}>
+              Get inducted
+            </button>
+            <button className="w-full px-4 py-3 rounded-2xl font-semibold border" style={{ borderColor: 'var(--hairline)', color: 'var(--text)', background: 'transparent' }} onClick={() => nav('/ForgotPassword')}>
+              Lost tag
+            </button>
+          </div>
+
+          <button
+            type="button"
+            className="mt-4 w-full text-sm font-semibold underline opacity-80 hover:opacity-100"
+            style={{ color: 'var(--accent-2)' }}
             onClick={() => nav('/SiteAdminLogin')}
           >
-            Site Admin
-          </div>
+            Site Admin login
+          </button>
+        </div>
         </div>
       </div>
     </div>

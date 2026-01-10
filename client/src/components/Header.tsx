@@ -153,12 +153,12 @@ export default function Header({ title, showSync = true, showBell = true }: { ti
         </div>
       </div>
 
-      <div className="flex items-center gap-3 text-sm text-slate-700 flex-shrink-0">
+      <div className="flex items-center gap-3 text-sm flex-shrink-0" style={{ color: 'var(--muted)' }}>
         {canShowBell ? (
           <button
             type="button"
-            className="relative w-10 h-10 rounded-full border flex items-center justify-center hover:bg-slate-50"
-            style={{ borderColor: '#e9d9c3' }}
+            className="relative w-10 h-10 rounded-full border flex items-center justify-center"
+            style={{ borderColor: 'var(--hairline)', background: 'rgba(255,255,255,0.06)' }}
             onClick={() => nav('/Notifications')}
             aria-label="Notifications"
             title="Notifications"

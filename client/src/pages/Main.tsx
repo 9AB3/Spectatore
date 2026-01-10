@@ -4,8 +4,29 @@ import useToast from '../hooks/useToast';
 import { useEffect, useState } from 'react';
 import { getDB } from '../lib/idb';
 import { api } from '../lib/api';
-import portalIcon from '../assets/portal_icon.png';
-import tagoutIcon from '../assets/tagout.png';
+
+function IconPortal({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true">
+      <path d="M12 3a7 7 0 1 0 7 7" strokeLinecap="round" />
+      <path d="M12 3v4" strokeLinecap="round" />
+      <path d="M16 7h4" strokeLinecap="round" />
+      <path d="M21 12a9 9 0 1 1-9-9" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconSignOut({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true">
+      <path d="M10 17l-1 0a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4h1" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M15 12H9" strokeLinecap="round" />
+      <path d="M15 12l-3-3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M15 12l-3 3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M14 7h3a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-3" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 function FeedbackIcon({ className = '' }: { className?: string }) {
   return (
@@ -117,83 +138,95 @@ export default function Main() {
     <div>
       <Toast />
       <Header />
-      <div className="p-4 max-w-2xl mx-auto space-y-4">
+      <div className="p-4 max-w-5xl mx-auto space-y-5">
         <div className="card">
-          <div className="text-xs opacity-70">Home</div>
-          <div className="text-2xl font-bold">Shift Portal</div>
-          <div className="text-sm opacity-70 mt-1">Start a new shift, tag out, or send feedback.</div>
+          <div className="text-xs" style={{ color: 'var(--muted)' }}>Home</div>
+          <div className="text-3xl md:text-4xl font-extrabold tracking-tight">Shift Portal</div>
+          <div className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+            Start a new shift, review validation, or manage your account.
+          </div>
         </div>
 
         <div className="space-y-3">
-          <button
-            type="button"
-            className="card w-full flex items-center justify-between gap-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0"
-            onClick={() => setOpen(true)}
-          >
-            <div className="flex items-center gap-4">
-              <div
-                className="h-14 w-14 rounded-2xl flex items-center justify-center shadow-sm"
-                style={{ background: 'var(--brand)', color: 'white' }}
-                aria-hidden="true"
-              >
-                <img src={portalIcon} alt="" className="h-9 w-9" />
-              </div>
-              <div>
-                <div className="text-xs opacity-70">Shift</div>
-                <div className="text-lg font-bold leading-tight">Start shift</div>
-                <div className="text-sm opacity-70">Choose date &amp; DS/NS</div>
-              </div>
-            </div>
-            <svg viewBox="0 0 24 24" className="h-6 w-6 opacity-50" aria-hidden="true">
-              <path d="M9 18l6-6-6-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-semibold" style={{ color: 'var(--text)' }}>Continue Working</div>
+            <div className="text-xs" style={{ color: 'var(--muted)' }}>Tap a tile</div>
+          </div>
 
-          <button
-            type="button"
-            className="card w-full flex items-center justify-between gap-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0"
-            onClick={tagOut}
-          >
-            <div className="flex items-center gap-4">
-              <div
-                className="h-14 w-14 rounded-2xl flex items-center justify-center shadow-sm"
-                style={{ background: 'rgba(15, 23, 42, 0.08)' }}
-                aria-hidden="true"
-              >
-                <img src={tagoutIcon} alt="" className="h-9 w-9" />
+          <div className="tv-row">
+            <button
+              type="button"
+              className="tv-tile min-w-[260px] w-[260px] md:w-[320px] text-left transition-transform"
+              onClick={() => setOpen(true)}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-xs" style={{ color: 'var(--muted)' }}>Shift</div>
+                  <div className="text-xl font-extrabold leading-tight">Start new shift</div>
+                  <div className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Choose date &amp; DS/NS</div>
+                </div>
+                <div className="h-12 w-12 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(184, 135, 47, 0.16)', border: '1px solid var(--hairline)' }} aria-hidden="true">
+                  <IconPortal className="h-6 w-6" />
+                </div>
               </div>
-              <div>
-                <div className="text-xs opacity-70">Session</div>
-                <div className="text-lg font-bold leading-tight">Tag out</div>
-                <div className="text-sm opacity-70">Sign out of the app</div>
+              <div className="mt-4">
+                <div className="inline-flex items-center gap-2 text-xs font-semibold" style={{ color: 'var(--muted)' }}>
+                  <span className="h-2 w-2 rounded-full" style={{ background: 'var(--accent)' }} />
+                  Enter portal
+                </div>
               </div>
-            </div>
-            <svg viewBox="0 0 24 24" className="h-6 w-6 opacity-50" aria-hidden="true">
-              <path d="M9 18l6-6-6-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        </div>
+            </button>
 
-        <div className="card flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <FeedbackIcon className="h-5 w-5" />
-            <div>
-              <div className="font-semibold">Feedback</div>
-              <div className="text-xs opacity-70">Report bugs or suggest improvements.</div>
+            <button
+              type="button"
+              className="tv-tile min-w-[260px] w-[260px] md:w-[320px] text-left transition-transform"
+              onClick={tagOut}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-xs" style={{ color: 'var(--muted)' }}>Session</div>
+                  <div className="text-xl font-extrabold leading-tight">Tag out</div>
+                  <div className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Sign out of the app</div>
+                </div>
+                <div className="h-12 w-12 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(10, 132, 255, 0.14)', border: '1px solid var(--hairline)' }} aria-hidden="true">
+                  <IconSignOut className="h-6 w-6" />
+                </div>
+              </div>
+              <div className="mt-4">
+                <div className="inline-flex items-center gap-2 text-xs font-semibold" style={{ color: 'var(--muted)' }}>
+                  <span className="h-2 w-2 rounded-full" style={{ background: 'var(--accent-2)' }} />
+                  End session
+                </div>
+              </div>
+            </button>
+
+            <div className="tv-tile min-w-[260px] w-[260px] md:w-[320px]">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-xs" style={{ color: 'var(--muted)' }}>Support</div>
+                  <div className="text-xl font-extrabold leading-tight">Feedback</div>
+                  <div className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Report bugs or suggest improvements</div>
+                </div>
+                <div className="h-12 w-12 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(17, 24, 39, 0.12)', border: '1px solid var(--hairline)' }} aria-hidden="true">
+                  <FeedbackIcon className="h-6 w-6" />
+                </div>
+              </div>
+              <div className="mt-4">
+                <button type="button" onClick={() => nav('/Feedback')} className="btn w-full">
+                  Open
+                </button>
+              </div>
             </div>
           </div>
-          <button type="button" onClick={() => nav('/Feedback')} className="btn">
-            Open
-          </button>
         </div>
 
         {isAdmin ? (
           <div className="card flex items-center justify-between gap-3">
             <div>
               <div className="font-semibold">Admin</div>
-              <div className="text-xs opacity-70">Manage users and run seed tools.</div>
+              <div className="text-xs" style={{ color: 'var(--muted)' }}>Manage users and run seed tools.</div>
             </div>
-            <button type="button" onClick={() => nav('/AdminUsers')} className="btn">
+            <button type="button" onClick={() => nav('/AdminUsers')} className="btn-secondary px-4 py-3 rounded-2xl font-semibold">
               Users
             </button>
           </div>

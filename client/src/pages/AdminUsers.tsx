@@ -148,9 +148,7 @@ export default function AdminUsers() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b">
-                  <th className="text-left py-2 pr-2">Name</th>
-                  <th className="text-left py-2 pr-2">Email</th>
-                  <th className="text-left py-2 pr-2">Site</th>
+                  <th className="text-left py-2 pr-2">Name</th>                  <th className="text-left py-2 pr-2">Site</th>
                   <th className="text-left py-2 pr-2">State</th>
                   <th className="text-left py-2 pr-2">Role</th>
                   <th className="text-right py-2 pl-2">Actions</th>
@@ -169,7 +167,6 @@ export default function AdminUsers() {
                         </div>
                       </td>
                       <td className="py-2 pr-2">
-                        <div className="text-xs text-slate-700">{u.email}</div>
                       </td>
                       <td className="py-2 pr-2">{u.site || '-'}</td>
                       <td className="py-2 pr-2">{u.state || '-'}</td>

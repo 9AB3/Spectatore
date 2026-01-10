@@ -991,7 +991,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
   };
 
   return (
-    <div key={idx} className="p-3 rounded-xl border border-slate-200 bg-slate-50">
+    <div key={idx} className="p-3 rounded-xl border tv-surface tv-border">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="font-semibold">Truck Loads</div>
@@ -1071,8 +1071,8 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
       )}
 
       {/* Load list on the form (truck #, weight, time) */}
-      <div className="mt-3 rounded-xl border border-slate-200 bg-white overflow-hidden">
-        <div className="px-3 py-2 border-b border-slate-200 text-sm font-semibold">Loads</div>
+      <div className="mt-3 rounded-xl border overflow-hidden tv-surface tv-border">
+        <div className="px-3 py-2 border-b text-sm font-semibold tv-border">Loads</div>
         {haulLoads.length ? (
           <div className="divide-y divide-slate-100">
             {haulLoads.map((l, i) => (
@@ -1085,12 +1085,12 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                   onChange={(e) => setHaulLoads((prev) => prev.map((x, xi) => (xi === i ? { ...x, weight: e.target.value } : x)))}
                   placeholder="Weight (t)"
                 />
-                <div className="w-20 text-right text-sm tabular-nums text-slate-700">
-                  {fmtTime((l as any).time_s) || <span className="text-slate-400">—</span>}
+                <div className="w-20 text-right text-sm tabular-nums text-[var(--text)]">
+                  {fmtTime((l as any).time_s) || <span className="text-[var(--muted)]">—</span>}
                 </div>
                 <button
                   type="button"
-                  className="px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50"
+                  className="px-3 py-2 rounded-xl border tv-surface tv-border hover:brightness-[1.03]"
                   onClick={() => {
                     const id = (l as any).id;
                     if (haulTimingRunning) {
@@ -1110,7 +1110,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
             ))}
           </div>
         ) : (
-          <div className="p-3 text-xs text-slate-500">No loads yet. Use “Log Times” or “+ Add truck”.</div>
+          <div className="p-3 text-xs tv-muted">No loads yet. Use “Log Times” or “+ Add truck”.</div>
         )}
       </div>
 
@@ -1124,7 +1124,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                   <label className="block text-sm font-medium">
                     {f.field}
                     {f.required ? ' *' : ''}{' '}
-                    {f.unit ? <span className="text-xs text-slate-500">({f.unit})</span> : null}
+                    {f.unit ? <span className="text-xs tv-muted">({f.unit})</span> : null}
                   </label>
 
                   {/* ✅ Equipment select (filtered) + manual option always works */}
@@ -1495,7 +1495,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
 
         <button
           type="button"
-          className="w-20 h-11 rounded-2xl bg-white/10 text-white border border-white/15 hover:bg-white/15 font-bold"
+          className="w-20 h-11 rounded-2xl tv-surface/10 text-white border border-white/15 hover:tv-surface/15 font-bold"
           onClick={() => {
             // Before closing, persist any running timer onto the active load so the form shows time.
             if (haulTimingRunning && haulTimingLoadIndex >= 0) {
@@ -1533,10 +1533,10 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
       </div>
 
       <div className="flex-1 flex items-center justify-center">
-        <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
+        <div className="w-full max-w-2xl rounded-3xl tv-surface border tv-border p-6 shadow-2xl">
           {/* Load number */}
           <div className="text-center">
-            <div className="text-slate-500 text-sm font-semibold tracking-wide">LOAD</div>
+            <div className="tv-muted text-sm font-semibold tracking-wide">LOAD</div>
             <div className="text-6xl md:text-7xl font-extrabold tabular-nums">
               {(haulTimingRunning || haulTimingPaused) && haulTimingLoadIndex >= 0 ? haulTimingLoadIndex + 1 : haulLoads.length + 1}
             </div>
@@ -1544,7 +1544,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
 
           {/* Stopwatch */}
           <div className="mt-6 text-center">
-            <div className="text-slate-500 text-sm font-semibold tracking-wide">TIME</div>
+            <div className="tv-muted text-sm font-semibold tracking-wide">TIME</div>
             <div className="mt-2 text-[80px] md:text-[110px] leading-none font-extrabold tabular-nums">
               {haulTimingRunning
                 ? (() => {
@@ -1569,7 +1569,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
             <div className="flex items-center justify-between gap-3">
               <button
                 type="button"
-                className="w-20 h-20 md:w-24 md:h-24 rounded-3xl bg-slate-100 text-slate-900 text-5xl font-extrabold shadow active:translate-y-[1px] disabled:opacity-40"
+                className="w-20 h-20 md:w-24 md:h-24 rounded-3xl tv-surface/10 border border-white/15 text-[color:var(--text)] text-3xl md:text-4xl font-extrabold shadow active:translate-y-[1px] disabled:opacity-40"
                 disabled={!haulTimingRunning || haulTimingLoadIndex < 0}
                 onPointerDown={() => {
                   if (!haulTimingRunning || haulTimingLoadIndex < 0) return;
@@ -1612,11 +1612,11 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
               </button>
 
               <div className="flex-1">
-                <div className="text-slate-500 text-sm font-semibold tracking-wide flex items-center justify-center gap-2">
+                <div className="tv-muted text-sm font-semibold tracking-wide flex items-center justify-center gap-2">
                   WEIGHT (t)
                   <button
                     type="button"
-                    className="px-3 py-1 rounded-xl bg-slate-900 text-white text-xs font-bold"
+                    className="px-3 py-1 rounded-xl tv-surface/10 text-[color:var(--text)] border border-white/15 text-xs font-bold"
                     onClick={() => setHaulClickerSettingsOpen(true)}
                   >
                     Clicker weight increments
@@ -1658,14 +1658,14 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                     : '0'}
                 </div>
 
-                <div className="mt-2 text-xs text-slate-500">
+                <div className="mt-2 text-xs tv-muted">
                   Tap +/- to adjust while running. Hold the number to set manually.
                 </div>
               </div>
 
               <button
                 type="button"
-                className="w-20 h-20 md:w-24 md:h-24 rounded-3xl bg-slate-100 text-slate-900 text-5xl font-extrabold shadow active:translate-y-[1px] disabled:opacity-40"
+                className="w-20 h-20 md:w-24 md:h-24 rounded-3xl tv-surface/10 border border-white/15 text-[color:var(--text)] text-3xl md:text-4xl font-extrabold shadow active:translate-y-[1px] disabled:opacity-40"
                 disabled={!haulTimingRunning || haulTimingLoadIndex < 0}
                 onPointerDown={() => {
                   if (!haulTimingRunning || haulTimingLoadIndex < 0) return;
@@ -1718,7 +1718,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
             {haulTimingRunning ? (
               <button
                 type="button"
-                className="w-full h-20 md:h-24 rounded-3xl bg-slate-900 text-white text-3xl md:text-4xl font-extrabold shadow-xl active:translate-y-[1px]"
+                className="btn w-full h-20 md:h-24 rounded-3xl text-2xl md:text-4xl font-extrabold shadow-xl"
                 onClick={() => {
                   // Pause load (do not advance load number)
                   haulWeightHoldingRef.current = false;
@@ -1754,7 +1754,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
             {!haulTimingRunning && !haulTimingPaused ? (
               <button
                 type="button"
-                className="w-full h-20 md:h-24 rounded-3xl bg-slate-900 text-white text-3xl md:text-4xl font-extrabold shadow-xl active:translate-y-[1px]"
+                className="btn w-full h-20 md:h-24 rounded-3xl text-2xl md:text-4xl font-extrabold shadow-xl"
                 onClick={() => {
                   const start = Date.now();
                   setHaulTimingElapsedS(0);
@@ -1782,7 +1782,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
               <div className="grid grid-cols-1 gap-3">
                 <button
                   type="button"
-                  className="w-full h-20 md:h-24 rounded-3xl bg-slate-900 text-white text-3xl md:text-4xl font-extrabold shadow-xl active:translate-y-[1px]"
+                  className="btn w-full h-20 md:h-24 rounded-3xl text-2xl md:text-4xl font-extrabold shadow-xl"
                   onClick={() => {
                     const start = Date.now();
                     setHaulTimingStartMs(start);
@@ -1797,7 +1797,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
 
                 <button
                   type="button"
-                  className="w-full h-16 md:h-20 rounded-3xl bg-white border border-slate-200 text-slate-900 text-2xl md:text-3xl font-extrabold shadow active:translate-y-[1px]"
+                  className="w-full h-16 md:h-20 rounded-3xl tv-surface border border-white/15 text-[color:var(--text)] text-2xl md:text-3xl font-extrabold shadow active:translate-y-[1px]"
                   onClick={() => {
                     // Finalize paused load as-is, and start a new one immediately
                     const start = Date.now();
@@ -1828,13 +1828,13 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
           {/* Clicker settings overlay */}
           {haulClickerSettingsOpen ? (
             <div className="fixed inset-0 z-[1100] bg-black/70 flex items-center justify-center p-4">
-              <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl">
+              <div className="w-full max-w-md rounded-3xl tv-surface p-5 shadow-2xl">
                 <div className="text-lg font-extrabold">Clicker weight increments</div>
-                <div className="mt-1 text-sm text-slate-500">Set the step and max. A-button ramp and +/- use these values.</div>
+                <div className="mt-1 text-sm tv-muted">Set the step and max. A-button ramp and +/- use these values.</div>
 
                 <div className="mt-4 grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600">Increment (t)</label>
+                    <label className="block text-xs font-semibold tv-muted">Increment (t)</label>
                     <input
                       className="input"
                       inputMode="decimal"
@@ -1843,7 +1843,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600">Max (t)</label>
+                    <label className="block text-xs font-semibold tv-muted">Max (t)</label>
                     <input
                       className="input"
                       inputMode="decimal"
@@ -1855,7 +1855,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
 
                 <button
                   type="button"
-                  className="mt-5 w-full h-14 rounded-2xl bg-slate-900 text-white font-extrabold text-lg active:translate-y-[1px]"
+                  className="mt-5 w-full h-14 rounded-2xl btn font-extrabold text-lg active:translate-y-[1px]"
                   onClick={() => {
                     setHaulClickerSettingsOpen(false);
                     window.setTimeout(() => focusTruckCapture(), 0);
@@ -1870,9 +1870,9 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
           {/* Manual weight input overlay (press-and-hold weight) */}
           {haulManualWeightOpen ? (
             <div className="fixed inset-0 z-[1100] bg-black/70 flex items-center justify-center p-4">
-              <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl">
+              <div className="w-full max-w-md rounded-3xl tv-surface p-5 shadow-2xl">
                 <div className="text-lg font-extrabold">Set weight (t)</div>
-                <div className="mt-1 text-sm text-slate-500">Timer keeps running — enter the weight then save.</div>
+                <div className="mt-1 text-sm tv-muted">Timer keeps running — enter the weight then save.</div>
 
                 <input
                   className="input mt-4 text-2xl font-extrabold"
@@ -1886,7 +1886,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                 <div className="mt-4 grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    className="h-14 rounded-2xl bg-white border border-slate-200 font-extrabold text-lg active:translate-y-[1px]"
+                    className="h-14 rounded-2xl tv-surface border border-white/15 font-extrabold text-lg active:translate-y-[1px]"
                     onClick={() => {
                       setHaulManualWeightOpen(false);
                       window.setTimeout(() => focusTruckCapture(), 0);
@@ -1896,7 +1896,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                   </button>
                   <button
                     type="button"
-                    className="h-14 rounded-2xl bg-slate-900 text-white font-extrabold text-lg active:translate-y-[1px]"
+                    className="h-14 rounded-2xl btn font-extrabold text-lg active:translate-y-[1px]"
                     onClick={() => {
                       const idx = haulTimingLoadIndex;
                       if (!haulTimingRunning || idx < 0) {
@@ -1924,7 +1924,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
               </div>
             </div>
           ) : null}
-<div className="mt-4 text-center text-xs text-slate-500">
+<div className="mt-4 text-center text-xs tv-muted">
             Exit to see the load list on the hauling form.
           </div>
         </div>
@@ -2119,7 +2119,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
 
 {pdModal ? (
         <div className="fixed inset-0 bg-black/30 flex items-start justify-center z-[1000] p-3 overflow-auto pt-6 pb-24">
-          <div className="bg-white w-full max-w-md sm:max-w-2xl rounded-2xl shadow-xl border p-3 sm:p-4">
+          <div className="tv-surface-soft w-full max-w-md sm:max-w-2xl rounded-3xl shadow-xl border tv-border p-3 sm:p-5">
             <div className="flex items-center justify-between gap-3 mb-3">
               <div>
                 <div className="font-bold">Production drilling holes</div>
@@ -2136,7 +2136,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
 
             <div className="overflow-auto border rounded-xl">
               <table className="w-full table-fixed text-sm">
-                <thead className="bg-slate-50 border-b">
+                <thead className="tv-surface-soft border-b tv-divider">
                   <tr>
                     <th className="p-1 text-left w-[72px]">Ring ID</th>
                     <th className="p-1 text-left w-[72px]">Hole ID</th>
@@ -2281,7 +2281,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
         </div>
       ) : null}
 
-      <div className="sticky bottom-0 left-0 right-0 bg-white border-t bottom-0 left-0 right-0 bg-white border-t">
+      <div className="sticky bottom-0 left-0 right-0 tv-surface tv-border border-t">
         <div className="max-w-2xl mx-auto p-4 flex gap-2">
           <button className="btn btn-primary flex-1" onClick={finishTask} disabled={!canFinish}>
             FINISH TASK

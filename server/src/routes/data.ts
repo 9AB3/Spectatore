@@ -394,7 +394,7 @@ router.get('/connections/incoming', authMiddleware, async (req: any, res) => {
   try {
     const uid = Number(req.user_id || req.query.user_id);
     const r = await pool.query(
-      `SELECT c.id, c.requester_id, u.name, u.email, c.status, c.created_at
+      `SELECT c.id, c.requester_id, u.name, c.status, c.created_at
          FROM connections c
          JOIN users u ON u.id=c.requester_id
         WHERE c.addressee_id=$1 AND c.status='pending'
@@ -407,11 +407,29 @@ router.get('/connections/incoming', authMiddleware, async (req: any, res) => {
   }
 });
 
+// GET /api/connections/incoming-count
+// Used for in-app badges on the Crew tab.
+router.get('/connections/incoming-count', authMiddleware, async (req: any, res) => {
+  try {
+    const uid = Number(req.user_id || req.query.user_id);
+    if (!uid) return res.status(401).json({ error: 'unauthorized' });
+    const r = await pool.query(
+      `SELECT COUNT(1)::int AS count
+         FROM connections
+        WHERE addressee_id=$1 AND status='pending'`,
+      [uid],
+    );
+    return res.json({ count: r.rows?.[0]?.count || 0 });
+  } catch (err) {
+    return res.status(400).json({ error: 'query failed' });
+  }
+});
+
 router.get('/connections/outgoing', authMiddleware, async (req: any, res) => {
   try {
     const uid = Number(req.user_id || req.query.user_id);
     const r = await pool.query(
-      `SELECT c.id, c.addressee_id, u.name, u.email, c.status, c.created_at
+      `SELECT c.id, c.addressee_id, u.name, c.status, c.created_at
          FROM connections c
          JOIN users u ON u.id=c.addressee_id
         WHERE c.requester_id=$1 AND c.status='pending'

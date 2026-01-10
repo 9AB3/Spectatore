@@ -172,7 +172,7 @@ export default function SiteAdminEquipmentLocations() {
               onChange={(e) => setEquipId(e.target.value.toUpperCase())}
             />
           </div>
-          <div className="text-xs text-slate-500 mt-1">
+          <div className="text-xs text-[color:var(--muted)] mt-1">
             Activity: <strong>{activityForType(type)}</strong>
           </div>
         </div>

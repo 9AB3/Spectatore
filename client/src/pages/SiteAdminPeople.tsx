@@ -162,16 +162,16 @@ export default function SiteAdminPeople() {
   if (!canManage) return null;
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-[color:var(--surface-2)]">
       <Header title="People" />
       <Toast />
 
       <div className="max-w-4xl mx-auto px-4 pb-28">
-        <div className="mt-4 bg-white rounded-2xl shadow p-4">
+        <div className="mt-4 bg-[color:var(--card)] rounded-2xl shadow p-4">
           <div className="flex items-center gap-3 flex-wrap">
             <div className="text-sm font-semibold text-slate-700">Site</div>
             <select
-              className="border rounded-xl px-3 py-2 text-sm bg-white"
+              className="border rounded-xl px-3 py-2 text-sm bg-[color:var(--card)]"
               value={site}
               onChange={(e) => setSite(e.target.value)}
             >
@@ -187,7 +187,7 @@ export default function SiteAdminPeople() {
               <button
                 className={cx(
                   'px-3 py-2 rounded-xl text-sm font-semibold border',
-                  tab === 'requests' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-800',
+                  tab === 'requests' ? 'bg-slate-900 text-white border-slate-900' : 'bg-[color:var(--card)] text-slate-800',
                 )}
                 onClick={() => setTab('requests')}
               >
@@ -196,7 +196,7 @@ export default function SiteAdminPeople() {
               <button
                 className={cx(
                   'px-3 py-2 rounded-xl text-sm font-semibold border',
-                  tab === 'active' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-800',
+                  tab === 'active' ? 'bg-slate-900 text-white border-slate-900' : 'bg-[color:var(--card)] text-slate-800',
                 )}
                 onClick={() => setTab('active')}
               >
@@ -209,13 +209,13 @@ export default function SiteAdminPeople() {
             <div className="text-sm font-semibold text-slate-800">Add / Search</div>
             <div className="mt-2 flex gap-2 flex-wrap items-center">
               <input
-                className="border rounded-xl px-3 py-2 text-sm bg-white min-w-[260px]"
-                placeholder="Search user by name/email…"
+                className="border rounded-xl px-3 py-2 text-sm bg-[color:var(--card)] min-w-[260px]"
+                placeholder="Search user by name…"
                 value={memberQuery}
                 onChange={(e) => searchPeople(e.target.value)}
               />
               <select
-                className="border rounded-xl px-3 py-2 text-sm bg-white"
+                className="border rounded-xl px-3 py-2 text-sm bg-[color:var(--card)]"
                 value={addRole}
                 onChange={(e) => setAddRole(e.target.value as any)}
               >
@@ -227,9 +227,9 @@ export default function SiteAdminPeople() {
                 Invite
               </button>
               {selectedUserLabel ? (
-                <div className="text-xs text-slate-600">Selected: {selectedUserLabel}</div>
+                <div className="text-xs text-[color:var(--muted)]">Selected: {selectedUserLabel}</div>
               ) : (
-                <div className="text-xs text-slate-500">Pick a user from results</div>
+                <div className="text-xs text-[color:var(--muted)]">Pick a user from results</div>
               )}
             </div>
 
@@ -239,7 +239,7 @@ export default function SiteAdminPeople() {
                   <button
                     key={u.id}
                     className={cx(
-                      'w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex justify-between gap-2',
+                      'w-full text-left px-3 py-2 text-sm hover:bg-[color:var(--surface-2)] flex justify-between gap-2',
                       selectedUserId === u.id ? 'bg-slate-100' : '',
                     )}
                     onClick={() => {
@@ -248,7 +248,6 @@ export default function SiteAdminPeople() {
                     }}
                   >
                     <span className="font-medium text-slate-800">{u.name || '(no name)'}</span>
-                    <span className="text-slate-500">{u.email}</span>
                   </button>
                 ))}
               </div>
@@ -256,10 +255,10 @@ export default function SiteAdminPeople() {
           </div>
         </div>
 
-        <div className="mt-4 bg-white rounded-2xl shadow">
+        <div className="mt-4 bg-[color:var(--card)] rounded-2xl shadow">
           <div className="p-4 border-b">
             <div className="text-sm font-semibold text-slate-800">{tab === 'requests' ? 'Membership Requests' : 'Active Members'}</div>
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-[color:var(--muted)]">
               Authority comes from <span className="font-mono">site_memberships</span>. User.site is legacy only.
             </div>
           </div>
@@ -273,14 +272,13 @@ export default function SiteAdminPeople() {
                     <Badge tone={r.status === 'active' ? 'green' : r.status === 'requested' ? 'amber' : 'gray'}>{r.status}</Badge>
                     <Badge tone={r.role === 'admin' ? 'blue' : r.role === 'validator' ? 'green' : 'gray'}>{r.role}</Badge>
                   </div>
-                  <div className="text-sm text-slate-600">{r.email}</div>
                 </div>
 
                 {tab === 'requests' ? (
                   <div className="flex gap-2 flex-wrap">
                     {String(r.status).toLowerCase() === 'invited' ? (
                       <>
-                        <div className="text-xs text-slate-500 flex items-center">
+                        <div className="text-xs text-[color:var(--muted)] flex items-center">
                           Invited — waiting for user to accept/deny
                         </div>
                         <button
@@ -316,7 +314,7 @@ export default function SiteAdminPeople() {
                   </div>
                 ) : (
                   <div className="flex gap-2 flex-wrap items-center">
-                    <select className="border rounded-xl px-3 py-2 text-sm bg-white" value={r.role} onChange={(e) => approve(r.user_id, e.target.value as any)}>
+                    <select className="border rounded-xl px-3 py-2 text-sm bg-[color:var(--card)]" value={r.role} onChange={(e) => approve(r.user_id, e.target.value as any)}>
                       <option value="member">Member</option>
                       <option value="validator">Validator</option>
                       <option value="admin">Admin</option>
@@ -329,7 +327,7 @@ export default function SiteAdminPeople() {
               </div>
             ))}
 
-            {(tab === 'requests' ? requests : active).length === 0 && <div className="p-6 text-sm text-slate-500">Nothing here yet.</div>}
+            {(tab === 'requests' ? requests : active).length === 0 && <div className="p-6 text-sm text-[color:var(--muted)]">Nothing here yet.</div>}
           </div>
         </div>
       </div>

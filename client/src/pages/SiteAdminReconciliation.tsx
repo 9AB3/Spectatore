@@ -168,7 +168,7 @@ export default function SiteAdminReconciliation() {
             <div>
               <div className="text-xs font-semibold mb-1">Site</div>
               <select
-                className="w-full p-2 rounded-xl border bg-white"
+                className="w-full p-2 rounded-xl border bg-[color:var(--card)]"
                 value={site}
                 onChange={(e) => setSite(e.target.value)}
               >
@@ -184,7 +184,7 @@ export default function SiteAdminReconciliation() {
               <div className="text-xs font-semibold mb-1">Month</div>
               <input
                 type="month"
-                className="w-full p-2 rounded-xl border bg-white"
+                className="w-full p-2 rounded-xl border bg-[color:var(--card)]"
                 value={monthYm}
                 onChange={(e) => setMonthYm(e.target.value)}
               />
@@ -193,7 +193,7 @@ export default function SiteAdminReconciliation() {
             <div className="sm:col-span-2">
               <div className="text-xs font-semibold mb-1">Metric</div>
               <select
-                className="w-full p-2 rounded-xl border bg-white"
+                className="w-full p-2 rounded-xl border bg-[color:var(--card)]"
                 value={metricKey}
                 onChange={(e) => setMetricKey(e.target.value)}
               >
@@ -208,7 +208,7 @@ export default function SiteAdminReconciliation() {
             <div>
               <div className="text-xs font-semibold mb-1">Method</div>
               <select
-                className="w-full p-2 rounded-xl border bg-white"
+                className="w-full p-2 rounded-xl border bg-[color:var(--card)]"
                 value={method}
                 onChange={(e) => setMethod(e.target.value as any)}
                 disabled={isLocked}
@@ -221,7 +221,7 @@ export default function SiteAdminReconciliation() {
             <div>
               <div className="text-xs font-semibold mb-1">Reconciled total ({selectedMetric?.unit || 'm'})</div>
               <input
-                className="w-full p-2 rounded-xl border bg-white"
+                className="w-full p-2 rounded-xl border bg-[color:var(--card)]"
                 value={reconciledTotal}
                 onChange={(e) => setReconciledTotal(e.target.value)}
                 placeholder="e.g. 300"
@@ -230,7 +230,7 @@ export default function SiteAdminReconciliation() {
             </div>
           </div>
 
-          <div className="mt-4 p-3 rounded-xl border bg-white" style={{ borderColor: '#f0e4d4' }}>
+          <div className="mt-4 p-3 rounded-xl border bg-[color:var(--card)]" style={{ borderColor: '#f0e4d4' }}>
             <div className="grid grid-cols-3 gap-2 text-sm">
               <div>
                 <div className="text-xs opacity-70">Actual (month)</div>
@@ -268,7 +268,7 @@ export default function SiteAdminReconciliation() {
               Save
             </button>
             <button
-              className={`px-4 py-2 rounded-xl border bg-white ${!summary?.reconciliation || isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`px-4 py-2 rounded-xl border bg-[color:var(--card)] ${!summary?.reconciliation || isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
               onClick={recalc}
               disabled={loading || !summary?.reconciliation || isLocked}
             >
@@ -276,7 +276,7 @@ export default function SiteAdminReconciliation() {
             </button>
             {summary?.reconciliation && (
               <button
-                className="px-4 py-2 rounded-xl border bg-white"
+                className="px-4 py-2 rounded-xl border bg-[color:var(--card)]"
                 onClick={() => setLock(!isLocked)}
                 disabled={loading}
               >

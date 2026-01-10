@@ -18,6 +18,7 @@ import adminRoutes from './routes/admin.js';
 import siteAdminRoutes from './routes/siteAdmin.js';
 import feedbackRoutes from './routes/feedback.js';
 import notificationsRoutes from './routes/notifications.js';
+import notificationPreferencesRoutes from './routes/notificationPreferences.js';
 import pushRoutes from './routes/push.js';
 import publicRoutes from './routes/public.js';
 
@@ -97,6 +98,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/site-admin', siteAdminRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/notification-preferences', notificationPreferencesRoutes);
 app.use('/api/push', pushRoutes);
 
 // Public, unauthenticated endpoints (marketing site)

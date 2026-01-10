@@ -138,7 +138,7 @@ function LineChart({
           textAnchor="middle"
           fontSize="12"
           fontWeight={700}
-          fill="#334155"
+          fill="var(--chart-title)"
         >
           {yLabel}
         </text>
@@ -158,7 +158,7 @@ function LineChart({
           textAnchor="middle"
           fontSize="12"
           fontWeight={700}
-          fill="#334155"
+          fill="var(--chart-title)"
         >
           Date
         </text>
@@ -175,7 +175,7 @@ function LineChart({
                 y={y + 3}
                 textAnchor="end"
                 fontSize="10"
-                fill="#334155"
+                fill="var(--chart-title)"
                 opacity={0.85}
               >
                 {v >= 100 ? Math.round(v) : v.toFixed(1)}
@@ -202,7 +202,7 @@ function LineChart({
                 y={pts.h - pts.pad + 18}
                 textAnchor="middle"
                 fontSize="10"
-                fill="#334155"
+                fill="var(--chart-title)"
                 opacity={0.85}
               >
                 {fmtYmd(t.label)}
@@ -462,7 +462,7 @@ export default function YouVsNetwork() {
                 <option value="0">Crew avg</option>
                 {(data?.members || []).map((m) => (
                   <option key={m.id} value={String(m.id)}>
-                    {m.name || m.email}
+                    {m.name || `Crew mate ${m.id}` }
                   </option>
                 ))}
               </select>
@@ -470,7 +470,7 @@ export default function YouVsNetwork() {
             </div>
           </div>
 
-          <div className="flex gap-2 mb-3"><div className="flex rounded-xl border border-slate-200 overflow-hidden">
+          <div className="flex gap-2 mb-3"><div className="flex rounded-xl border tv-border overflow-hidden">
               <button
                 className={`px-3 py-2 text-sm ${mode === 'daily' ? 'font-semibold' : 'opacity-70'}`}
                 onClick={() => setMode('daily')}
@@ -505,9 +505,6 @@ export default function YouVsNetwork() {
           <>
             {/* Card 2: KPI strip */}
             <div className="card">
-              <div className="text-xs opacity-70 mb-2">
-                Solid = you, dashed = {bLabel} • {mode === 'cumulative' ? 'cumulative total' : 'daily average'}
-              </div>
               <div className="grid grid-cols-3 gap-3">
                 <div className="p-3 rounded-2xl border" >
                   <div className="text-xs opacity-70">{bLabel}</div>
@@ -568,6 +565,7 @@ export default function YouVsNetwork() {
 
             {/* Card 4: chart */}
             <div className="card">
+              <div className="text-xs tv-muted mb-2">Solid = you, dashed = {bLabel} • {mode === 'cumulative' ? 'cumulative total' : 'daily average'}</div>
               <LineChart rows={rows} bLabel={bLabel} yLabel={metric} />
             </div>
           </>

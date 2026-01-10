@@ -198,7 +198,7 @@ export default function EquipmentLocations() {
       <div className="p-6 max-w-4xl mx-auto space-y-4">
         <div className="card p-5">
           <div className="text-lg font-semibold">Equipment &amp; Locations</div>
-          <div className="text-sm text-slate-600 mt-1">
+          <div className="text-sm text-[color:var(--muted)] mt-1">
             Maintain your local equipment IDs and location list. These lists power drop-downs and validation tools.
           </div>
         </div>
@@ -208,9 +208,9 @@ export default function EquipmentLocations() {
           <div className="card p-5 space-y-4">
             <div className="text-sm font-semibold text-slate-800">Add / Update</div>
 
-            <div className="rounded-xl border border-slate-200 p-4">
+            <div className="rounded-xl border border-[color:var(--hairline)] p-4">
               <div className="font-medium">Equipment</div>
-              <div className="text-xs text-slate-500 mt-1">
+              <div className="text-xs text-[color:var(--muted)] mt-1">
                 Activity mapping is automatic based on type.
               </div>
 
@@ -228,12 +228,12 @@ export default function EquipmentLocations() {
                 />
               </div>
 
-              <div className="text-xs text-slate-500 mt-2">
+              <div className="text-xs text-[color:var(--muted)] mt-2">
                 Activity: <strong>{activityForType(type)}</strong>
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-200 p-4">
+            <div className="rounded-xl border border-[color:var(--hairline)] p-4">
               <div className="font-medium">Location</div>
               <div className="grid grid-cols-3 gap-2 mt-3">
                 <select
@@ -270,35 +270,33 @@ export default function EquipmentLocations() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm font-semibold text-slate-800">Saved lists</div>
-                <div className="text-xs text-slate-500 mt-1">
+                <div className="text-xs text-[color:var(--muted)] mt-1">
                   Tap ✕ to remove an item. Lists update immediately.
                 </div>
               </div>
-              <div className="text-xs text-slate-500">
+              <div className="text-xs text-[color:var(--muted)]">
                 {equipListSorted.length} equipment • {locList.length} locations
               </div>
             </div>
 
             <div className="grid sm:grid-cols-2 gap-4 mt-4">
-              <div className="rounded-xl border border-slate-200 p-4">
+              <div className="rounded-xl border border-[color:var(--hairline)] p-4">
                 <div className="font-medium mb-2">Equipment</div>
-                <ul className="space-y-1">
+                <ul className="tv-list space-y-1">
                   {equipListSorted.map((e) => (
                     <li
                       key={`${e.type}-${e.equipment_id}`}
-                      className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-slate-50"
+                      className="tv-list-item"
                     >
                       <div className="min-w-0">
                         <div className="text-sm font-medium">
                           {e.equipment_id}{' '}
-                          <span className="text-xs font-normal text-slate-500">({e.type})</span>
+                          <span className="text-xs font-normal text-[color:var(--muted)]">({e.type})</span>
                         </div>
-                        <div className="text-xs text-slate-500 truncate">Activity: {activityForType(e.type)}</div>
+                        <div className="text-xs text-[color:var(--muted)] truncate">Activity: {activityForType(e.type)}</div>
                       </div>
                       <button
-                        className="w-9 h-9 rounded-full border flex items-center justify-center hover:bg-white"
-                        style={{ borderColor: 'rgba(148, 163, 184, 0.6)' }}
-                        onClick={() => deleteEquipment(e.equipment_id)}
+                        className="btn-icon" onClick={() => deleteEquipment(e.equipment_id)}
                         type="button"
                         aria-label={`Delete ${e.equipment_id}`}
                       >
@@ -306,28 +304,26 @@ export default function EquipmentLocations() {
                       </button>
                     </li>
                   ))}
-                  {equipListSorted.length === 0 && <div className="text-slate-500 text-sm">No equipment yet</div>}
+                  {equipListSorted.length === 0 && <div className="text-[color:var(--muted)] text-sm">No equipment yet</div>}
                 </ul>
               </div>
 
-              <div className="rounded-xl border border-slate-200 p-4">
+              <div className="rounded-xl border border-[color:var(--hairline)] p-4">
                 <div className="font-medium mb-2">Locations</div>
-                <ul className="space-y-1">
+                <ul className="tv-list space-y-1">
                   {locList.map((l) => (
                     <li
                       key={`${l.type}-${l.name}`}
-                      className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-slate-50"
+                      className="tv-list-item"
                     >
                       <div className="min-w-0">
                         <div className="text-sm font-medium">
                           {l.name}{' '}
-                          <span className="text-xs font-normal text-slate-500">({l.type})</span>
+                          <span className="text-xs font-normal text-[color:var(--muted)]">({l.type})</span>
                         </div>
                       </div>
                       <button
-                        className="w-9 h-9 rounded-full border flex items-center justify-center hover:bg-white"
-                        style={{ borderColor: 'rgba(148, 163, 184, 0.6)' }}
-                        onClick={() => deleteLocation(l.name)}
+                        className="btn-icon" onClick={() => deleteLocation(l.name)}
                         type="button"
                         aria-label={`Delete ${l.name}`}
                       >
@@ -335,7 +331,7 @@ export default function EquipmentLocations() {
                       </button>
                     </li>
                   ))}
-                  {locList.length === 0 && <div className="text-slate-500 text-sm">No locations yet</div>}
+                  {locList.length === 0 && <div className="text-[color:var(--muted)] text-sm">No locations yet</div>}
                 </ul>
               </div>
             </div>

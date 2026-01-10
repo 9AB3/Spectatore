@@ -74,7 +74,7 @@ router.get('/shift-totals', async (req, res) => {
         s.date,
         s.dn,
         s.site,
-        COALESCE(NULLIF(s.user_email, ''), u.email, '') AS user_email,
+        s.user_id AS user_id,
         COALESCE(NULLIF(s.user_name, ''), u.name, '') AS user_name,
         kv.key AS metric,
 	        CASE
@@ -94,7 +94,7 @@ router.get('/shift-totals', async (req, res) => {
       WHERE ($1::text IS NULL OR s.site = $1)
         AND ($2::date IS NULL OR s.date >= $2)
         AND ($3::date IS NULL OR s.date <= $3)
-      ORDER BY s.date, s.dn, user_email, kv.key
+      ORDER BY s.date, s.dn, user_id, kv.key
       `,
       [site, from, to]
     );
@@ -113,7 +113,7 @@ router.get('/shift-totals', async (req, res) => {
  * specific metrics (e.g. Hauling → Production → Trucks) over time.
  *
  * Columns:
- *  - date, dn, site, user_email, user_name, finalized_at
+ *  - date, dn, site, user_id, user_name, finalized_at
  *  - heading        (e.g. "Hauling")
  *  - sub_activity   (e.g. "Production" / "Development" / "No Sub Activity")
  *  - metric         (e.g. "Trucks", "Weight", "Distance")
@@ -135,7 +135,7 @@ router.get('/shift-metrics', async (req, res) => {
           s.dn,
           s.site,
           s.finalized_at,
-          u.email AS user_email,
+          s.user_id AS user_id,
           u.name AS user_name,
           COALESCE(s.totals_json, '{}'::jsonb) AS totals_json
         FROM shifts s
@@ -153,7 +153,7 @@ router.get('/shift-metrics', async (req, res) => {
           b.dn,
           b.site,
           b.finalized_at,
-          b.user_email,
+          b.user_id,
           b.user_name,
           ARRAY[e.key]::text[] AS path,
           e.value AS val
@@ -169,7 +169,7 @@ router.get('/shift-metrics', async (req, res) => {
           kv.dn,
           kv.site,
           kv.finalized_at,
-          kv.user_email,
+          kv.user_id,
           kv.user_name,
           kv.path || e.key,
           e.value
@@ -181,7 +181,7 @@ router.get('/shift-metrics', async (req, res) => {
         date,
         dn,
         site,
-        user_email,
+        user_id,
         user_name,
         finalized_at,
         path[1] AS heading,
@@ -206,7 +206,7 @@ router.get('/shift-metrics', async (req, res) => {
         END AS metric_text
       FROM kv
       WHERE jsonb_typeof(val) <> 'object'
-      ORDER BY date, dn, user_email, heading, sub_activity, metric;
+      ORDER BY date, dn, user_id, heading, sub_activity, metric;
       `,
       [site, from, to]
     );
@@ -237,7 +237,7 @@ router.get('/activity-payloads', async (req, res) => {
         s.date,
         s.dn,
         COALESCE(a.site, s.site) AS site,
-        COALESCE(NULLIF(a.user_email, ''), NULLIF(s.user_email, ''), u.email, '') AS user_email,
+        s.user_id AS user_id,
         COALESCE(NULLIF(a.user_name, ''), NULLIF(s.user_name, ''), u.name, '') AS user_name,
         a.activity,
         a.sub_activity,
@@ -259,7 +259,7 @@ router.get('/activity-payloads', async (req, res) => {
       WHERE ($1::text IS NULL OR COALESCE(a.site, s.site) = $1)
         AND ($2::date IS NULL OR s.date >= $2)
         AND ($3::date IS NULL OR s.date <= $3)
-      ORDER BY s.date, s.dn, user_email, a.activity, a.sub_activity, kv.key
+      ORDER BY s.date, s.dn, user_id, a.activity, a.sub_activity, kv.key
       `,
       [site, from, to]
     );
@@ -287,7 +287,7 @@ router.get('/validated/shift-totals', async (req, res) => {
         v.date,
         v.dn,
         v.site,
-        v.user_email,
+        v.user_id,
         COALESCE(NULLIF(v.user_name, ''), '') AS user_name,
         kv.key AS metric,
 	        CASE
@@ -307,7 +307,7 @@ router.get('/validated/shift-totals', async (req, res) => {
       WHERE ($1::text IS NULL OR v.site = $1)
         AND ($2::date IS NULL OR v.date >= $2)
         AND ($3::date IS NULL OR v.date <= $3)
-      ORDER BY v.date, v.dn, v.user_email, kv.key
+      ORDER BY v.date, v.dn, v.user_id, kv.key
       `,
       [site, from, to]
     );
@@ -331,7 +331,7 @@ router.get('/validated/activity-payloads', async (req, res) => {
         a.date,
         a.dn,
         a.site,
-        COALESCE(NULLIF(a.user_email, ''), '') AS user_email,
+        a.user_id AS user_id,
         COALESCE(NULLIF(a.user_name, ''), '') AS user_name,
         a.activity,
         a.sub_activity,
@@ -348,7 +348,7 @@ router.get('/validated/activity-payloads', async (req, res) => {
       WHERE ($1::text IS NULL OR a.site = $1)
         AND ($2::date IS NULL OR a.date >= $2)
         AND ($3::date IS NULL OR a.date <= $3)
-      ORDER BY a.date, a.dn, user_email, a.activity, a.sub_activity, kv.key
+      ORDER BY a.date, a.dn, user_id, a.activity, a.sub_activity, kv.key
       `,
       [site, from, to]
     );
@@ -399,7 +399,7 @@ router.get('/validated/activity-metrics', async (req, res) => {
     vs.dn AS dn,
     vs.site AS site,
     vs.user_id AS user_id,
-    u.email AS user_email,
+    s.user_id AS user_id,
     u.name  AS user_name,
     vsa.activity AS activity,
     COALESCE(NULLIF(vsa.sub_activity,''),'(No Sub Activity)') AS sub_activity,
@@ -451,7 +451,7 @@ typed_metrics AS (
     ar.dn,
     ar.site,
     ar.user_id,
-    ar.user_email,
+    ar.user_id,
     ar.user_name,
     ar.activity,
     ar.sub_activity,
@@ -482,7 +482,7 @@ load_weights AS (
     ar.dn,
     ar.site,
     ar.user_id,
-    ar.user_email,
+    ar.user_id,
     ar.user_name,
     ar.activity,
     ar.sub_activity,
@@ -511,7 +511,7 @@ SELECT
   dn,
   site,
   user_id,
-  user_email,
+  user_id,
   user_name,
   activity,
   sub_activity,
@@ -530,7 +530,7 @@ FROM (
   UNION ALL
   SELECT * FROM load_weights
 ) x
-ORDER BY date, dn, user_email, activity, sub_activity, task_row_id, task_item_type, task_item_index NULLS FIRST, metric_key
+ORDER BY date, dn, user_id, activity, sub_activity, task_row_id, task_item_type, task_item_index NULLS FIRST, metric_key
 `;
 
     const r = await pool.query(sql, params);
@@ -632,8 +632,8 @@ router.get('/validated/fact-hauling', async (req, res) => {
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
+          COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -662,7 +662,7 @@ router.get('/validated/fact-hauling', async (req, res) => {
         dn,
         site,
         user_id,
-        user_email,
+        user_id,
         user_name,
         activity,
         sub_activity,
@@ -709,7 +709,7 @@ router.get('/validated/fact-hauling', async (req, res) => {
           * NULLIF(regexp_replace(COALESCE(vals->>'Distance',''), '[^0-9.\-]', '', 'g'), '')::double precision
         ) AS tkm
       FROM x
-      ORDER BY date, dn, user_email, activity_id;
+      ORDER BY date, dn, user_id, activity_id;
     `;
 
     const r = await pool.query(sql, [site, from, to]);
@@ -737,8 +737,8 @@ router.get('/validated/fact-hauling-loads', async (req, res) => {
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
+          COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
           COALESCE(vsa.sub_activity,'(No Sub Activity)') AS sub_activity,
           vsa.payload_json AS payload,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals,
@@ -759,7 +759,7 @@ router.get('/validated/fact-hauling-loads', async (req, res) => {
         b.dn,
         b.site,
         b.user_id,
-        b.user_email,
+        b.user_id,
         b.user_name,
         b.sub_activity,
 
@@ -775,7 +775,7 @@ router.get('/validated/fact-hauling-loads', async (req, res) => {
         NULLIF(TRIM(x.lw->>'kind'), '') AS load_kind
       FROM base b
       CROSS JOIN LATERAL jsonb_array_elements(b.loads) WITH ORDINALITY AS x(lw, ord)
-      ORDER BY b.date, b.dn, b.user_email, b.activity_id, load_index;
+      ORDER BY b.date, b.dn, b.user_id, b.activity_id, load_index;
     `;
 
     const r = await pool.query(sql, [site, from, to]);
@@ -803,8 +803,8 @@ router.get('/validated/fact-loading', async (req, res) => {
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
+          COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -827,7 +827,7 @@ router.get('/validated/fact-loading', async (req, res) => {
         dn,
         site,
         user_id,
-        user_email,
+        user_id,
         user_name,
         activity,
         sub_activity,
@@ -845,7 +845,7 @@ router.get('/validated/fact-loading', async (req, res) => {
         NULLIF(regexp_replace(COALESCE(vals->>'SP to Truck',''), '[^0-9.\-]', '', 'g'), '')::double precision AS sp_to_truck,
         NULLIF(regexp_replace(COALESCE(vals->>'SP to SP',''), '[^0-9.\-]', '', 'g'), '')::double precision AS sp_to_sp
       FROM base
-      ORDER BY date, dn, user_email, activity_id;
+      ORDER BY date, dn, user_id, activity_id;
     `;
 
     const r = await pool.query(sql, [site, from, to]);
@@ -873,8 +873,8 @@ router.get('/validated/fact-dev-face-drilling', async (req, res) => {
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
+          COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -898,7 +898,7 @@ router.get('/validated/fact-dev-face-drilling', async (req, res) => {
         dn,
         site,
         user_id,
-        user_email,
+        user_id,
         user_name,
         activity,
         sub_activity,
@@ -915,7 +915,7 @@ router.get('/validated/fact-dev-face-drilling', async (req, res) => {
           * NULLIF(regexp_replace(COALESCE(vals->>'Cut Length',''), '[^0-9.\-]', '', 'g'), '')::double precision
         ) AS dev_drill_m
       FROM base
-      ORDER BY date, dn, user_email, activity_id;
+      ORDER BY date, dn, user_id, activity_id;
     `;
 
     const r = await pool.query(sql, [site, from, to]);
@@ -943,8 +943,8 @@ router.get('/validated/fact-ground-support', async (req, res) => {
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
+          COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -968,7 +968,7 @@ router.get('/validated/fact-ground-support', async (req, res) => {
         dn,
         site,
         user_id,
-        user_email,
+        user_id,
         user_name,
         activity,
         sub_activity,
@@ -987,7 +987,7 @@ router.get('/validated/fact-ground-support', async (req, res) => {
           * NULLIF(regexp_replace(COALESCE(vals->>'Bolt Length',''), '[^0-9.\-]', '', 'g'), '')::double precision
         ) AS gs_drill_m
       FROM base
-      ORDER BY date, dn, user_email, activity_id;
+      ORDER BY date, dn, user_id, activity_id;
     `;
 
     const r = await pool.query(sql, [site, from, to]);
@@ -1015,8 +1015,8 @@ router.get('/validated/fact-production-drilling', async (req, res) => {
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
+          COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -1040,7 +1040,7 @@ router.get('/validated/fact-production-drilling', async (req, res) => {
         dn,
         site,
         user_id,
-        user_email,
+        user_id,
         user_name,
         activity,
         sub_activity,
@@ -1052,7 +1052,7 @@ router.get('/validated/fact-production-drilling', async (req, res) => {
         NULLIF(regexp_replace(COALESCE(vals->>'Cleanouts Drilled',''), '[^0-9.\\-]', '', 'g'), '')::double precision AS cleanouts_drilled_m,
         NULLIF(regexp_replace(COALESCE(vals->>'Redrills',''), '[^0-9.\\-]', '', 'g'), '')::double precision AS redrills_m
       FROM base
-      ORDER BY date, dn, user_email, activity_id;
+      ORDER BY date, dn, user_id, activity_id;
     `;
 
     const r = await pool.query(sql, [site, from, to]);
@@ -1088,8 +1088,8 @@ router.get('/validated/fact-production-drilling-holes', async (req, res) => {
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
+          COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -1115,7 +1115,7 @@ router.get('/validated/fact-production-drilling-holes', async (req, res) => {
         b.dn,
         b.site,
         b.user_id,
-        b.user_email,
+        b.user_id,
         b.user_name,
         b.activity,
         b.sub_activity,
@@ -1145,7 +1145,7 @@ router.get('/validated/fact-production-drilling-holes', async (req, res) => {
           ELSE '[]'::jsonb
         END
       ) WITH ORDINALITY AS x(hole, ord)
-      ORDER BY b.date, b.dn, b.user_email, b.activity_id, bh.bucket, hole_index;
+      ORDER BY b.date, b.dn, b.user_id, b.activity_id, bh.bucket, hole_index;
     `;
 
     const r = await pool.query(sql, [site, from, to]);
@@ -1177,8 +1177,8 @@ router.get('/validated/fact-charging', async (req, res) => {
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
+          COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -1201,7 +1201,7 @@ router.get('/validated/fact-charging', async (req, res) => {
         dn,
         site,
         user_id,
-        user_email,
+        user_id,
         user_name,
         activity,
         sub_activity,
@@ -1215,7 +1215,7 @@ router.get('/validated/fact-charging', async (req, res) => {
         NULLIF(regexp_replace(COALESCE(vals->>'Cut Length',''), '[^0-9.\-]', '', 'g'), '')::double precision AS cut_length_m,
         NULLIF(regexp_replace(COALESCE(vals->>'Tonnes Fired',''), '[^0-9.\-]', '', 'g'), '')::double precision AS tonnes_fired
       FROM base
-      ORDER BY date, dn, user_email, activity_id;
+      ORDER BY date, dn, user_id, activity_id;
     `;
 
     const r = await pool.query(sql, [site, from, to]);
@@ -1244,8 +1244,8 @@ router.get('/validated/fact-backfilling', async (req, res) => {
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
+          COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -1268,7 +1268,7 @@ router.get('/validated/fact-backfilling', async (req, res) => {
         dn,
         site,
         user_id,
-        user_email,
+        user_id,
         user_name,
         activity,
         sub_activity,
@@ -1305,8 +1305,8 @@ router.get('/validated/fact-firing', async (req, res) => {
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
+          COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -1329,7 +1329,7 @@ router.get('/validated/fact-firing', async (req, res) => {
         dn,
         site,
         user_id,
-        user_email,
+        user_id,
         user_name,
         activity,
         sub_activity,
@@ -1339,7 +1339,7 @@ router.get('/validated/fact-firing', async (req, res) => {
         NULLIF(regexp_replace(COALESCE(vals->>'Cut Length',''), '[^0-9.\-]', '', 'g'), '')::double precision AS cut_length_m,
         NULLIF(regexp_replace(COALESCE(vals->>'Tonnes Fired',''), '[^0-9.\-]', '', 'g'), '')::double precision AS tonnes_fired
       FROM base
-      ORDER BY date, dn, user_email, activity_id;
+      ORDER BY date, dn, user_id, activity_id;
     `;
 
     const r = await pool.query(sql, [site, from, to]);
@@ -1398,8 +1398,8 @@ router.get('/validated/fact-hoisting', async (req, res) => {
           COALESCE(vs.dn, vsa.dn) AS dn,
           COALESCE(vs.site, vsa.site) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
-          COALESCE(u.email, vs.user_email, vsa.user_email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_email, vsa.user_email, '') AS user_name,
+          COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
+          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -1422,7 +1422,7 @@ router.get('/validated/fact-hoisting', async (req, res) => {
         dn,
         site,
         user_id,
-        user_email,
+        user_id,
         user_name,
         activity,
         sub_activity,
@@ -1434,7 +1434,7 @@ router.get('/validated/fact-hoisting', async (req, res) => {
           + NULLIF(regexp_replace(COALESCE(vals->>'Waste Tonnes',''), '[^0-9.\-]', '', 'g'), '')::double precision
         ) AS total_tonnes
       FROM base
-      ORDER BY date, dn, user_email, activity_id;
+      ORDER BY date, dn, user_id, activity_id;
     `;
 
     const r = await pool.query(sql, [site, from, to]);

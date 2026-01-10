@@ -391,7 +391,7 @@ export default function SiteAdminValidate() {
         <div className="p-6 max-w-xl mx-auto">
           <div className="card">
             <h2 className="text-xl font-semibold mb-2">Validation</h2>
-            <div className="text-sm text-slate-600">Connection required. Please connect to the network and try again.</div>
+            <div className="text-sm text-[color:var(--muted)]">Connection required. Please connect to the network and try again.</div>
             <div className="mt-4">
               <button className="btn" onClick={() => nav('/SiteAdmin')}>Back</button>
             </div>
@@ -1291,14 +1291,14 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
   const week = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="min-h-screen">
       <div className="max-w-7xl mx-auto p-4 space-y-4">
         <Toast />
 
         <div className="flex items-center justify-between">
           <div className="font-bold text-lg">Validate Shifts</div>
           <button
-            className="px-4 py-2 rounded-xl bg-slate-900 text-white shadow-sm hover:bg-slate-800"
+            className="btn"
             onClick={() => nav('/siteadmin')}
             type="button"
           >
@@ -1306,7 +1306,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
           </button>
         </div>
 
-        <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-4">
+        <div className="card">
           <div className="flex items-center justify-between mb-2">
             <div className="font-bold">Calendar</div>
           </div>
@@ -1316,7 +1316,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
               <div className="flex flex-wrap gap-2 items-center justify-between">
                 <div className="flex items-center gap-2">
                   <button
-                    className="px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50"
+                    className="tv-pill"
                     onClick={() => setYear((y) => y - 1)}
                     type="button"
                   >
@@ -1324,7 +1324,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                   </button>
                   <div className="font-semibold text-lg px-1">{year}</div>
                   <button
-                    className="px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50"
+                    className="tv-pill"
                     onClick={() => setYear((y) => y + 1)}
                     type="button"
                   >
@@ -1349,7 +1349,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                   const cells = monthGrid(year, mi);
                   const mm = String(mi + 1).padStart(2, '0');
                   return (
-                    <div key={mi} className="border border-slate-200 rounded-2xl p-3 bg-white">
+                    <div key={mi} className="tv-tile">
                       <div className="font-bold mb-1">{monthNames[mi]}</div>
                       <div className="grid grid-cols-7 text-[11px] opacity-70 mb-1">
                         {week.map((w) => (
@@ -1397,7 +1397,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
 
               <div className="flex justify-center mt-2">
                 <button
-                  className="px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50"
+                  className="tv-pill"
                   type="button"
                   onClick={() => setCalendarOpen((o) => !o)}
                   aria-label="Collapse calendar"
@@ -1412,7 +1412,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
           {!calendarOpen && (
             <div className="flex justify-center">
               <button
-                className="px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50"
+                className="tv-pill"
                 type="button"
                 onClick={() => setCalendarOpen(true)}
                 aria-label="Expand calendar"
@@ -1425,7 +1425,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
         </div>
 
         {selectedDate && (
-          <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-4">
+          <div className="card">
             <div className="flex items-center justify-between mb-2">
               <div className="font-bold">{selectedDate}</div>
               <div className="flex items-center gap-2">
@@ -1447,7 +1447,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                 </button>
                 <button
                   type="button"
-                  className="px-3 py-2 rounded-xl bg-white border border-slate-200 shadow-sm hover:bg-slate-50 text-sm"
+                  className="px-3 py-2 rounded-xl bg-[color:var(--card)] border border-[color:var(--hairline)] shadow-sm hover:bg-[color:var(--surface-2)] text-sm"
                   onClick={() => {
                     if (!selectedDate) return;
                     nav(`/SiteAdmin/AddActivity?date=${encodeURIComponent(selectedDate)}&site=${encodeURIComponent(site)}`);
@@ -1481,7 +1481,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                             <div className="overflow-auto">
                               <table className="min-w-full text-sm">
                                 <thead>
-                                  <tr className="text-xs text-slate-500 bg-slate-50 border-b border-slate-200">
+                                  <tr className="text-xs text-[color:var(--muted)] bg-[color:var(--surface-2)] border-b border-[color:var(--hairline)]">
                                     <th className="text-left p-2 whitespace-nowrap">Metric</th>
                                     <th className="text-right p-2 whitespace-nowrap">DS</th>
                                     <th className="text-right p-2 whitespace-nowrap">NS</th>
@@ -1497,7 +1497,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                       let lastS = '__none__';
                                       // activity header
                                       out.push(
-                                        <tr key={`act|||${a}`} className="border-b border-slate-200 bg-slate-50">
+                                        <tr key={`act|||${a}`} className="border-b border-[color:var(--hairline)] bg-[color:var(--surface-2)]">
                                           <td className="p-2 font-semibold" colSpan={4}>
                                             {a}
                                           </td>
@@ -1510,7 +1510,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                           out.push(
                                             <tr
                                               key={`${a}|||sub|||${r.sub}`}
-                                              className="border-b border-slate-200 bg-slate-50/60"
+                                              className="border-b border-[color:var(--hairline)] bg-[color:var(--surface-2)]/60"
                                             >
                                               <td className="p-2 pl-6 font-semibold" colSpan={4}>
                                                 {r.sub}
@@ -1674,13 +1674,13 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
 
 
                           return (
-                            <div key={actName} className="rounded-2xl bg-white border border-slate-200 shadow-sm p-4">
+                            <div key={actName} className="card">
                               <div className="font-bold mb-2">{actName}</div>
 
                               <div className="overflow-auto">
                                 <table className="min-w-[900px] w-full text-sm">
                                   <thead>
-                                    <tr className="border-b border-slate-200">
+                                    <tr className="border-b border-[color:var(--hairline)]">
                                       <th className="p-2 text-left">User</th>
                                       <th className="p-2 text-left">Shift</th>
                                       {groupKey ? <th className="p-2 text-left">{groupKey}</th> : null}
@@ -1700,7 +1700,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                       return (
                                         <Fragment key={sub}>
                                           {sub ? (
-                                            <tr className="bg-slate-50 border-b border-slate-200">
+                                            <tr className="bg-[color:var(--surface-2)] border-b border-[color:var(--hairline)]">
                                               <td className="p-2 font-bold" colSpan={colSpan}>
                                                 {sub}
                                               </td>
@@ -1712,7 +1712,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                             return (
                                               <Fragment key={`${sub}|||${loc}`}>
                                                 {groupKey && loc ? (
-                                                  <tr className="border-b border-slate-200">
+                                                  <tr className="border-b border-[color:var(--hairline)]">
                                                     <td className="p-2 pl-4 font-semibold text-sm" colSpan={colSpan}>
                                                       <div className="flex items-center justify-between gap-2">
                                                         <span>{loc}</span>
@@ -1747,7 +1747,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                 ) : null}
 
                                                 {actName === 'Hauling' && truckOpen[`${actName}|||${sub}|||${loc}`] ? (
-                                                  <tr className="border-b border-slate-200 bg-slate-50/50">
+                                                  <tr className="border-b border-[color:var(--hairline)] bg-[color:var(--surface-2)]/50">
                                                     <td className="p-2 pl-6" colSpan={colSpan}>
                                                       {(() => {
                                                         const flat: any[] = [];
@@ -1826,9 +1826,9 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                         };
 
                                                         return (
-                                                          <div className="overflow-auto border rounded-xl bg-white">
+                                                          <div className="overflow-auto border rounded-xl bg-[color:var(--card)]">
                                                             <table className="w-full text-xs table-fixed">
-                                                              <thead className="bg-slate-50 border-b">
+                                                              <thead className="bg-[color:var(--surface-2)] border-b">
                                                                 <tr>
                                                                   <th className="p-1 text-left w-[72px]">Truck #</th>
                                                                   <th className="p-1 text-left w-[140px]">Weight (t)</th>
@@ -1883,10 +1883,10 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                                 )}
                                                               </tbody>
                                                             </table>
-                                                            <div className="p-2 border-t bg-slate-50 flex items-center justify-between gap-2">
+                                                            <div className="p-2 border-t bg-[color:var(--surface-2)] flex items-center justify-between gap-2">
                                                               <button
                                                                 type="button"
-                                                                className="px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50 text-xs"
+                                                                className="tv-pill text-xs"
                                                                 onClick={addTruck}
                                                               >
                                                                 + Add truck
@@ -1902,7 +1902,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
 
                                                 
                                                 {actName === 'Production Drilling' && holeOpen[`${actName}|||${sub}|||${loc}`] ? (
-                                                  <tr className="border-b border-slate-200 bg-slate-50/50">
+                                                  <tr className="border-b border-[color:var(--hairline)] bg-[color:var(--surface-2)]/50">
                                                     <td className="p-2 pl-6" colSpan={colSpan}>
                                                       {(() => {
                                                         const flat: any[] = [];
@@ -1918,9 +1918,9 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                         }
                                                         const flatEmpty = (flat.length === 0);
                                                         return (
-                                                          <div className="overflow-auto border rounded-xl bg-white">
+                                                          <div className="overflow-auto border rounded-xl bg-[color:var(--card)]">
                                                             <table className="w-full text-xs table-fixed">
-  <thead className="bg-slate-50 border-b">
+  <thead className="bg-[color:var(--surface-2)] border-b">
     <tr>
       <th className="p-1 text-left w-[92px]">Bucket</th>
       <th className="p-1 text-left w-[72px]">Ring ID</th>
@@ -2036,10 +2036,10 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
     })}
   </tbody>
 </table>
-    <div className="p-2 border-t bg-slate-50 flex items-center justify-between gap-2">
+    <div className="p-2 border-t bg-[color:var(--surface-2)] flex items-center justify-between gap-2">
       <button
         type="button"
-        className="px-3 py-1 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50 text-xs"
+        className="tv-pill text-xs"
         onClick={() => {
           const first = flat[0] as any;
           const actId = Number((first?._act_id) || (rows?.[0]?.id) || 0);
@@ -2084,9 +2084,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
 
 {rows.map((r) => {
                                                   const userLabel =
-                                                    nameByEmail.get(String((r as any)?.user_email || '')) ||
-                                                    String((r as any)?.user_email || '') ||
-                                                    'User';
+                                                    nameByEmail.get(String((r as any)?.user_email || '')) || 'User';
 
                                                   const originalObj: any = getValidatedActObjOriginal(r) || {};
                                                   const currentObj: any = getValidatedActObj(r) || originalObj || {};
@@ -2107,7 +2105,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                   const diffGroup = String(currentGrp ?? '') !== String(baselineGrp ?? '');
 
                                                   return (
-                                                    <tr key={(r as any)?.id} className="border-b border-slate-200">
+                                                    <tr key={(r as any)?.id} className="border-b border-[color:var(--hairline)]">
                                                       <td className="p-2 whitespace-nowrap">{userLabel}</td>
                                                       <td className="p-2 whitespace-nowrap">{(r as any)?.dn}</td>
 
@@ -2202,7 +2200,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                                   <select
                                                                     // NOTE: In this Backfilling (Volume/Buckets) branch, `c` is narrowed to
                                                                     // "Volume" | "Buckets"; keep readonly styling based on `isReadonly` only.
-                                                                    className={`input w-full ${isReadonly ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
+                                                                    className={`input w-full ${isReadonly ? "bg-[color:var(--surface-2)] text-slate-700 cursor-default" : ""}`}
                                                                     title={`Validated: ${String(curVal ?? '')} | Original: ${String(
                                                                       (hasLive ? liveVal : baselineVal) ?? '',
                                                                     )}`}
@@ -2241,7 +2239,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                                 const inList = optsLoc.includes(String(cur || ''));
                                                                 return (
                                                                   <select
-                                                                    className={`input w-full ${isReadonly ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
+                                                                    className={`input w-full ${isReadonly ? "bg-[color:var(--surface-2)] text-slate-700 cursor-default" : ""}`}
                                                                     title={`Validated: ${String(curVal ?? '')} | Original: ${String(
                                                                       (hasLive ? liveVal : baselineVal) ?? '',
                                                                     )}`}
@@ -2274,7 +2272,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                                 // Production hauling is always ore and should not be selectable.
                                                                 const rowSub = String(getSubNameFromObj(r as any, currentObj) || '').toLowerCase();
                                                                 if (String(actName || '').toLowerCase() === 'hauling' && rowSub === 'production') {
-                                                                  return <div className="input bg-slate-50 text-slate-700 cursor-default">ore</div>;
+                                                                  return <div className="input bg-[color:var(--surface-2)] text-slate-700 cursor-default">ore</div>;
                                                                 }
 
                                                                 // Backfilling has specific material lists by sub-activity.
@@ -2319,7 +2317,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                                   curStr === 'ore' || curStr === 'waste' ? curStr : curStr ? curStr : '';
                                                                 return (
                                                                   <select
-                                                                    className={`input w-full ${isReadonly ? "bg-slate-50 text-slate-700 cursor-default" : ""}`}
+                                                                    className={`input w-full ${isReadonly ? "bg-[color:var(--surface-2)] text-slate-700 cursor-default" : ""}`}
                                                                     title={`Shift: ${String(hasLive ? liveVal : baselineVal)} | Validated: ${String(
                                                                       cur ?? '',
                                                                     )}`}
@@ -2422,7 +2420,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                                                       <td className="p-2 text-right whitespace-nowrap">
                                                         <button
                                                           type="button"
-                                                          className="px-3 py-1 rounded-full border border-slate-200 bg-white hover:bg-rose-50 text-rose-700 text-xs"
+                                                          className="px-3 py-1 rounded-full border border-[color:var(--hairline)] bg-[color:var(--card)] hover:bg-rose-50 text-rose-700 text-xs"
                                                           title="Delete this activity from validated data"
                                                           disabled={isReadonly}
                                                           onClick={async () => {

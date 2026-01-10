@@ -261,19 +261,19 @@ function CalendarDropdown({ label, value, onChange, datesWithData }: CalendarDro
 
   return (
     <div className="relative inline-block">
-      <div className="block text-xs text-slate-600 mb-1">{label}</div>
+      <div className="block text-xs tv-muted mb-1">{label}</div>
       <button
         type="button"
         className="input flex items-center justify-between min-w-[9rem]"
         onClick={() => setOpen((o) => !o)}
       >
         <span>{labelText}</span>
-        <span className="ml-2 text-slate-400">▾</span>
+        <span className="ml-2 tv-muted">▾</span>
       </button>
       {open && (
-        <div className="absolute z-20 mt-1 bg-white border border-slate-300 rounded shadow-lg p-2 w-64">
+        <div className="absolute z-20 mt-1 tv-surface-soft border tv-border rounded shadow-lg p-2 w-64">
           <div className="flex items-center justify-between mb-2">
-            <button type="button" className="px-2 text-sm text-slate-600" onClick={prevMonth}>
+            <button type="button" className="px-2 text-sm tv-muted" onClick={prevMonth}>
               ‹
             </button>
             <div className="text-sm font-medium">
@@ -281,12 +281,12 @@ function CalendarDropdown({ label, value, onChange, datesWithData }: CalendarDro
                 new Date(year, month, 1),
               )}
             </div>
-            <button type="button" className="px-2 text-sm text-slate-600" onClick={nextMonth}>
+            <button type="button" className="px-2 text-sm tv-muted" onClick={nextMonth}>
               ›
             </button>
           </div>
 
-          <div className="grid grid-cols-7 text-center text-[11px] mb-1 text-slate-500">
+          <div className="grid grid-cols-7 text-center text-[11px] mb-1 tv-muted">
             <div>S</div>
             <div>M</div>
             <div>T</div>
@@ -313,7 +313,7 @@ function CalendarDropdown({ label, value, onChange, datesWithData }: CalendarDro
 
                 let base =
                   'w-8 h-8 inline-flex items-center justify-center rounded-full text-xs cursor-pointer';
-                let extra = ' text-slate-700 hover:bg-slate-100';
+                let extra = ' text-slate-700 hover:tv-surface-soft';
 
                 if (hasData) extra = ' bg-green-200 text-green-900 hover:bg-green-300';
                 if (isSelected) extra += ' ring-2 ring-slate-500';
@@ -380,7 +380,7 @@ export default function PerformanceReview() {
         <div className="p-6 max-w-xl mx-auto">
           <div className="card">
             <h2 className="text-xl font-semibold mb-2">Performance Review</h2>
-            <div className="text-sm text-slate-600">Connection required. Please connect to the network and try again.</div>
+            <div className="text-sm tv-muted">Connection required. Please connect to the network and try again.</div>
             <div className="mt-4">
               <button className="btn" onClick={() => nav('/Main')}>Back</button>
             </div>
@@ -927,8 +927,8 @@ export default function PerformanceReview() {
   }
 
   function PctPill({ value }: { value: number | null }) {
-    if (value === null || !Number.isFinite(value)) return <span className="text-slate-400">–</span>;
-    const cls = value > 0 ? 'text-emerald-700' : value < 0 ? 'text-red-600' : 'text-slate-600';
+    if (value === null || !Number.isFinite(value)) return <span className="tv-muted">–</span>;
+    const cls = value > 0 ? 'text-emerald-700' : value < 0 ? 'text-red-600' : 'tv-muted';
     const sign = value > 0 ? '+' : '';
     return <span className={cls}>{`${sign}${value.toFixed(0)}%`}</span>;
   }
@@ -1140,9 +1140,9 @@ export default function PerformanceReview() {
           <h2 className="text-xl font-semibold">Performance Review</h2>
 
           {error && <div className="text-sm text-red-600">{error}</div>}
-          {loading && <div className="text-sm text-slate-600">Loading…</div>}
+          {loading && <div className="text-sm tv-muted">Loading…</div>}
 
-          <div className="flex gap-2 border-b border-slate-200">
+          <div className="flex gap-2 border-b tv-border">
             <button
               onClick={() => setTab('graph')}
               className={`px-3 py-2 text-sm ${
@@ -1172,11 +1172,11 @@ export default function PerformanceReview() {
           {tab === 'milestones' && (
             <div className="space-y-4">
               {!selectionReady ? (
-                <div className="text-sm text-slate-600">
+                <div className="text-sm tv-muted">
                   Select an <b>Activity</b>, <b>Sub-activity</b>, and <b>Metric</b> to view milestones.
                 </div>
               ) : !milestonesAllTime ? (
-                <div className="text-sm text-slate-600">No milestone data found for this selection.</div>
+                <div className="text-sm tv-muted">No milestone data found for this selection.</div>
               ) : (
                 <div className="card p-4">
                   <div className="text-sm font-semibold mb-3">All-time milestones (You)</div>
@@ -1184,14 +1184,14 @@ export default function PerformanceReview() {
                   <div className="overflow-x-auto">
                     <table className="min-w-full text-sm">
                       <thead>
-                        <tr className="text-left text-slate-600">
+                        <tr className="text-left tv-muted">
                           <th className="py-2 pr-4">Milestone</th>
                           <th className="py-2 pr-4">Achieved</th>
                           <th className="py-2 pr-4 text-right">Value</th>
                         </tr>
                       </thead>
                       <tbody className="align-top">
-                        <tr className="border-t border-slate-200">
+                        <tr className="border-t tv-border">
                           <td className="py-2 pr-4 font-medium">Record shift</td>
                           <td className="py-2 pr-4">{formatDMY(milestonesAllTime.bestDay.date)}</td>
                           <td className="py-2 pr-4 text-right tabular-nums">
@@ -1200,7 +1200,7 @@ export default function PerformanceReview() {
                             })}
                           </td>
                         </tr>
-                        <tr className="border-t border-slate-200">
+                        <tr className="border-t tv-border">
                           <td className="py-2 pr-4 font-medium">Record week</td>
                           <td className="py-2 pr-4">
                             {formatDMY(milestonesAllTime.best7.start)} – {formatDMY(milestonesAllTime.best7.end)}
@@ -1211,7 +1211,7 @@ export default function PerformanceReview() {
                             })}
                           </td>
                         </tr>
-                        <tr className="border-t border-slate-200">
+                        <tr className="border-t tv-border">
                           <td className="py-2 pr-4 font-medium">Record month</td>
                           <td className="py-2 pr-4">{milestonesAllTime.bestMonth.label || '–'}</td>
                           <td className="py-2 pr-4 text-right tabular-nums">
@@ -1233,7 +1233,7 @@ export default function PerformanceReview() {
               {/* 1) Selectors */}
               <div className="flex flex-wrap gap-2 items-end">
                 <div>
-                  <div className="text-xs text-slate-600 mb-1">Activity</div>
+                  <div className="text-xs tv-muted mb-1">Activity</div>
                   <select
                     className="input text-sm"
                     value={graphActivity}
@@ -1249,7 +1249,7 @@ export default function PerformanceReview() {
                 </div>
 
                 <div>
-                  <div className="text-xs text-slate-600 mb-1">Sub-activity</div>
+                  <div className="text-xs tv-muted mb-1">Sub-activity</div>
                   <select
                     className="input text-sm"
                     value={graphSub}
@@ -1266,7 +1266,7 @@ export default function PerformanceReview() {
                 </div>
 
                 <div>
-                  <div className="text-xs text-slate-600 mb-1">Metric</div>
+                  <div className="text-xs tv-muted mb-1">Metric</div>
                   <select
                     className="input text-sm"
                     value={graphMetric}
@@ -1283,7 +1283,7 @@ export default function PerformanceReview() {
                 </div>
 
                 <div>
-                  <div className="text-xs text-slate-600 mb-1">Crew Match-Up</div>
+                  <div className="text-xs tv-muted mb-1">Crew Match-Up</div>
                   <select
                     className="input text-sm"
                     value={selectedCrewId}
@@ -1306,7 +1306,7 @@ export default function PerformanceReview() {
                   <div className="font-semibold mb-2">Milestones</div>
 
                   {selectedCrewId && (
-                    <div className="grid items-center gap-2 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem] text-[11px] text-slate-500 mb-2">
+                    <div className="grid items-center gap-2 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem] text-[11px] tv-muted mb-2">
                       <div className="truncate">{currentUserName}</div>
                       <div className="text-right truncate">{crewName || 'Crew'}</div>
                       <div className="text-right">Δ</div>
@@ -1315,8 +1315,8 @@ export default function PerformanceReview() {
 
                   <div className="grid grid-cols-1 gap-2 text-sm">
                     {/* Record Shift */}
-                    <div className="bg-white border rounded p-2">
-                      <div className="text-xs text-slate-600">Record Shift</div>
+                    <div className="tv-surface-soft border rounded p-2">
+                      <div className="text-xs tv-muted">Record Shift</div>
                       <CompareRowWithPct
                         userNum={milestonesAllTime.bestDay.total}
                         userText={`${milestonesAllTime.bestDay.total.toLocaleString()}`}
@@ -1329,10 +1329,10 @@ export default function PerformanceReview() {
                       />
                       {/* date below number (like other milestones) */}
                       <div className="grid items-center gap-2 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem] mt-1">
-                        <div className="text-xs text-slate-600">
+                        <div className="text-xs tv-muted">
                           {formatDMY(milestonesAllTime.bestDay.date)}
                         </div>
-                        <div className="text-xs text-slate-600 text-right">
+                        <div className="text-xs tv-muted text-right">
                           {milestonesAllTimeCrew ? formatDMY(milestonesAllTimeCrew.bestDay.date) : ''}
                         </div>
                         <div />
@@ -1340,8 +1340,8 @@ export default function PerformanceReview() {
                     </div>
 
                     {/* Record Week */}
-                    <div className="bg-white border rounded p-2">
-                      <div className="text-xs text-slate-600">Record Week</div>
+                    <div className="tv-surface-soft border rounded p-2">
+                      <div className="text-xs tv-muted">Record Week</div>
                       <CompareRowWithPct
                         userNum={milestonesAllTime.best7.total}
                         userText={`${milestonesAllTime.best7.total.toLocaleString()}`}
@@ -1353,14 +1353,14 @@ export default function PerformanceReview() {
                         }
                       />
                       <div className="grid items-center gap-2 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem] mt-1">
-                        <div className="text-xs text-slate-600">
+                        <div className="text-xs tv-muted">
                           {milestonesAllTime.best7.start && milestonesAllTime.best7.end
                             ? `${formatDMY(milestonesAllTime.best7.start)} → ${formatDMY(
                                 milestonesAllTime.best7.end,
                               )}`
                             : '–'}
                         </div>
-                        <div className="text-xs text-slate-600 text-right">
+                        <div className="text-xs tv-muted text-right">
                           {milestonesAllTimeCrew &&
                           milestonesAllTimeCrew.best7.start &&
                           milestonesAllTimeCrew.best7.end
@@ -1376,8 +1376,8 @@ export default function PerformanceReview() {
                     </div>
 
                     {/* Record Month */}
-                    <div className="bg-white border rounded p-2">
-                      <div className="text-xs text-slate-600">Record Month</div>
+                    <div className="tv-surface-soft border rounded p-2">
+                      <div className="text-xs tv-muted">Record Month</div>
                       <CompareRowWithPct
                         userNum={milestonesAllTime.bestMonth.total}
                         userText={`${milestonesAllTime.bestMonth.total.toLocaleString()}`}
@@ -1389,10 +1389,10 @@ export default function PerformanceReview() {
                         }
                       />
                       <div className="grid items-center gap-2 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_3.5rem] mt-1">
-                        <div className="text-xs text-slate-600">
+                        <div className="text-xs tv-muted">
                           {milestonesAllTime.bestMonth.label || '–'}
                         </div>
-                        <div className="text-xs text-slate-600 text-right">
+                        <div className="text-xs tv-muted text-right">
                           {milestonesAllTimeCrew ? milestonesAllTimeCrew.bestMonth.label || '–' : ''}
                         </div>
                         <div />
@@ -1400,10 +1400,10 @@ export default function PerformanceReview() {
                     </div>
 
                     {/* Most Productive Shift (RESTORED DS/NS AVG) */}
-                    <div className="bg-white border rounded p-2">
+                    <div className="tv-surface-soft border rounded p-2">
                       <div className="flex items-baseline justify-between">
-                        <div className="text-xs text-slate-600">Most Productive Shift</div>
-                        <div className="text-xs text-slate-500">
+                        <div className="text-xs tv-muted">Most Productive Shift</div>
+                        <div className="text-xs tv-muted">
                           Winner:{' '}
                           <span className="font-semibold text-slate-700">
                             {milestonesAllTime.shiftCompare.bestShiftLabel}
@@ -1465,7 +1465,7 @@ export default function PerformanceReview() {
 
               {/* 4) Legend */}
               {selectionReady && (
-                <div className="flex flex-wrap gap-4 text-xs text-slate-600 mb-2">
+                <div className="flex flex-wrap gap-4 text-xs tv-muted mb-2">
                   <div>
                     <span className="inline-block w-3 h-3 rounded bg-slate-600 mr-1" />
                     Daily ({currentUserName})
@@ -1491,17 +1491,17 @@ export default function PerformanceReview() {
 
               {/* 5) Graph */}
               {!selectionReady ? (
-                <div className="text-sm text-slate-500">
+                <div className="text-sm tv-muted">
                   Select Activity → Sub-activity → Metric to generate the graph.
                 </div>
               ) : seriesCurrent.length === 0 && seriesCrew.length === 0 ? (
-                <div className="text-sm text-slate-500">No data for this selection</div>
+                <div className="text-sm tv-muted">No data for this selection</div>
               ) : (
                 <div ref={chartWrapRef} className="border rounded p-3 overflow-x-auto relative">
                   {/* tooltip */}
                   {hoverTip && (
                     <div
-                      className="absolute z-10 pointer-events-none bg-white border border-slate-300 rounded shadow px-2 py-1 text-xs"
+                      className="absolute z-10 pointer-events-none tv-surface-soft border tv-border rounded shadow px-2 py-1 text-xs"
                       style={{ left: Math.min(hoverTip.x + 10, svgWidth - 120), top: Math.max(hoverTip.y - 40, 0) }}
                     >
                       <div className="font-semibold">{hoverTip.title}</div>
@@ -1784,7 +1784,7 @@ export default function PerformanceReview() {
               </div>
 
               {activityOptionsTable.length === 0 ? (
-                <div className="text-sm text-slate-500">No data</div>
+                <div className="text-sm tv-muted">No data</div>
               ) : (
                 Object.entries(filteredRollupTable).map(([act, subs]) => {
                   return (
@@ -1795,7 +1795,7 @@ export default function PerformanceReview() {
                           <div className="font-medium">{sub}</div>
                           <table className="w-full text-sm mt-2 table-fixed">
                             <thead>
-                              <tr className="text-left text-slate-600">
+                              <tr className="text-left tv-muted">
                                 <th className="py-1 pr-4 w-1/4">Metric</th>
                                 <th className="py-1 pr-4 w-1/4 text-right">Sum</th>
                                 <th className="py-1 pr-4 w-1/4 text-right">Shift Avg</th>

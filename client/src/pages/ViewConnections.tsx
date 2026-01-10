@@ -51,12 +51,14 @@ export default function ViewConnections() {
     await api(`/api/connections/${id}/accept`, { method: 'POST' });
     setMsg('Request accepted');
     await reloadConnections();
+    window.dispatchEvent(new Event('spectatore:connections'));
   }
 
   async function decline(id: number) {
     await api(`/api/connections/${id}/decline`, { method: 'POST' });
     setMsg('Request declined');
     await reloadConnections();
+    window.dispatchEvent(new Event('spectatore:connections'));
   }
 
   async function removeAccepted() {
@@ -66,6 +68,7 @@ export default function ViewConnections() {
     setRemoveId(null);
     setRemoveName('');
     await reloadConnections();
+    window.dispatchEvent(new Event('spectatore:connections'));
   }
 
 
@@ -131,7 +134,6 @@ export default function ViewConnections() {
                     <li key={r.id} className="flex items-center justify-between">
                       <div>
                         <div className="font-medium">{r.name || 'Unknown'}</div>
-                        <div className="text-xs text-slate-600">{r.email}</div>
                       </div>
                       <button
                         className="ml-3 w-8 h-8 rounded-full border flex items-start justify-center text-slate-600 hover:bg-slate-50"
@@ -160,7 +162,6 @@ export default function ViewConnections() {
                     <li key={r.id} className="flex items-center justify-between">
                       <div>
                         <div className="font-medium">{r.name || 'Unknown'}</div>
-                        <div className="text-xs text-slate-600">{r.email}</div>
                       </div>
                       <div className="flex gap-2">
                         <button className="btn" onClick={() => accept(r.id)}>
@@ -187,7 +188,6 @@ export default function ViewConnections() {
                     <li key={r.id} className="flex items-center justify-between">
                       <div>
                         <div className="font-medium">{r.name || 'Unknown'}</div>
-                        <div className="text-xs text-slate-600">{r.email}</div>
                       </div>
                       <div className="text-xs text-slate-500">Pending</div>
                     </li>

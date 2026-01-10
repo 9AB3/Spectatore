@@ -10,26 +10,35 @@ function Item({
   to,
   label,
   icon,
+  end,
 }: {
   to: string;
   label: string;
   icon: React.ReactNode;
+  end?: boolean;
 }) {
   return (
     <NavLink
       to={to}
+      end={end}
       className={({ isActive }) =>
         cx(
-          'flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl min-w-[56px]',
-          isActive ? 'font-semibold text-[var(--brand)]' : 'opacity-70',
+          'bottomnav-link flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-2xl min-w-[64px] transition-all',
+          isActive ? 'is-active' : 'is-inactive',
         )
       }
     >
-      <div className="h-6 w-6 flex items-center justify-center">{icon}</div>
-      <div className="text-[11px] leading-none text-center whitespace-pre-line">{label}</div>
+      {({ isActive }) => (
+        <>
+          <div className={cx('h-6 w-6 flex items-center justify-center', isActive && 'scale-[1.03]')}>{icon}</div>
+          <div className="text-[11px] leading-none text-center whitespace-pre-line font-semibold">{label}</div>
+          <div className={cx('mt-1 h-[3px] w-8 rounded-full', isActive ? 'bottomnav-indicator' : 'bg-transparent')} />
+        </>
+      )}
     </NavLink>
   );
 }
+
 
 function IconHome(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -149,7 +158,7 @@ export default function SiteAdminBottomNav() {
           gridTemplateColumns: `repeat(${2 + (canManageSites ? 1 : 0) + (canManageMembers ? 1 : 0) + (canReconcile ? 1 : 0) + (canUseTools ? 1 : 0) + (IS_DEV && canManageSites ? 1 : 0)}, minmax(0, 1fr))`,
         }}
       >
-        <Item to="/SiteAdmin" label="Home" icon={<IconHome className="h-6 w-6" />} />
+        <Item to="/SiteAdmin" end label="Home" icon={<IconHome className="h-6 w-6" />} />
         {canManageSites && (
           <Item to="/SiteAdmin/Sites" label="Sites" icon={<IconSites className="h-6 w-6" />} />
         )}

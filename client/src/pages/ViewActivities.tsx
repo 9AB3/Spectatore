@@ -87,11 +87,11 @@ export default function ViewActivities() {
   return (
     <div>
       <Header />
-      <div className="p-6 max-w-2xl mx-auto">
-        <div className="card">
+      <div className="p-6 max-w-3xl mx-auto">
+        <div className="tv-tile">
           <h2 className="text-xl font-semibold mb-3">Shift Activities</h2>
           {items.length === 0 ? (
-            <div className="text-slate-500 text-sm">No activities yet</div>
+            <div className="tv-muted text-sm">No activities yet</div>
           ) : (
             <div className="space-y-6">
               {activityKeys.map((act) => (
@@ -106,17 +106,17 @@ export default function ViewActivities() {
                           return (
                             <li
                               key={idx}
-                              className="border-b pb-1 last:border-b-0 flex items-start gap-2"
+                              className="tv-surface-soft tv-border border rounded-2xl p-3 flex items-start gap-3"
                             >
-                              <div className="text-xs text-slate-600">
+                              <div className="text-xs tv-muted flex-1">
                                 {Object.entries(p.values || {}).map(([k, v], i) => (
                                   <span key={i} className="mr-2">
-                                    {k}: <b>{String(v)}</b>
+                                    {k}: <b className="text-[color:var(--text)]">{String(v)}</b>
                                   </span>
                                 ))}
 
                                 {act === 'Hauling' && Array.isArray((p as any).loads) && (p as any).loads.length ? (
-                                  <div className="mt-1 text-[11px] text-slate-500">
+                                  <div className="mt-1 text-[11px] tv-muted">
                                     Truck weights: {(p as any).loads
                                       .map((l: any, ii: number) => {
                                         const w = Number(String(l?.weight ?? l?.Weight ?? '').replace(/[^0-9.]/g, ''));
@@ -133,7 +133,7 @@ export default function ViewActivities() {
                                 <button
                                   aria-label="Delete"
                                   title="Delete"
-                                  className="ml-auto text-slate-400 hover:text-red-600 text-lg leading-none px-2"
+                                  className="ml-auto tv-muted hover:text-red-400 text-lg leading-none px-2"
                                   onClick={() => handleDelete(it.id)}
                                 >
                                   ×
@@ -196,10 +196,10 @@ export default function ViewActivities() {
 
     return (
       <tbody>
-        <tr><td className="py-1 pr-4 text-slate-600">Total Trucks</td><td className="py-1 font-semibold">{totalTrucks.toLocaleString()}</td></tr>
-        <tr><td className="py-1 pr-4 text-slate-600">Total Weight</td><td className="py-1 font-semibold">{totalWeight.toLocaleString()}</td></tr>
-        <tr><td className="py-1 pr-4 text-slate-600">Total Distance</td><td className="py-1 font-semibold">{totalDistance.toLocaleString()}</td></tr>
-        <tr><td className="py-1 pr-4 text-slate-600">Total TKMs</td><td className="py-1 font-semibold">{totalTKMs.toLocaleString()}</td></tr>
+        <tr><td className="py-1 pr-4 tv-muted">Total Trucks</td><td className="py-1 font-semibold">{totalTrucks.toLocaleString()}</td></tr>
+        <tr><td className="py-1 pr-4 tv-muted">Total Weight</td><td className="py-1 font-semibold">{totalWeight.toLocaleString()}</td></tr>
+        <tr><td className="py-1 pr-4 tv-muted">Total Distance</td><td className="py-1 font-semibold">{totalDistance.toLocaleString()}</td></tr>
+        <tr><td className="py-1 pr-4 tv-muted">Total TKMs</td><td className="py-1 font-semibold">{totalTKMs.toLocaleString()}</td></tr>
       </tbody>
     );
   })()
@@ -207,7 +207,7 @@ export default function ViewActivities() {
   <tbody>
     {Object.entries(sums).map(([k, v]) => (
       <tr key={k}>
-        <td className="py-1 pr-4 text-slate-600">{k}</td>
+        <td className="py-1 pr-4 tv-muted">{k}</td>
         <td className="py-1 font-semibold">{Number(v as number).toLocaleString()}</td>
       </tr>
     ))}

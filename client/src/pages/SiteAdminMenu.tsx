@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { getDB } from '../lib/idb';
 
 function Card({ children }: { children: any }) {
-  return <div className="card w-full max-w-sm text-center">{children}</div>;
+  return <div className="tv-tile w-full max-w-md">{children}</div>;
 }
 
 export default function SiteAdminMenu() {
@@ -25,10 +25,10 @@ export default function SiteAdminMenu() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center">
+    <div className="min-h-screen flex items-center justify-center p-6">
       <Card>
         <img src="/logo.png" alt="Spectatore" className="mx-auto mb-4 w-48 h-48 object-contain" />
-        <div className="text-sm opacity-80 mb-4">{username}</div>
+        <div className="text-sm tv-subtext mb-4">{username}</div>
         <div className="space-y-3">
           <button className="btn w-full" onClick={() => nav('/SiteAdmin/Validate')}>
             Validate Data

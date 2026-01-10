@@ -1,5 +1,6 @@
 import Header from '../components/Header';
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import useToast from '../hooks/useToast';
 
@@ -26,6 +27,7 @@ export default function Notifications() {
   const { Toast, setMsg } = useToast();
   const [items, setItems] = useState<Notif[]>([]);
   const [loading, setLoading] = useState(true);
+  const nav = useNavigate();
 
   async function load() {
     setLoading(true);
@@ -54,10 +56,37 @@ export default function Notifications() {
     window.dispatchEvent(new Event('spectatore:notifications'));
   }
 
+  async function clearRead() {
+    if (!confirm('Clear all read notifications?')) return;
+    await api('/api/notifications/clear-read', { method: 'POST' });
+    setMsg('Cleared read notifications');
+    await load();
+    window.dispatchEvent(new Event('spectatore:notifications'));
+  }
+
+  async function clearAll() {
+    if (!confirm('Clear ALL notifications?')) return;
+    await api('/api/notifications/clear-all', { method: 'POST' });
+    setMsg('Cleared notifications');
+    await load();
+    window.dispatchEvent(new Event('spectatore:notifications'));
+  }
+
+  async function open(n: Notif) {
+    // Mark as read (best-effort) then deep-link if available
+    if (!n.read_at) {
+      try {
+        await markRead(n.id);
+      } catch {}
+    }
+    const url = n?.payload_json?.url;
+    if (typeof url === 'string' && url.trim()) nav(url);
+  }
+
   return (
     <div>
       <Toast />
-      <Header />
+      <Header showBell={false} />
       <div className="max-w-2xl mx-auto p-4 space-y-4">
         <div className="card">
           <div className="flex items-center justify-between gap-3 mb-3">
@@ -65,8 +94,22 @@ export default function Notifications() {
               <div className="text-lg font-semibold">Notifications</div>
               <div className="text-sm opacity-70">Crew requests and milestone updates.</div>
             </div>
-            <button className="btn" onClick={markAll}>
-              Mark all read
+            <div className="flex items-center gap-2">
+              <button className="btn" onClick={() => nav(-1)} title="Close">
+                Close
+              </button>
+              <button className="btn" onClick={markAll}>
+                Mark all read
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <button className="btn" onClick={clearRead}>
+              Clear read
+            </button>
+            <button className="btn" onClick={clearAll}>
+              Clear all
             </button>
           </div>
 
@@ -77,7 +120,18 @@ export default function Notifications() {
           ) : (
             <ul className="space-y-2">
               {items.map((n) => (
-                <li key={n.id} className="p-3 rounded-2xl border" style={{ borderColor: '#e9d9c3' }}>
+                <li
+                  key={n.id}
+                  className="p-3 rounded-2xl border cursor-pointer"
+                  style={{ borderColor: '#e9d9c3' }}
+                  onClick={() => open(n)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') open(n);
+                  }}
+                  title={n?.payload_json?.url ? 'Open' : ''}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
@@ -91,11 +145,7 @@ export default function Notifications() {
                       <div className="text-sm opacity-80 mt-1">{n.body}</div>
                       <div className="text-xs opacity-60 mt-2">{fmt(n.created_at)}</div>
                     </div>
-                    {!n.read_at ? (
-                      <button className="btn" onClick={() => markRead(n.id)}>
-                        Read
-                      </button>
-                    ) : null}
+                    {!n.read_at ? <div className="text-xs opacity-60">Tap to open</div> : null}
                   </div>
                 </li>
               ))}

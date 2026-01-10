@@ -353,7 +353,7 @@ function LineChart({
   // Defensive: when data hasn't loaded (or API errored), avoid crashing the whole page.
   if (!points || points.length === 0) {
     return (
-      <div className="w-full rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
+      <div className="w-full rounded-xl border tv-border tv-surface-soft p-4 text-sm tv-muted">
         No data to chart for this metric yet.
       </div>
     );
@@ -418,17 +418,17 @@ function LineChart({
           viewBox={`0 0 ${w} ${h}`}
           onMouseMove={onMove}
           onMouseLeave={onLeave}
-          className="select-none text-slate-900"
+          className="select-none text-[color:var(--text)]"
         >
           {/* y grid */}
           {[0, 0.25, 0.5, 0.75, 1].map((t) => {
             const y = padT + t * (h - padT - padB);
-            return <line key={t} x1={padL} y1={y} x2={w - padR} y2={y} stroke="#e2e8f0" />;
+            return <line key={t} x1={padL} y1={y} x2={w - padR} y2={y} stroke="var(--chart-grid)" />;
           })}
 
           {/* axes */}
-          <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke="#94a3b8" />
-          <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke="#94a3b8" />
+          <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke="var(--chart-axis)" />
+          <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke="var(--chart-axis)" />
 
           {/* y axis title */}
           <text
@@ -438,7 +438,7 @@ function LineChart({
             textAnchor="middle"
             fontSize="12"
             fontWeight={700}
-            fill="#334155"
+            fill="var(--chart-title)"
           >
             {yLabel}
           </text>
@@ -453,7 +453,7 @@ function LineChart({
                 y={y + 4}
                 textAnchor="end"
                 fontSize="10"
-                fill="#64748b"
+                fill="var(--chart-label)"
               >
                 {Math.round(v)}
               </text>
@@ -466,13 +466,13 @@ function LineChart({
             y1={yAvg}
             x2={w - padR}
             y2={yAvg}
-            stroke="#0f172a"
+            stroke="var(--chart-avg)"
             strokeDasharray="6 6"
-            opacity={0.35}
+            opacity={0.9}
           />
 
           {/* series */}
-          <path d={path} fill="none" stroke="#0f172a" strokeWidth={3} opacity={0.85} />
+          <path d={path} fill="none" stroke="var(--chart-line)" strokeWidth={3} opacity={0.95} />
 
           {/* points */}
           {points.map((p, i) => (
@@ -481,8 +481,8 @@ function LineChart({
               cx={toX(i)}
               cy={toY(p.value)}
               r={hoverIdx === i ? 5 : 3}
-              fill="#0f172a"
-              opacity={hoverIdx === i ? 0.9 : 0.55}
+              fill="var(--chart-point)"
+              opacity={hoverIdx === i ? 1 : 0.85}
             />
           ))}
 
@@ -497,32 +497,32 @@ function LineChart({
                 y={h - 12}
                 textAnchor="middle"
                 fontSize="10"
-                fill="#64748b"
+                fill="var(--chart-label)"
               >
                 {p.label}
               </text>
             ))}
 
           {/* axis title */}
-          <text x={(padL + (w - padR)) / 2} y={h - 2} textAnchor="middle" fontSize="12" fill="#0f172a">
+          <text x={(padL + (w - padR)) / 2} y={h - 2} textAnchor="middle" fontSize="12" fill="var(--chart-point)">
             Date
           </text>
 
           {/* hover marker */}
           {hover && (
             <>
-              <line x1={hx} y1={padT} x2={hx} y2={h - padB} stroke="#0f172a" opacity={0.15} />
-              <circle cx={hx} cy={hy} r={6} fill="#0f172a" opacity={0.25} />
+              <line x1={hx} y1={padT} x2={hx} y2={h - padB} stroke="var(--chart-hover)" opacity={0.45} />
+              <circle cx={hx} cy={hy} r={6} fill="var(--chart-hover)" opacity={1} />
             </>
           )}
         </svg>
 
         {hover && (
           <div
-            className="absolute pointer-events-none px-3 py-2 rounded-xl border border-slate-200 shadow-sm bg-white text-xs"
+            className="absolute pointer-events-none px-3 py-2 rounded-xl border tv-border shadow-sm tv-surface-soft text-xs"
             style={{ left: `${(hx / w) * 100}%`, top: `${(hy / h) * 100}%`, transform: 'translate(-50%, -120%)' }}
           >
-            <div className="font-semibold text-slate-900">
+            <div className="font-semibold text-[color:var(--text)]">
               {hover.date} ({hover.label})
             </div>
             <div className="text-slate-700">
@@ -577,7 +577,7 @@ function HeatmapMonth({
       <div className="text-sm font-semibold mb-2">{title}</div>
       <div className="grid grid-cols-7 gap-1">
         {cells.map((d, i) => {
-          if (!d) return <div key={i} className="h-8 rounded-lg bg-slate-100" />;
+          if (!d) return <div key={i} className="h-8 rounded-lg tv-surface-soft" />;
           const v = byDate[d] || 0;
           const ratio = Math.min(1, v / max);
           const bg = v <= 0 ? '#e2e8f0' : `rgba(15, 23, 42, ${0.12 + ratio * 0.65})`;
@@ -594,7 +594,7 @@ function HeatmapMonth({
           );
         })}
       </div>
-      <div className="mt-2 text-[11px] text-slate-600">Darker = higher output (relative to your month max)</div>
+      <div className="mt-2 text-[11px] tv-muted">Darker = higher output (relative to your month max)</div>
     </div>
   );
 }
@@ -965,7 +965,7 @@ export default function YouVsYou() {
         <div className="p-6 max-w-xl mx-auto">
           <div className="card">
             <h2 className="text-xl font-semibold mb-2">You vs You</h2>
-            <div className="text-sm text-slate-600">
+            <div className="text-sm tv-muted">
               Connection required. Please connect to the network and try again.
             </div>
             <div className="mt-4 flex gap-2">
@@ -986,9 +986,9 @@ export default function YouVsYou() {
         <div className="card">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-xs text-slate-600">Performance</div>
+              <div className="text-xs tv-muted">Performance</div>
               <div className="text-2xl font-bold">You vs You</div>
-              <div className="text-sm text-slate-600">Trends and benchmarks based on your own logged shifts.</div>
+              <div className="text-sm tv-muted">Trends and benchmarks based on your own logged shifts.</div>
             </div>
             <div className="seg-tabs" role="tablist" aria-label="Performance pages">
               <button role="tab" aria-selected="false" className="seg-tab" onClick={() => nav('/YouVsNetwork')} title="Compare to crew">
@@ -1005,9 +1005,9 @@ export default function YouVsYou() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-semibold">Trend cards</div>
-              <div className="text-xs text-slate-600">Tap a card to change the chart</div>
+              <div className="text-xs tv-muted">Tap a card to change the chart</div>
             </div>
-            <div className="text-xs text-slate-600">Last 30 shifts</div>
+            <div className="text-xs tv-muted">Last 30 shifts</div>
           </div>
 
           <div className="mt-3 flex gap-3 overflow-x-auto pb-2">
@@ -1030,13 +1030,13 @@ export default function YouVsYou() {
                     background: active ? 'rgba(15,23,42,0.03)' : 'transparent',
                   }}
                 >
-                  <div className="text-xs text-slate-600">{t.title}</div>
+                  <div className="text-xs tv-muted">{t.title}</div>
                   <div className="text-xl font-bold mt-1">{headline}</div>
                   <div className="mt-1 flex items-center justify-between gap-2">
                     <div className="text-xs" style={{ color: col }}>
                       {sub}
                     </div>
-                    <div className="text-slate-900" style={{ color: 'var(--brand)' }}>
+                    <div className="text-[color:var(--text)]" style={{ color: 'var(--brand)' }}>
                       <Sparkline values={vals} />
                     </div>
                   </div>
@@ -1050,7 +1050,7 @@ export default function YouVsYou() {
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
               <div className="text-sm font-semibold">{selected.title}</div>
-              <div className="text-xs text-slate-600">{windowN === 999 ? 'All time' : `Last ${windowN} shifts`}</div>
+              <div className="text-xs tv-muted">{windowN === 999 ? 'All time' : `Last ${windowN} shifts`}</div>
             </div>
             <div className="flex gap-2">
               {[7, 14, 30].map((n) => (
@@ -1087,7 +1087,7 @@ export default function YouVsYou() {
 </div>
 
 
-          <div className="mt-3 text-xs text-slate-600">
+          <div className="mt-3 text-xs tv-muted">
             Dashed line = your average for the selected window. Hover a point to see the value.
           </div>
         </div>
@@ -1097,7 +1097,7 @@ export default function YouVsYou() {
             <div className="text-sm font-semibold mb-2">Personal benchmarks</div>
             <div className="space-y-2 text-sm">
               <div className="flex items-center justify-between">
-                <div className="text-slate-600">Average</div>
+                <div className="tv-muted">Average</div>
                 <div className="font-semibold">
                   {selected.id === 'shifts' ? Math.round(currentAvg) : Math.round(currentAvg)} {selected.unit}
                   {selected.id === 'shifts' ? '' : ' / shift'}
@@ -1105,22 +1105,22 @@ export default function YouVsYou() {
               </div>
               {selected.id !== 'shifts' && (
                 <div className="flex items-center justify-between">
-                  <div className="text-slate-600">Typical range</div>
+                  <div className="tv-muted">Typical range</div>
                   <div className="font-semibold">
                     {Math.round(typical.p25)} – {Math.round(typical.p75)} {selected.unit}
                   </div>
                 </div>
               )}
               <div className="flex items-center justify-between">
-                <div className="text-slate-600">Best shift</div>
+                <div className="tv-muted">Best shift</div>
                 <div className="font-semibold">
                   {Math.round(best.value)} {selected.unit}{' '}
-                  <span className="text-slate-600 font-normal">({best.date} {best.dn})</span>
+                  <span className="tv-muted font-normal">({best.date} {best.dn})</span>
                 </div>
               </div>
               {selected.id !== 'shifts' && (
                 <div className="flex items-center justify-between">
-                  <div className="text-slate-600">Change vs previous window</div>
+                  <div className="tv-muted">Change vs previous window</div>
                   <div className="font-semibold" style={{ color: deltaPct >= 0 ? 'var(--ok)' : 'var(--warn)' }}>
                     {prevWindowRows.length ? `${deltaPct >= 0 ? '▲' : '▼'} ${Math.abs(deltaPct).toFixed(0)}%` : '–'}
                   </div>
@@ -1132,7 +1132,7 @@ export default function YouVsYou() {
           <div className="card">
             <div className="text-sm font-semibold mb-2">Consistency & reliability</div>
             <div className="flex items-center justify-between">
-              <div className="text-slate-600 text-sm">Consistency</div>
+              <div className="tv-muted text-sm">Consistency</div>
               <div
                 className="font-semibold"
                 style={{
@@ -1149,21 +1149,21 @@ export default function YouVsYou() {
             </div>
             <div className="mt-3 space-y-2 text-sm">
               <div className="flex items-center justify-between">
-                <div className="text-slate-600">Non-zero shifts</div>
+                <div className="tv-muted">Non-zero shifts</div>
                 <div className="font-semibold">{nonZeroPct.toFixed(0)}%</div>
               </div>
               <div className="flex items-center justify-between">
-                <div className="text-slate-600">Shifts in window</div>
+                <div className="tv-muted">Shifts in window</div>
                 <div className="font-semibold">{series.length}</div>
               </div>
               {selected.id !== 'shifts' && (
                 <div className="flex items-center justify-between">
-                  <div className="text-slate-600">Variance</div>
+                  <div className="tv-muted">Variance</div>
                   <div className="font-semibold">{(consistency.variance * 100).toFixed(0)}%</div>
                 </div>
               )}
             </div>
-            <div className="mt-3 text-xs text-slate-600">
+            <div className="mt-3 text-xs tv-muted">
               Consistency is based on how stable your output is across the selected window.
             </div>
           </div>
@@ -1171,28 +1171,28 @@ export default function YouVsYou() {
 
         <div className="card">
           <div className="text-sm font-semibold mb-2">Calendar heatmap</div>
-          <div className="text-xs text-slate-600 mb-3">Tap a day to see your output.</div>
+          <div className="text-xs tv-muted mb-3">Tap a day to see your output.</div>
           <HeatmapMonth points={monthPoints} selectedDate={selectedDate} onSelect={setSelectedDate} />
           {selectedDate && (
-            <div className="mt-3 rounded-2xl border border-slate-200 p-4">
+            <div className="mt-3 rounded-2xl border tv-border p-4">
               <div className="text-sm font-semibold">{selectedDate}</div>
               <div className="text-sm text-slate-700 mt-1">
                 {selected.title}: <span className="font-semibold">{Math.round(selectedDateValue || 0)} {selected.unit}</span>
               </div>
-              <div className="text-[11px] text-slate-600 mt-2">Tip: switch cards to shade the calendar by a different metric.</div>
+              <div className="text-[11px] tv-muted mt-2">Tip: switch cards to shade the calendar by a different metric.</div>
             </div>
           )}
         </div>
 
         {loading && (
           <div className="card">
-            <div className="text-sm text-slate-600">Loading…</div>
+            <div className="text-sm tv-muted">Loading…</div>
           </div>
         )}
         {error && (
           <div className="card">
             <div className="text-sm font-semibold mb-1">Couldn’t load</div>
-            <div className="text-sm text-slate-600">{error}</div>
+            <div className="text-sm tv-muted">{error}</div>
             <div className="mt-3 flex gap-2">
               <button
                 className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm"
@@ -1201,7 +1201,7 @@ export default function YouVsYou() {
                 Retry
               </button>
               <button
-                className="px-3 py-2 rounded-xl border border-slate-300 text-sm"
+                className="px-3 py-2 rounded-xl border tv-border text-sm"
                 onClick={() => nav('/Main')}
               >
                 Back

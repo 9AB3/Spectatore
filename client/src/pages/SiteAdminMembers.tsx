@@ -150,7 +150,7 @@ export default function SiteAdminMembers() {
                 onChange={(e) => searchMembers(e.target.value)}
               />
               {memberResults.length > 0 && (
-                <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-xl border bg-white text-slate-900 shadow-xl">
+                <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-xl border bg-[color:var(--card)] text-slate-900 shadow-xl">
                   {memberResults.map((u) => (
                     <button
                       key={u.id}
@@ -158,13 +158,12 @@ export default function SiteAdminMembers() {
                       className="w-full text-left px-3 py-2 hover:bg-slate-100"
                       onClick={() => {
                         setSelectedUserId(u.id);
-                        setSelectedUserLabel(`${u.name || 'Unnamed'} (${u.email})`);
+                        setSelectedUserLabel(`${u.name || 'Unnamed'}`);
                         setMemberResults([]);
                         setMemberQuery(u.name || '');
                       }}
                     >
                       <div className="font-medium">{u.name || 'Unnamed'}</div>
-                      <div className="text-xs opacity-70">{u.email}</div>
                     </button>
                   ))}
                 </div>
@@ -182,7 +181,7 @@ export default function SiteAdminMembers() {
               Add / Move
             </button>
           </div>
-          <div className="text-xs text-slate-600">
+          <div className="text-xs text-[color:var(--muted)]">
             Use this if someone nominated the wrong site during signup.
           </div>
         </div>
@@ -190,14 +189,13 @@ export default function SiteAdminMembers() {
         <div className="card p-4">
           <div className="font-semibold mb-2">Membership requests</div>
           {!requested.length ? (
-            <div className="text-sm text-slate-600">No pending requests.</div>
+            <div className="text-sm text-[color:var(--muted)]">No pending requests.</div>
           ) : (
             <div className="space-y-2">
               {requested.map((r) => (
                 <div key={r.id} className="p-3 rounded-xl border flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                   <div>
-                    <div className="font-semibold">{r.name || r.email}</div>
-                    <div className="text-xs text-slate-600">{r.email}</div>
+                    <div className="font-semibold">{r.name || 'Unnamed'}</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button className="btn" onClick={() => approve(r.user_id, 'member')}>
@@ -219,14 +217,13 @@ export default function SiteAdminMembers() {
         <div className="card p-4">
           <div className="font-semibold mb-2">Active members</div>
           {!active.length ? (
-            <div className="text-sm text-slate-600">No active members for this site.</div>
+            <div className="text-sm text-[color:var(--muted)]">No active members for this site.</div>
           ) : (
             <div className="space-y-2">
               {active.map((r) => (
                 <div key={r.id} className="p-3 rounded-xl border flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                   <div>
-                    <div className="font-semibold">{r.name || r.email}</div>
-                    <div className="text-xs text-slate-600">{r.email}</div>
+                    <div className="font-semibold">{r.name || 'Unnamed'}</div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs px-2 py-1 rounded-full bg-slate-100">{r.role}</span>

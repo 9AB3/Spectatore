@@ -1,5 +1,6 @@
 import Header from '../components/Header';
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import useToast from '../hooks/useToast';
 import { disablePush, enablePush, getExistingSubscription, isPushSupported } from '../lib/push';
@@ -30,6 +31,7 @@ function normaliseRole(raw: any): 'member' | 'validator' | 'admin' {
 
 export default function Settings() {
   const { Toast, setMsg } = useToast();
+  const nav = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [me, setMe] = useState<Me | null>(null);
@@ -228,6 +230,20 @@ export default function Settings() {
         <h2 className="text-xl font-semibold mb-4">Settings</h2>
 
         <div className="card" style={{ marginBottom: 12 }}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 style={{ margin: 0 }}>Notification preferences</h3>
+              <p style={{ marginTop: 6, opacity: 0.85 }}>
+                Control milestones vs crew request alerts (in-app and push).
+              </p>
+            </div>
+            <button className="btn" onClick={() => nav('/NotificationPreferences')}>
+              Open
+            </button>
+          </div>
+        </div>
+
+        <div className="card" style={{ marginBottom: 12 }}>
           <h3 style={{ margin: 0 }}>Push notifications</h3>
           <p style={{ marginTop: 6, opacity: 0.85 }}>Get a phone/desktop notification for crew requests and milestones.</p>
 
@@ -337,7 +353,7 @@ export default function Settings() {
                       const siteName = String(m.site || '');
                       const key = String(siteId || m.id || siteName);
                       return (
-                        <div key={key} className="flex items-center justify-between gap-2 border rounded-xl p-2">
+                        <div key={key} className="tv-list-item">
                           <div className="min-w-0">
                             <div className="font-medium truncate">{siteName}</div>
                             <div className="text-xs opacity-70">

@@ -463,6 +463,27 @@ await client.query('COMMIT');
         const actorName = user_name || 'A crew mate';
         const metricMap = computeMilestoneMetricMapForShift({ totals_json: totals || {} }, activities as any);
 
+        // To avoid spamming: only notify when the actor *crosses* the recipient's personal best
+        // for a metric (i.e. actor previously <= recipient best, now > recipient best).
+        // We compute actor's previous best (excluding this shift) once.
+        const ar = await pool.query(
+          `SELECT id, totals_json
+             FROM shifts
+            WHERE user_id=$1
+              AND id <> $2
+              AND date >= (CURRENT_DATE - INTERVAL '365 days')`,
+          [actorId, shift_id],
+        );
+        const actorPrevBest: Record<string, number> = {};
+        for (const m of MILESTONE_METRICS as any) actorPrevBest[m] = 0;
+        for (const row of ar.rows || []) {
+          const mm = computeMilestoneMetricMapForShift({ totals_json: asObj(row.totals_json) }, undefined);
+          for (const m of MILESTONE_METRICS as any) {
+            const v = n(mm[m] || 0);
+            if (v > actorPrevBest[m]) actorPrevBest[m] = v;
+          }
+        }
+
         // Find accepted connections
         const cr = await pool.query(
           `SELECT CASE WHEN requester_id=$1 THEN addressee_id ELSE requester_id END as other_id
@@ -472,7 +493,7 @@ await client.query('COMMIT');
         );
         const others = (cr.rows || []).map((r: any) => Number(r.other_id)).filter((x: any) => Number.isFinite(x) && x > 0);
 
-        // Build list of exceeded milestones per other user, then notify (cap to avoid spam)
+        // Build list of crossed milestones per other user, then notify (bundled)
         for (const otherId of others) {
           // Compute recipient bests over last 365 days using totals_json only
           const sr = await pool.query(
@@ -492,21 +513,40 @@ await client.query('COMMIT');
             }
           }
 
-          const exceeded: Array<{ metric: string; value: number; diff: number }> = [];
+          const crossed: Array<{ metric: string; value: number; diff: number }> = [];
           for (const m of MILESTONE_METRICS as any) {
             const v = n(metricMap[m] || 0);
-            if (v > 0 && v > (best[m] || 0)) exceeded.push({ metric: m, value: v, diff: v - (best[m] || 0) });
+            const recipientBest = n(best[m] || 0);
+            const actorWas = n(actorPrevBest[m] || 0);
+            // Notify only on the *first crossing* over the recipient's PB.
+            if (v > 0 && v > recipientBest && actorWas <= recipientBest) {
+              crossed.push({ metric: m, value: v, diff: v - recipientBest });
+            }
           }
-          exceeded.sort((a, b) => b.diff - a.diff);
-          const top = exceeded.slice(0, 4);
-          for (const ex of top) {
+          crossed.sort((a, b) => b.diff - a.diff);
+          if (crossed.length) {
+            const top = crossed.slice(0, 6);
+            const metricNames = top.map((x) => String(x.metric));
+            const more = crossed.length > top.length ? ` (+${crossed.length - top.length} more)` : '';
+            const body =
+              crossed.length === 1
+                ? `${actorName} just beat your personal best for ${metricNames[0]} on ${date}.`
+                : `${actorName} just beat ${crossed.length} of your milestones: ${metricNames.join(', ')}${more} on ${date}.`;
+
             await notify(
               otherId,
               'milestone_broken',
-              'Milestone broken',
-              `${actorName} just beat your personal best for ${ex.metric}: ${ex.value.toFixed(1)} on ${date}.`,
-              { actor_id: actorId, actor_name: actorName, metric: ex.metric, value: ex.value, date },
-              `/YouVsNetwork?metric=${encodeURIComponent(String(ex.metric))}`,
+              'Milestones broken',
+              body,
+              {
+                actor_id: actorId,
+                actor_name: actorName,
+                metrics: crossed.map((x) => x.metric),
+                top_metrics: metricNames,
+                date,
+                tag: `milestone_broken:${actorId}:${shift_id}`,
+              },
+              `/YouVsNetwork?metric=${encodeURIComponent(String(metricNames[0] || ''))}`,
             );
           }
         }

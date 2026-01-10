@@ -101,13 +101,13 @@ function ShiftDateCalendar({
         onClick={() => setOpen((o) => !o)}
       >
         <span>{value || 'Select date'}</span>
-        <span className="ml-2 text-slate-400">▾</span>
+        <span className="ml-2 tv-muted">▾</span>
       </button>
 
       {open && (
-        <div className="absolute z-20 mt-1 bg-white border border-slate-300 rounded shadow-lg p-2 w-64 right-0">
+        <div className="absolute z-20 mt-2 right-0 w-72 card p-3 tv-border">
           <div className="flex items-center justify-between mb-2">
-            <button type="button" className="px-2 text-sm text-slate-600" onClick={prevMonth}>
+            <button type="button" className="px-2 text-sm tv-muted" onClick={prevMonth}>
               ‹
             </button>
             <div className="text-sm font-medium">
@@ -115,12 +115,12 @@ function ShiftDateCalendar({
                 new Date(year, month, 1),
               )}
             </div>
-            <button type="button" className="px-2 text-sm text-slate-600" onClick={nextMonth}>
+            <button type="button" className="px-2 text-sm tv-muted" onClick={nextMonth}>
               ›
             </button>
           </div>
 
-          <div className="grid grid-cols-7 gap-1 text-center text-xs text-slate-500 mb-1">
+          <div className="grid grid-cols-7 gap-1 text-center text-xs tv-muted mb-1">
             {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d) => (
               <div key={d}>{d}</div>
             ))}
@@ -134,7 +134,7 @@ function ShiftDateCalendar({
                 <button
                   key={idx}
                   type="button"
-                  className={`text-xs rounded p-1 ${selected ? 'bg-slate-900 text-white' : 'hover:bg-slate-100'}`}
+                  className={`text-xs rounded-xl p-2 ${selected ? 'bg-blue-600 text-white' : 'hover:bg-white/10'}`}
                   onClick={() => handleSelect(d)}
                 >
                   {d.getDate()}
@@ -399,11 +399,11 @@ export default function FinalizeShift() {
     <div>
       <Toast />
       <Header />
-      <div className="p-6 max-w-2xl mx-auto">
-        <div className="card">
+      <div className="p-6 max-w-3xl mx-auto">
+        <div className="tv-tile">
           <h2 className="text-xl font-semibold mb-3">Finalize Shift</h2>
           {items.length === 0 ? (
-            <div className="text-slate-500 text-sm">No activities yet</div>
+            <div className="tv-muted text-sm">No activities yet</div>
           ) : (
             <div className="space-y-6">
               {activityKeys.map((act) => (
@@ -418,9 +418,9 @@ export default function FinalizeShift() {
                           return (
                             <li
                               key={idx}
-                              className="border-b pb-1 last:border-b-0 flex items-start gap-2"
+                              className="tv-surface-soft tv-border border rounded-2xl p-3 flex items-start gap-3"
                             >
-                              <div className="text-xs text-slate-600">
+                              <div className="text-xs tv-muted">
                                 {Object.entries(p.values || {}).map(([k, v], i) => (
                                   <span key={i} className="mr-2">
                                     {k}: <b>{String(v)}</b>
@@ -431,7 +431,7 @@ export default function FinalizeShift() {
                                 <button
                                   aria-label="Delete"
                                   title="Delete"
-                                  className="ml-auto text-slate-400 hover:text-red-600 text-lg leading-none px-2"
+                                  className="ml-auto tv-muted hover:text-red-400 text-lg leading-none px-2"
                                   onClick={() => handleDelete(it.id)}
                                 >
                                   ×
@@ -461,7 +461,7 @@ export default function FinalizeShift() {
                       <tbody>
                         {Object.entries(sums).map(([k, v]) => (
                           <tr key={k}>
-                            <td className="py-1 pr-4 text-slate-600">{k}</td>
+                            <td className="py-1 pr-4 tv-muted">{k}</td>
                             <td className="py-1 font-semibold">{Number(v as number).toLocaleString()}</td>
                           </tr>
                         ))}
@@ -552,7 +552,7 @@ export default function FinalizeShift() {
           <div className="min-h-full flex items-start justify-center p-4 sm:items-center">
             <div className="card w-full max-w-lg max-h-[calc(100vh-2rem)] flex flex-col">
             <h3 className="text-lg font-semibold">Milestone unlocked 🏁</h3>
-            <div className="text-sm text-slate-600 mt-1">
+            <div className="text-sm tv-muted mt-1">
               Nice work — you just set a new record on one or more metrics.
             </div>
 
@@ -564,14 +564,14 @@ export default function FinalizeShift() {
             */}
             <div className="mt-4 space-y-2 overflow-y-auto pr-1 flex-1">
               {milestoneHits.map((m) => (
-                <div key={m.metric} className="border border-slate-200 rounded-xl p-3">
+                <div key={m.metric} className="tv-surface-soft tv-border border rounded-2xl p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="font-semibold">{m.metric}</div>
                     <div className="flex flex-wrap gap-2 justify-end">
                       {m.kinds.map((k) => (
                         <span
                           key={k}
-                          className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200"
+                          className="text-[11px] px-2 py-0.5 rounded-full tv-border border tv-surface text-[color:var(--text)]"
                         >
                           {k}
                         </span>

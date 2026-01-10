@@ -3,22 +3,88 @@
 @tailwind utilities;
 
 /*
-  Professional, low-saturation theme (matches the Site Admin / Validate page tone)
-  - Slate + muted amber accents
-  - Minimal “fun” colour flooding
+  Spectatore — Industrial Premium (Apple TV–inspired)
+
+  Goals:
+  - Desktop: bright, clean, high-end “studio” vibe.
+  - Mobile: darker, cinematic, OLED-friendly vibe.
+  - Consistent surfaces, typography, spacing, and interaction polish across User + Admin.
 */
 
 :root {
-  --brand: #0f172a; /* slate-900 */
-  --brand-press: #111827; /* slate-900-ish */
-  --bg: #f1f5f9; /* slate-100 */
-  --card: #ffffff;
-  --input: #ffffff;
-  --text: #0f172a;
-  --muted: #475569; /* slate-600 */
-  --ok: #16a34a;
-  --warn: #b45309; /* amber-700 */
-  --bad: #dc2626;
+  /* Surfaces */
+  --bg: #f7f7f9;
+  --bg-elev: rgba(255, 255, 255, 0.72);
+  --card: rgba(255, 255, 255, 0.9);
+  --card-solid: #ffffff;
+  --input: rgba(255, 255, 255, 0.96);
+  --surface-2: rgba(11, 12, 15, 0.04);
+  --surface-3: rgba(11, 12, 15, 0.07);
+
+  /* Text */
+  --text: #0b0c0f;
+  --muted: rgba(11, 12, 15, 0.62);
+
+  /* Charts */
+  --chart-grid: rgba(11, 12, 15, 0.10);
+  --chart-axis: rgba(11, 12, 15, 0.28);
+  --chart-label: rgba(11, 12, 15, 0.55);
+  --chart-title: rgba(11, 12, 15, 0.80);
+  --chart-line: var(--accent-2);
+  --chart-point: var(--accent-2);
+  --chart-avg: rgba(184, 135, 47, 0.65);
+  --chart-hover: rgba(11, 12, 15, 0.25);
+
+  /* Brand */
+  --brand: #111827; /* graphite */
+  --brand-press: #0b1220;
+  --accent: #b8872f; /* premium brass */
+  --accent-2: #0a84ff; /* electric blue highlight */
+
+  /* Status */
+  --ok: #30d158;
+  --warn: #ff9f0a;
+  --bad: #ff453a;
+
+  /* Borders / shadows */
+  --hairline: rgba(11, 12, 15, 0.10);
+  --hover: rgba(0, 0, 0, 0.05);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+  --shadow-strong: 0 16px 50px rgba(0, 0, 0, 0.16);
+
+  /* Icons (raster assets) */
+  --icon-filter: brightness(0) saturate(100%);
+}
+
+/* Mobile cinematic mode (Apple TV app vibe) */
+@media (max-width: 768px) {
+  :root {
+    --bg: #000000;
+    --bg-elev: rgba(20, 20, 22, 0.62);
+    --card: rgba(28, 28, 30, 0.72);
+    --card-solid: #1c1c1e;
+    --input: rgba(28, 28, 30, 0.96);
+
+    --text: rgba(245, 245, 247, 0.98);
+    --muted: rgba(245, 245, 247, 0.60);
+
+    /* Charts */
+    --chart-grid: rgba(245, 245, 247, 0.14);
+    --chart-axis: rgba(245, 245, 247, 0.28);
+    --chart-label: rgba(245, 245, 247, 0.62);
+    --chart-title: rgba(245, 245, 247, 0.86);
+    --chart-line: var(--accent-2);
+    --chart-point: var(--accent-2);
+    --chart-avg: rgba(184, 135, 47, 0.70);
+    --chart-hover: rgba(245, 245, 247, 0.22);
+
+    --hairline: rgba(245, 245, 247, 0.12);
+    --hover: rgba(255, 255, 255, 0.10);
+    --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    --shadow-strong: 0 18px 60px rgba(0, 0, 0, 0.65);
+
+    --icon-filter: brightness(0) invert(1) saturate(100%);
+  }
 }
 
 html,
@@ -35,31 +101,134 @@ body {
   color: var(--text);
 }
 
+/* Premium background texture without assets */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background:
+    radial-gradient(900px 500px at 12% 10%, rgba(184, 135, 47, 0.12), transparent 55%),
+    radial-gradient(900px 520px at 85% 0%, rgba(10, 132, 255, 0.10), transparent 50%),
+    radial-gradient(1200px 800px at 50% 120%, rgba(0, 0, 0, 0.06), transparent 60%);
+}
+
 /* Cards / surfaces */
 .card {
-  @apply rounded-2xl shadow-sm border border-slate-200/70 p-5;
+  @apply rounded-3xl p-5;
   background: var(--card);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+}
+
+/* Apple TV style “poster” card */
+.tv-tile {
+  @apply rounded-3xl p-5;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.04), rgba(0, 0, 0, 0.10));
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+}
+
+.tv-tile:hover {
+  transform: translateY(-2px) scale(1.01);
+  box-shadow: var(--shadow-strong);
+}
+
+/* Generic surfaces + text helpers (use in pages/components to avoid hardcoded light colors) */
+.tv-surface {
+  background: var(--card-solid);
+  color: var(--text);
+}
+.tv-surface-soft {
+  background: var(--card);
+  color: var(--text);
+}
+.tv-border {
+  border-color: var(--hairline) !important;
+}
+.tv-divider {
+  border-color: var(--hairline) !important;
+}
+.tv-muted {
+  color: var(--muted) !important;
+}
+
+.tv-hoverable {
+  transition: background-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+.tv-hoverable:hover {
+  background: var(--hover);
+}
+
+/* Pills (tabs / filters) */
+.tv-pill {
+  @apply px-3 py-1.5 rounded-full text-sm font-medium;
+  background: var(--bg-elev);
+  border: 1px solid var(--hairline);
+  color: var(--text);
+  box-shadow: 0 8px 18px rgba(0,0,0,0.10);
+}
+
+.tv-pill:hover {
+  background: var(--hover);
+}
+
+.tv-pill-active {
+  background: linear-gradient(180deg, rgba(10, 132, 255, 0.95), rgba(10, 132, 255, 0.65));
+  color: rgba(245,245,247,0.98);
+  border-color: rgba(10, 132, 255, 0.35);
+  box-shadow: 0 14px 34px rgba(10, 132, 255, 0.25);
+}
+
+/* Table header surface (dark-mode safe) */
+.tv-table-head {
+  background: var(--bg-elev);
+  color: var(--muted);
+}
+
+
+.tv-row {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scroll-snap-type: x mandatory;
+}
+
+.tv-row > * {
+  scroll-snap-align: start;
 }
 
 /* Inputs */
 .input {
-  @apply w-full rounded-xl px-3 py-2 outline-none border border-slate-200 focus:border-slate-400 focus:ring-2 focus:ring-slate-200;
+  @apply w-full rounded-2xl px-3 py-2 outline-none;
   background: var(--input);
   color: var(--text);
+  border: 1px solid var(--hairline);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.input:focus {
+  border-color: rgba(10, 132, 255, 0.55);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.18);
 }
 
 /* Buttons */
- .btn {
-  @apply px-4 py-3 rounded-2xl shadow-sm font-semibold tracking-wide border border-transparent;
+.btn {
+  @apply px-4 py-3 rounded-2xl font-semibold tracking-wide border border-transparent;
   @apply transition-all duration-150 ease-out;
-  @apply hover:-translate-y-0.5 hover:shadow-md;
+  @apply hover:-translate-y-0.5;
   @apply active:translate-y-0 active:shadow-sm;
-  @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300;
-  background: var(--brand);
-  color: white;
+  @apply focus-visible:outline-none;
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.95), rgba(11, 18, 32, 0.95));
+  color: rgba(245, 245, 247, 0.98);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
 }
 .btn:hover {
-  background: var(--brand-press);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
 }
 .btn:disabled {
   opacity: 0.55;
@@ -67,24 +236,28 @@ body {
 }
 
 .btn-primary {
-  background: var(--brand);
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.95), rgba(11, 18, 32, 0.95));
 }
 .btn-primary:hover {
-  background: var(--brand-press);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
 }
 
 .btn-secondary {
-  @apply bg-slate-700 hover:bg-slate-800;
-  @apply transition-all duration-150 ease-out;
-  @apply hover:-translate-y-0.5 hover:shadow-md;
-  @apply active:translate-y-0 active:shadow-sm;
-  @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300;
+  background: linear-gradient(180deg, rgba(184, 135, 47, 0.92), rgba(140, 98, 26, 0.92));
+  color: rgba(11, 12, 15, 0.95);
+  box-shadow: 0 10px 24px rgba(184, 135, 47, 0.25);
+}
+
+.btn-secondary:hover {
+  box-shadow: 0 14px 34px rgba(184, 135, 47, 0.35);
 }
 
 /* Header */
 .header-bar {
-  @apply flex justify-between items-center p-4 border-b border-slate-200/70;
-  background: var(--card);
+  @apply flex justify-between items-center p-4;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--hairline);
+  backdrop-filter: blur(14px);
 }
 .logo-title {
   @apply font-bold;
@@ -121,7 +294,7 @@ body {
 }
 .sync-text {
   font-size: 10px;
-  color: #64748b; /* slate-500 */
+  color: var(--muted);
   white-space: nowrap;
 }
 
@@ -149,14 +322,55 @@ a.link {
 }
 
 
+/* Bottom navigation (mobile-first). Make active state obvious. */
+.bottomnav-link {
+  color: var(--muted);
+}
+.bottomnav-link.is-inactive {
+  opacity: 0.88;
+}
+.bottomnav-link.is-active {
+  color: var(--text);
+  background: linear-gradient(180deg, rgba(10, 132, 255, 0.22), rgba(10, 132, 255, 0.10));
+  border: 1px solid rgba(10, 132, 255, 0.35);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+}
+@media (max-width: 768px) {
+  .bottomnav-link.is-active {
+    background: linear-gradient(180deg, rgba(10, 132, 255, 0.26), rgba(10, 132, 255, 0.08));
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+  }
+}
+.bottomnav-indicator {
+  background: var(--brand);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 10px 26px rgba(10, 132, 255, 0.40);
+}
+
+/* Inputs: ensure readability (especially on mobile). */
+.input {
+  font-size: 16px;
+}
+.input::placeholder {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+/* Raster icon helper (used in BottomNav, etc.) */
+.nav-icon {
+  filter: var(--icon-filter);
+}
+
+/* Segmented tabs: tuned for both light + dark */
+
+
 /* Segmented tabs (used on You vs You / You vs Crew) */
 .seg-tabs {
   display: flex;
   gap: 6px;
   padding: 6px;
   border-radius: 18px;
-  background: rgba(15, 23, 42, 0.06);
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid var(--hairline);
 }
 .seg-tab {
   flex: 1;
@@ -164,18 +378,209 @@ a.link {
   border-radius: 14px;
   font-weight: 700;
   font-size: 14px;
-  color: rgba(15, 23, 42, 0.80);
+  color: var(--muted);
   background: transparent;
   transition: transform 150ms ease-out, box-shadow 150ms ease-out, background 150ms ease-out;
 }
 .seg-tab:hover {
-  background: rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.08);
 }
 .seg-tab:active {
   transform: translateY(1px);
 }
 .seg-tab--active {
-  background: white;
-  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.08);
-  color: rgba(15, 23, 42, 0.95);
+  background: var(--card-solid);
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+
+/* Lists (Settings / Equipment / Admin) */
+.tv-list {
+  @apply divide-y;
+  border-color: var(--hairline);
+}
+
+.tv-list-item {
+  @apply flex items-center justify-between gap-3 py-3 px-3 rounded-2xl;
+  border: 1px solid transparent;
+}
+
+.tv-list-item:hover {
+  background: var(--surface-2);
+  border-color: var(--hairline);
+}
+
+.tv-subtext {
+  color: var(--muted);
+}
+
+.btn-icon {
+  @apply w-10 h-10 rounded-2xl flex items-center justify-center;
+  border: 1px solid var(--hairline);
+  background: var(--card);
+  transition: transform 150ms ease-out, background 150ms ease-out;
+}
+
+.btn-icon:hover {
+  transform: translateY(-1px);
+  background: var(--surface-3);
+}
+
+.tv-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.tv-table th {
+  text-align: left;
+  font-weight: 700;
+  color: var(--muted);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.tv-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.tv-table tr:hover td {
+  background: var(--surface-2);
+}
+
+
+/*test*/
+
+/* Startup splash (Netflix-ish glow sweep) */
+.startup-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(1200px 700px at 50% 20%, rgba(184, 135, 47, 0.18), transparent 60%),
+              radial-gradient(1000px 600px at 50% 10%, rgba(10, 132, 255, 0.14), transparent 55%),
+              var(--bg);
+  backdrop-filter: blur(12px);
+  transition: opacity 280ms ease;
+}
+
+.startup-splash--leave {
+  opacity: 0;
+}
+
+.startup-splash__inner {
+  text-align: center;
+  padding: 24px;
+}
+
+.startup-splash__logo {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 14px;
+  border-radius: 22px;
+  background: var(--bg-elev);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.startup-splash__logo img {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+}
+
+.startup-splash__wordmark {
+  font-weight: 900;
+  letter-spacing: 0.22em;
+  font-size: 34px;
+  line-height: 1.1;
+  display: inline-flex;
+  gap: 0.12em;
+  position: relative;
+  --baseDelay: 500ms; /* wait a beat before letters start */
+  filter: drop-shadow(0 14px 28px rgba(0,0,0,0.45));
+}
+
+/* Left-to-right light bar that sweeps across AFTER the letters appear */
+.startup-splash__wordmark::after {
+  content: "";
+  position: absolute;
+  inset: -8px -14px;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    linear-gradient(90deg,
+      transparent 0%,
+      rgba(245,245,247,0.0) 35%,
+      rgba(245,245,247,0.28) 50%,
+      rgba(184,135,47,0.22) 60%,
+      rgba(10,132,255,0.18) 70%,
+      rgba(245,245,247,0.0) 82%,
+      transparent 100%
+    );
+  transform: translateX(-120%);
+  filter: blur(2px);
+  mix-blend-mode: screen;
+  animation: spectatore-lightbar 900ms ease-in-out forwards;
+  animation-delay: calc(var(--baseDelay) + 1400ms);
+}
+
+/* Each letter appears with a "Netflix-ish" glow + subtle sweep */
+.startup-splash__letter {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(10px) scale(0.98);
+  -webkit-text-fill-color: transparent;
+  background-image:
+    linear-gradient(90deg,
+      rgba(245,245,247,0.18) 0%,
+      rgba(245,245,247,0.85) 50%,
+      rgba(245,245,247,0.18) 100%
+    ),
+    linear-gradient(180deg, rgba(184, 135, 47, 0.95), rgba(10, 132, 255, 0.65));
+  background-size: 220% 100%, 100% 100%;
+  background-position: 0% 50%, 0% 50%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation:
+    spectatore-letter-in 620ms cubic-bezier(0.2, 0.9, 0.2, 1) forwards,
+    spectatore-letter-sweep 1200ms ease forwards;
+  animation-delay:
+    calc(var(--baseDelay) + var(--i) * 80ms),
+    calc(var(--baseDelay) + var(--i) * 80ms + 120ms);
+}
+
+@keyframes spectatore-lightbar {
+  0% { opacity: 0; transform: translateX(-120%); }
+  10% { opacity: 1; }
+  60% { opacity: 0.85; }
+  100% { opacity: 0; transform: translateX(120%); }
+}
+
+@keyframes spectatore-letter-in {
+  0% { opacity: 0; transform: translateY(10px) scale(0.98); }
+  60% { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes spectatore-letter-sweep {
+  0% { background-position: -120% 50%, 0% 50%; filter: drop-shadow(0 0 0 rgba(184,135,47,0)); }
+  35% { filter: drop-shadow(0 10px 18px rgba(184,135,47,0.22)); }
+  100% { background-position: 120% 50%, 0% 50%; filter: drop-shadow(0 14px 28px rgba(10,132,255,0.18)); }
+}
+
+.startup-splash__tag {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+@media (max-width: 420px) {
+  .startup-splash__wordmark { font-size: 28px; }
 }

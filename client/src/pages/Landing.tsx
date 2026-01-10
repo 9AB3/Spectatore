@@ -68,9 +68,9 @@ export default function Landing() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white to-slate-50 text-slate-900">
+    <div className="min-h-screen" style={{ background: "var(--bg)", color: "var(--text)" }}>
       {/* Top bar */}
-      <div className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/80 backdrop-blur">
+      <div className="sticky top-0 z-20 border-b tv-divider backdrop-blur" style={{ background: "var(--bg-elev)" }}>
         <div className="mx-auto max-w-6xl px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-amber-200/60 to-amber-100/40 flex items-center justify-center overflow-hidden border border-amber-200/40">
@@ -78,18 +78,18 @@ export default function Landing() {
             </div>
             <div>
               <div className="text-lg font-extrabold tracking-tight">Spectatore</div>
-              <div className="text-xs text-slate-600">Your metres. Your metrics.</div>
+              <div className="text-xs tv-muted">Your metres. Your metrics.</div>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <a
-              className="px-3 py-2 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-100 text-sm"
+              className="tv-pill"
               href={`${appUrl}/Register`}
             >
               Create account
             </a>
-            <a className="px-3 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800 text-sm font-semibold" href={appUrl}>
+            <a className="btn" href={appUrl}>
               Open app
             </a>
           </div>
@@ -99,45 +99,47 @@ export default function Landing() {
       {/* Hero */}
       <div className="mx-auto max-w-6xl px-4 pt-14 pb-10">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs text-slate-700">
-              Built for operators • Integrates to sites
-            </div>
+         
+          
 
             <div className="mt-8 flex flex-col items-center lg:items-start text-center lg:text-left">
               <img src="/logo.png" alt="Spectatore" className="h-20 w-20 md:h-28 md:w-28 object-contain" />
               <div className="mt-3 text-2xl md:text-3xl font-extrabold tracking-tight">Spectatore</div>
-              <div className="mt-1 text-lg md:text-xl font-semibold text-slate-700">Your metres. Your metrics.</div>
-            </div>
+              <div className="mt-1 text-lg md:text-xl font-semibold tv-muted">Your metres. Your metrics.</div>
+           
 
             <h1 className="mt-6 text-4xl md:text-5xl font-black tracking-tight">
-              Operator-owned performance data — <span className="text-amber-700">back yourself with numbers</span>.
+              Operator-owned performance data — <span style={{ color: "var(--accent)" }}>back yourself with numbers</span>.
             </h1>
 
-            <div className="mt-4 text-base md:text-lg text-slate-700 leading-relaxed space-y-3">
+            <div className="mt-4 text-base md:text-lg tv-muted leading-relaxed space-y-3">
               <p>
                 Track your shift performance with <strong>Spectatore</strong> — a web app that captures your shift data on your device.
               </p>
               <p>Chase your best shift, compare your progress and compete with your crew.</p>
-              <p className="font-semibold text-slate-900">
-                <span className="text-amber-700">Get inducted now</span> and become a certified meter eater!
+              <p className="font-semibold">
+                <span style={{ color: "var(--accent)" }}>Get inducted now</span> and become a certified meter eater!
               </p>
-              <p className="text-slate-700">
+              <p className="tv-muted">
                 Speak to us today if you want to learn more about our <strong>clean integration</strong> for site data management (Power BI-ready).
                 With Spectatore, the focus is on the key mining physicals and getting them right with a simple validation process.
               </p>
-              <p className="text-slate-600">
+              <p className="tv-muted">
                 Operator timelines, pre-starts, Take 5&apos;s and shift planning — that&apos;s better handled elsewhere.
               </p>
             </div>
           </div>
 
           {/* Visual card */}
-          <div className="relative">
+
+          <div className="relative max-w-md mx-auto md:max-w-none">
+            {/* iPhone-style frame on mobile */}
+            <div className="md:hidden absolute -inset-3 rounded-[44px] border tv-border" style={{ background: 'rgba(255,255,255,0.04)' }} />
+            <div className="md:hidden absolute -inset-2 rounded-[40px] border tv-border" style={{ background: 'rgba(0,0,0,0.10)' }} />
             <div className="absolute -inset-4 bg-amber-300/10 blur-3xl rounded-full" />
-            <div className="relative rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="relative card">
               <div className="flex items-center justify-between gap-3">
-                <div className="inline-flex items-center rounded-2xl border border-slate-200 bg-slate-50 p-1">
+                <div className="inline-flex items-center rounded-2xl border tv-border p-1" style={{ background: "var(--bg-elev)" }}>
                   <button
                     type="button"
                     onClick={() => setActiveTab('operators')}
@@ -145,7 +147,7 @@ export default function Landing() {
                       'px-3 py-2 rounded-xl text-sm font-semibold transition ' +
                       (activeTab === 'operators'
                         ? 'bg-slate-900 text-white'
-                        : 'text-slate-700 hover:bg-white')
+                        : 'tv-muted hover:tv-surface')
                     }
                   >
                     For Operators
@@ -155,49 +157,49 @@ export default function Landing() {
                     onClick={() => setActiveTab('sites')}
                     className={
                       'px-3 py-2 rounded-xl text-sm font-semibold transition ' +
-                      (activeTab === 'sites' ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-white')
+                      (activeTab === 'sites' ? 'bg-slate-900 text-white' : 'tv-muted hover:tv-surface')
                     }
                   >
                     For Sites
                   </button>
                 </div>
 
-                <div className="text-xs text-slate-500">Daily • MTD • YTD</div>
+                <div className="text-xs tv-muted">Daily • MTD • YTD</div>
               </div>
 
               <div className="mt-4">
                 {activeTab === 'operators' ? (
                   <>
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="rounded-2xl border tv-border tv-surface-soft p-4">
                       {demoCard === 'you' ? (
                         <div>
                           <div className="flex items-center justify-between">
                             <div className="text-sm font-semibold">You vs You</div>
-                            <div className="text-xs text-slate-600">Personal trends</div>
+                            <div className="text-xs tv-muted">Personal trends</div>
                           </div>
 
                           <div className="mt-3 grid grid-cols-3 gap-3 text-center">
-                            <div className="rounded-xl border border-slate-200 bg-white p-3">
-                              <div className="text-xs text-slate-600">GS Drillm</div>
+                            <div className="rounded-xl border tv-border tv-surface p-3">
+                              <div className="text-xs tv-muted">GS Drillm</div>
                               <div className="mt-1 text-lg font-black">184</div>
                               <div className="text-xs text-emerald-700">+12% MTD</div>
                             </div>
-                            <div className="rounded-xl border border-slate-200 bg-white p-3">
-                              <div className="text-xs text-slate-600">Tonnes Hauled</div>
+                            <div className="rounded-xl border tv-border tv-surface p-3">
+                              <div className="text-xs tv-muted">Tonnes Hauled</div>
                               <div className="mt-1 text-lg font-black">1,240</div>
-                              <div className="text-xs text-slate-600">Rolling 30d</div>
+                              <div className="text-xs tv-muted">Rolling 30d</div>
                             </div>
-                            <div className="rounded-xl border border-slate-200 bg-white p-3">
-                              <div className="text-xs text-slate-600">TKMs</div>
+                            <div className="rounded-xl border tv-border tv-surface p-3">
+                              <div className="text-xs tv-muted">TKMs</div>
                               <div className="mt-1 text-lg font-black">96</div>
-                              <div className="text-xs text-slate-600">Daily / MTD / YTD</div>
+                              <div className="text-xs tv-muted">Daily / MTD / YTD</div>
                             </div>
                           </div>
 
-                          <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                          <div className="mt-3 rounded-xl border tv-border tv-surface p-3">
                             <div className="flex items-center justify-between">
-                              <div className="text-xs font-semibold text-slate-800">Trend preview</div>
-                              <div className="text-[11px] text-slate-600">Tap metric → chart</div>
+                              <div className="text-xs font-semibold ">Trend preview</div>
+                              <div className="text-[11px] tv-muted">Tap metric → chart</div>
                             </div>
 
                             <div className="mt-2 grid grid-cols-10 gap-1 items-end h-14">
@@ -210,7 +212,7 @@ export default function Landing() {
                               ))}
                             </div>
 
-                            <div className="mt-2 text-[11px] text-slate-600">
+                            <div className="mt-2 text-[11px] tv-muted">
                               PBs, rolling averages, date filters, and per-metric drilldowns.
                             </div>
                           </div>
@@ -219,31 +221,31 @@ export default function Landing() {
                         <div>
                           <div className="flex items-center justify-between">
                             <div className="text-sm font-semibold">You vs Crew</div>
-                            <div className="text-xs text-slate-600">Optional sharing</div>
+                            <div className="text-xs tv-muted">Optional sharing</div>
                           </div>
 
                           <div className="mt-3 grid grid-cols-3 gap-3 text-center">
-                            <div className="rounded-xl border border-slate-200 bg-white p-3">
-                              <div className="text-xs text-slate-600">Rank</div>
+                            <div className="rounded-xl border tv-border tv-surface p-3">
+                              <div className="text-xs tv-muted">Rank</div>
                               <div className="mt-1 text-lg font-black">#3</div>
-                              <div className="text-xs text-slate-600">of 18</div>
+                              <div className="text-xs tv-muted">of 18</div>
                             </div>
-                            <div className="rounded-xl border border-slate-200 bg-white p-3">
-                              <div className="text-xs text-slate-600">Best metric</div>
+                            <div className="rounded-xl border tv-border tv-surface p-3">
+                              <div className="text-xs tv-muted">Best metric</div>
                               <div className="mt-1 text-lg font-black">GS</div>
                               <div className="text-xs text-emerald-700">Top 10%</div>
                             </div>
-                            <div className="rounded-xl border border-slate-200 bg-white p-3">
-                              <div className="text-xs text-slate-600">Delta</div>
+                            <div className="rounded-xl border tv-border tv-surface p-3">
+                              <div className="text-xs tv-muted">Delta</div>
                               <div className="mt-1 text-lg font-black">+8%</div>
-                              <div className="text-xs text-slate-600">vs avg</div>
+                              <div className="text-xs tv-muted">vs avg</div>
                             </div>
                           </div>
 
-                          <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                          <div className="mt-3 rounded-xl border tv-border tv-surface p-3">
                             <div className="flex items-center justify-between">
-                              <div className="text-xs font-semibold text-slate-800">Leaderboard snapshot</div>
-                              <div className="text-[11px] text-slate-600">Private by default</div>
+                              <div className="text-xs font-semibold ">Leaderboard snapshot</div>
+                              <div className="text-[11px] tv-muted">Private by default</div>
                             </div>
 
                             <div className="mt-2 space-y-2">
@@ -255,67 +257,67 @@ export default function Landing() {
                               ].map(([rank, who, val]) => (
                                 <div key={rank} className="flex items-center justify-between text-xs">
                                   <div className="flex items-center gap-2">
-                                    <div className="w-5 text-slate-600">{rank}</div>
-                                    <div className={who === 'You' ? 'font-semibold text-slate-900' : 'text-slate-700'}>{who}</div>
+                                    <div className="w-5 tv-muted">{rank}</div>
+                                    <div className={who === 'You' ? 'font-semibold text-slate-900' : 'tv-muted'}>{who}</div>
                                   </div>
-                                  <div className={who === 'You' ? 'font-semibold text-amber-700' : 'text-slate-600'}>{val}</div>
+                                  <div className={who === 'You' ? 'font-semibold text-amber-700' : 'tv-muted'}>{val}</div>
                                 </div>
                               ))}
                             </div>
 
-                            <div className="mt-2 text-[11px] text-slate-600">Compare by role, site, or your selected network.</div>
+                            <div className="mt-2 text-[11px] tv-muted">Compare by role, site, or your selected network.</div>
                           </div>
                         </div>
                       ) : (
                         <div>
                           <div className="flex items-center justify-between">
                             <div className="text-sm font-semibold">You vs Crew member</div>
-                            <div className="text-xs text-slate-600">1:1 comparison</div>
+                            <div className="text-xs tv-muted">1:1 comparison</div>
                           </div>
 
                           <div className="mt-3 grid grid-cols-2 gap-3">
-                            <div className="rounded-xl border border-slate-200 bg-white p-3">
-                              <div className="text-xs text-slate-600">Metric</div>
+                            <div className="rounded-xl border tv-border tv-surface p-3">
+                              <div className="text-xs tv-muted">Metric</div>
                               <div className="mt-1 text-sm font-semibold text-slate-900">Tonnes hauled</div>
                               <div className="mt-3 space-y-2 text-xs">
                                 <div className="flex items-center justify-between">
-                                  <div className="text-slate-700">You</div>
+                                  <div className="tv-muted">You</div>
                                   <div className="font-semibold text-amber-700">1,240</div>
                                 </div>
                                 <div className="flex items-center justify-between">
-                                  <div className="text-slate-700">Crew mate</div>
-                                  <div className="font-semibold text-slate-700">1,110</div>
+                                  <div className="tv-muted">Crew mate</div>
+                                  <div className="font-semibold tv-muted">1,110</div>
                                 </div>
                                 <div className="flex items-center justify-between">
-                                  <div className="text-slate-700">Delta</div>
+                                  <div className="tv-muted">Delta</div>
                                   <div className="font-semibold text-emerald-700">+12%</div>
                                 </div>
                               </div>
-                              <div className="mt-2 text-[11px] text-slate-600">Swap metrics instantly.</div>
+                              <div className="mt-2 text-[11px] tv-muted">Swap metrics instantly.</div>
                             </div>
 
-                            <div className="rounded-xl border border-slate-200 bg-white p-3">
-                              <div className="text-xs text-slate-600">Timeframe</div>
+                            <div className="rounded-xl border tv-border tv-surface p-3">
+                              <div className="text-xs tv-muted">Timeframe</div>
                               <div className="mt-1 text-sm font-semibold text-slate-900">Last 30 days</div>
                               <div className="mt-3 space-y-2 text-xs">
                                 <div className="flex items-center justify-between">
-                                  <div className="text-slate-700">Best day</div>
+                                  <div className="tv-muted">Best day</div>
                                   <div className="font-semibold text-slate-900">Fri</div>
                                 </div>
                                 <div className="flex items-center justify-between">
-                                  <div className="text-slate-700">Consistency</div>
+                                  <div className="tv-muted">Consistency</div>
                                   <div className="font-semibold text-emerald-700">High</div>
                                 </div>
                                 <div className="flex items-center justify-between">
-                                  <div className="text-slate-700">PB flags</div>
+                                  <div className="tv-muted">PB flags</div>
                                   <div className="font-semibold text-slate-900">On</div>
                                 </div>
                               </div>
-                              <div className="mt-2 text-[11px] text-slate-600">Change crew mate with one tap.</div>
+                              <div className="mt-2 text-[11px] tv-muted">Change crew mate with one tap.</div>
                             </div>
                           </div>
 
-                          <div className="mt-3 text-[11px] text-slate-600">Sharing is optional — you control what’s visible and to who.</div>
+                          <div className="mt-3 text-[11px] tv-muted">Sharing is optional — you control what’s visible and to who.</div>
                         </div>
                       )}
 
@@ -334,7 +336,7 @@ export default function Landing() {
                                 'px-2 py-1 rounded-full text-[11px] border ' +
                                 (demoCard === (key as any)
                                   ? 'border-amber-300/50 bg-amber-300/20 text-slate-900'
-                                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50')
+                                  : 'tv-border tv-surface tv-muted hover:tv-surface-soft')
                               }
                             >
                               {label}
@@ -342,50 +344,50 @@ export default function Landing() {
                           ))}
                         </div>
 
-                        <div className="text-[11px] text-slate-600">Auto-rotates</div>
+                        <div className="text-[11px] tv-muted">Auto-rotates</div>
                       </div>
                     </div>
 
-                    <div className="mt-4 flex items-center justify-between text-xs text-slate-600">
+                    <div className="mt-4 flex items-center justify-between text-xs tv-muted">
                       <div>Fast entry • Clean totals • Consistent metrics</div>
-                      <div className="px-2 py-1 rounded-full border border-slate-200">PWA</div>
+                      <div className="px-2 py-1 rounded-full border tv-border">PWA</div>
                     </div>
                   </>
                 ) : (
                   <div className="space-y-4">
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="rounded-2xl border tv-border tv-surface-soft p-4">
                       <div className="text-sm font-semibold text-slate-900">Data process flow</div>
                       <div className="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-2 text-sm">
-                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center font-semibold">Operator form input</div>
-                        <div className="text-slate-500 text-center">→</div>
-                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center font-semibold">Daily site validation process</div>
-                        <div className="text-slate-500 text-center">→</div>
-                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center font-semibold">End of month reconciliation</div>
+                        <div className="rounded-xl border tv-border tv-surface px-3 py-3 text-center font-semibold">Operator form input</div>
+                        <div className="tv-muted text-center">→</div>
+                        <div className="rounded-xl border tv-border tv-surface px-3 py-3 text-center font-semibold">Daily site validation process</div>
+                        <div className="tv-muted text-center">→</div>
+                        <div className="rounded-xl border tv-border tv-surface px-3 py-3 text-center font-semibold">End of month reconciliation</div>
                       </div>
-                      <div className="mt-3 text-[11px] text-slate-600">Clean inputs → simple validation → Power BI-ready reporting.</div>
+                      <div className="mt-3 text-[11px] tv-muted">Clean inputs → simple validation → Power BI-ready reporting.</div>
                     </div>
 
-                    <div className="rounded-2xl border border-slate-200 bg-white p-3">
-                      <div className="text-xs font-semibold text-slate-800">Power BI examples (month view)</div>
+                    <div className="rounded-2xl border tv-border tv-surface p-3">
+                      <div className="text-xs font-semibold ">Power BI examples (month view)</div>
                       <div className="mt-3 grid grid-cols-1 gap-3">
                         <img
-                          src="/powerbi-ore-mtd.png"
+                          src="/oremtd.png"
                           alt="Power BI monthly chart example"
-                          className="w-full rounded-xl border border-slate-200"
+                          className="w-full rounded-xl border tv-border"
                           loading="lazy"
                         />
                         <img
-                          src="/powerbi-ore-mtd.png"
+                          src="/devmtd.png"
                           alt="Power BI monthly chart example (alternate)"
-                          className="w-full rounded-xl border border-slate-200"
+                          className="w-full rounded-xl border tv-border"
                           loading="lazy"
                         />
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between text-xs text-slate-600">
+                    <div className="flex items-center justify-between text-xs tv-muted">
                       <div>Validated daily → reconciled monthly</div>
-                      <div className="px-2 py-1 rounded-full border border-slate-200">Power BI-ready</div>
+                      <div className="px-2 py-1 rounded-full border tv-border">Power BI-ready</div>
                     </div>
                   </div>
                 )}
@@ -397,73 +399,71 @@ export default function Landing() {
 
       {/* Book a demo / Contact */}
       <div className="mx-auto max-w-6xl px-4 pb-16">
-        <div className="rounded-3xl border border-slate-200 bg-white overflow-hidden">
+        <div className="rounded-3xl border tv-border tv-surface overflow-hidden">
           <div className="grid grid-cols-1 lg:grid-cols-2">
             <div className="p-8">
-              <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs text-slate-700">
-                Book a demo
-              </div>
-              <div className="mt-3 text-3xl font-black tracking-tight">See Spectatore in action</div>
-              <div className="mt-3 text-sm text-slate-700 leading-relaxed">
+             
+              <div className="mt-3 text-3xl font-black tracking-tight">Contact Us</div>
+              <div className="mt-3 text-sm tv-muted leading-relaxed">
                 
               </div>
 
-              <div className="mt-6 text-xs text-slate-600">
+              <div className="mt-6 text-xs tv-muted">
                 Prefer email? Contact us at <span className="text-amber-700">support@spectatore.com</span>
               </div>
             </div>
 
-            <div className="p-8 border-t lg:border-t-0 lg:border-l border-slate-200 bg-white">
+            <div className="p-8 border-t lg:border-t-0 lg:border-l tv-border tv-surface">
               <form onSubmit={submitContact} className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <label className="block">
-                    <div className="text-xs text-slate-600 mb-1">Name</div>
+                    <div className="text-xs tv-muted mb-1">Name</div>
                     <input
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-200"
-                      placeholder="Your name"
+                      className="w-full rounded-xl border tv-border tv-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-200"
+                      placeholder="Full Name"
                     />
                   </label>
                   <label className="block">
-                    <div className="text-xs text-slate-600 mb-1">Email</div>
+                    <div className="text-xs tv-muted mb-1">Email</div>
                     <input
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-200"
-                      placeholder="you@site.com"
+                      className="w-full rounded-xl border tv-border tv-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-200"
+                      placeholder="Email Address"
                     />
                   </label>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <label className="block">
-                    <div className="text-xs text-slate-600 mb-1">Company (optional)</div>
+                    <div className="text-xs tv-muted mb-1">Company</div>
                     <input
                       value={company}
                       onChange={(e) => setCompany(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-200"
+                      className="w-full rounded-xl border tv-border tv-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-200"
                       placeholder="Company"
                     />
                   </label>
                   <label className="block">
-                    <div className="text-xs text-slate-600 mb-1">Site (optional)</div>
+                    <div className="text-xs tv-muted mb-1">Site</div>
                     <input
                       value={site}
                       onChange={(e) => setSite(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-200"
+                      className="w-full rounded-xl border tv-border tv-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-200"
                       placeholder="Mine site"
                     />
                   </label>
                 </div>
 
                 <label className="block">
-                  <div className="text-xs text-slate-600 mb-1">Message</div>
+                  <div className="text-xs tv-muted mb-1">Message</div>
                   <textarea
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
-                    className="w-full min-h-[110px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-200"
-                    placeholder="What do you want to track? (e.g. drill metres, tonnes, loads, TKMs)"
+                    className="w-full min-h-[110px] rounded-xl border tv-border tv-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-200"
+                    placeholder="What do you want to know?"
                   />
                 </label>
 
@@ -475,7 +475,7 @@ export default function Landing() {
                   className="w-full sm:w-auto px-4 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800 text-sm font-semibold disabled:opacity-60"
                   type="submit"
                 >
-                  {sending ? 'Sending…' : 'Request demo'}
+                  {sending ? 'Sending…' : 'Submit'}
                 </button>
               </form>
             </div>
@@ -483,7 +483,7 @@ export default function Landing() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-6xl px-4 py-8 text-xs text-slate-500">
+      <div className="mx-auto max-w-6xl px-4 py-8 text-xs tv-muted">
         © {new Date().getFullYear()} Spectatore
       </div>
     </div>

@@ -21,6 +21,7 @@ import AddConnection from './pages/AddConnection';
 import ViewConnections from './pages/ViewConnections';
 import AdminUsers from './pages/AdminUsers';
 import Settings from './pages/Settings';
+import NotificationPreferences from './pages/NotificationPreferences';
 import Feedback from './pages/Feedback';
 import Notifications from './pages/Notifications';
 import SiteAdminLogin from './pages/SiteAdminLogin';
@@ -35,6 +36,7 @@ import SiteAdminPeople from './pages/SiteAdminPeople';
 import SiteAdminFeedbackApproval from './pages/SiteAdminFeedbackApproval';
 import SiteAdminSeed from './pages/SiteAdminSeed';
 import SiteAdminReconciliation from './pages/SiteAdminReconciliation';
+import StartupSplash from './components/StartupSplash';
 import { useEffect, useState } from 'react';
 import { getDB } from './lib/idb';
 import ProtectedLayout from './components/ProtectedLayout';
@@ -115,7 +117,9 @@ function RequireSiteAdminSuper({ children }: { children: JSX.Element }) {
 
 export default function App() {
   return (
-    <Routes>
+    <>
+      <StartupSplash />
+      <Routes>
       <Route
         path="/"
         element={
@@ -219,6 +223,7 @@ export default function App() {
         <Route path="/YouVsYou" element={<YouVsYou />} />
         <Route path="/YouVsNetwork" element={<YouVsNetwork />} />
         <Route path="/Settings" element={<Settings />} />
+        <Route path="/NotificationPreferences" element={<NotificationPreferences />} />
         <Route path="/Feedback" element={<Feedback />} />
         <Route path="/Notifications" element={<Notifications />} />
           <Route path="/Terms" element={<Terms />} />
@@ -242,5 +247,6 @@ export default function App() {
       />
       <Route path="/tools/clear" element={<ClearData />} />
     </Routes>
+    </>
   );
 }
