@@ -87,6 +87,18 @@ function applyScope(payload: any) {
 
           {(canManage || superAdmin) && (
             <div className="p-4 rounded-2xl border" style={{ borderColor: '#e9d9c3' }}>
+              <div className="font-semibold mb-2">Power BI Tokens</div>
+              <div className="text-sm opacity-70 mb-3">
+                Create per-site tokens for Power BI “From Web” endpoints.
+              </div>
+              <button className="btn w-full" onClick={() => nav('/SiteAdmin/PowerBiTokens')}>
+                Manage Tokens
+              </button>
+            </div>
+          )}
+
+          {(canManage || superAdmin) && (
+            <div className="p-4 rounded-2xl border" style={{ borderColor: '#e9d9c3' }}>
               <div className="font-semibold mb-2">People</div>
               <div className="text-sm opacity-70 mb-3">
                 Review requests, manage memberships, and adjust roles.

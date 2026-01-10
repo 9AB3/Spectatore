@@ -16,13 +16,7 @@ const router = Router();
  */
 
 function requirePowerBiAuth(req: any, res: any, next: any) {
-  const token = String(process.env.POWERBI_TOKEN || '').trim();
-  if (!token) {
-    // Open only for local development/testing.
-    if ((process.env.NODE_ENV || 'development') !== 'production') return next();
-    // In production we require a token to be configured.
-    return res.status(500).json({ error: 'POWERBI_TOKEN not configured' });
-  }
+  const masterToken = String(process.env.POWERBI_TOKEN || '').trim();
 
   // Power BI Desktop's "From Web" connector often doesn't allow custom headers like
   // `Authorization` (it depends on the connector/auth mode). So we accept a few
@@ -35,10 +29,61 @@ function requirePowerBiAuth(req: any, res: any, next: any) {
   const qToken = String(req.query?.token || '').trim();
   const xApiKey = String(req.headers?.['x-api-key'] || '').trim();
   const xPowerBi = String(req.headers?.['x-powerbi-token'] || '').trim();
-
   const got = hdrBearer || qToken || xApiKey || xPowerBi;
-  if (!got || got !== token) return res.status(401).json({ error: 'unauthorized' });
-  return next();
+
+  // Dev convenience: if no master token is set and we're not in production, allow open access.
+  if (!masterToken && (process.env.NODE_ENV || 'development') !== 'production') {
+    (req as any).powerbi_scope = { site: '*', mode: 'dev-open' };
+    return next();
+  }
+
+  // 1) Master token (env) grants access to all sites.
+  if (masterToken && got === masterToken) {
+    (req as any).powerbi_scope = { site: '*', mode: 'master' };
+    return next();
+  }
+
+  // 2) Per-site token from DB binds access to a single site.
+  if (!got) return res.status(401).json({ error: 'unauthorized' });
+
+  (async () => {
+    try {
+      const r = await pool.query(
+        `SELECT site, label
+           FROM powerbi_site_tokens
+          WHERE token=$1
+            AND revoked_at IS NULL
+          LIMIT 1`,
+        [got],
+      );
+      const row = r.rows?.[0];
+      if (!row?.site) return res.status(401).json({ error: 'unauthorized' });
+      (req as any).powerbi_scope = { site: String(row.site), label: row.label || null, mode: 'site' };
+      return next();
+    } catch (e) {
+      console.error('[powerbi] auth lookup failed', (e as any)?.message || e);
+      return res.status(500).json({ error: 'powerbi_auth_failed' });
+    }
+  })();
+}
+
+function scopedSite(req: any, requested: string | null) {
+  const scope = req?.powerbi_scope;
+  const s = String(scope?.site || '').trim();
+  if (s && s !== '*') return s;
+  return requested;
+}
+
+function assertScopeAllowsSite(req: any, site: string | null) {
+  const scope = req?.powerbi_scope;
+  const s = String(scope?.site || '').trim();
+  if (!s || s === '*') return;
+  if (!site) return;
+  if (site !== s) {
+    const e: any = new Error('forbidden');
+    e.status = 403;
+    throw e;
+  }
 }
 
 router.get('/ping', (_req, res) => res.json({ ok: true }));
@@ -64,7 +109,9 @@ function isYmd(s: string) {
  */
 router.get('/shift-totals', async (req, res) => {
   try {
-    const site = String(req.query.site || '').trim() || null;
+    const requestedSite = String(req.query.site || '').trim() || null;
+    assertScopeAllowsSite(req, requestedSite);
+    const site = scopedSite(req, requestedSite);
     const from = asDateParam(req.query.from);
     const to = asDateParam(req.query.to);
 
@@ -122,7 +169,9 @@ router.get('/shift-totals', async (req, res) => {
  */
 router.get('/shift-metrics', async (req, res) => {
   try {
-    const site = String(req.query.site || '').trim() || null;
+    const requestedSite = String(req.query.site || '').trim() || null;
+    assertScopeAllowsSite(req, requestedSite);
+    const site = scopedSite(req, requestedSite);
     const from = asDateParam(req.query.from);
     const to = asDateParam(req.query.to);
 
@@ -227,7 +276,9 @@ router.get('/shift-metrics', async (req, res) => {
  */
 router.get('/activity-payloads', async (req, res) => {
   try {
-    const site = String(req.query.site || '').trim() || null;
+    const requestedSite = String(req.query.site || '').trim() || null;
+    assertScopeAllowsSite(req, requestedSite);
+    const site = scopedSite(req, requestedSite);
     const from = asDateParam(req.query.from);
     const to = asDateParam(req.query.to);
 
@@ -277,7 +328,9 @@ router.get('/activity-payloads', async (req, res) => {
 
 router.get('/validated/shift-totals', async (req, res) => {
   try {
-    const site = String(req.query.site || '').trim() || null;
+    const requestedSite = String(req.query.site || '').trim() || null;
+    assertScopeAllowsSite(req, requestedSite);
+    const site = scopedSite(req, requestedSite);
     const from = asDateParam(req.query.from);
     const to = asDateParam(req.query.to);
 
@@ -321,7 +374,9 @@ router.get('/validated/shift-totals', async (req, res) => {
 
 router.get('/validated/activity-payloads', async (req, res) => {
   try {
-    const site = String(req.query.site || '').trim() || null;
+    const requestedSite = String(req.query.site || '').trim() || null;
+    assertScopeAllowsSite(req, requestedSite);
+    const site = scopedSite(req, requestedSite);
     const from = asDateParam(req.query.from);
     const to = asDateParam(req.query.to);
 
@@ -373,7 +428,11 @@ router.get('/validated/activity-payloads', async (req, res) => {
  */
 router.get('/validated/activity-metrics', async (req, res) => {
   try {
-    const site = String(req.query.site || '').trim();
+    const requestedSiteRaw = String(req.query.site || '').trim();
+    const requestedSite = requestedSiteRaw || null;
+    assertScopeAllowsSite(req, requestedSite);
+    const site = scopedSite(req, requestedSite) || '';
+    if (!site) return res.status(400).json({ error: 'missing site' });
     const from = String(req.query.from || '').trim(); // YYYY-MM-DD
     const to = String(req.query.to || '').trim();     // YYYY-MM-DD
 
@@ -545,15 +604,20 @@ ORDER BY date, dn, user_id, activity, sub_activity, task_row_id, task_item_type,
  * Optional: a small "dimension" endpoint Power BI can use for slicers.
  * GET /api/powerbi/dim/sites
  */
-router.get('/dim/sites', async (_req, res) => {
+router.get('/dim/sites', async (req: any, res) => {
   try {
+    const scopeSite = String(req?.powerbi_scope?.site || '').trim();
+    const onlySite = scopeSite && scopeSite !== '*' ? scopeSite : null;
     const r = await pool.query(
       `
       SELECT name AS site, state, created_at
       FROM admin_sites
       WHERE TRIM(COALESCE(name,'')) <> ''
+        AND ($1::text IS NULL OR name = $1)
       ORDER BY name
       `
+      ,
+      [onlySite],
     );
     res.json(r.rows);
   } catch (err: any) {
@@ -576,7 +640,9 @@ router.get('/dim/sites', async (_req, res) => {
 
 // helper: optional site/from/to with basic YYYY-MM-DD validation
 function parseCommonFilters(req: any) {
-  const site = String(req.query.site || '').trim() || null;
+  const requestedSite = String(req.query.site || '').trim() || null;
+  assertScopeAllowsSite(req, requestedSite);
+  const site = scopedSite(req, requestedSite);
   const fromRaw = String(req.query.from || '').trim();
   const toRaw = String(req.query.to || '').trim();
   const from = isYmd(fromRaw) ? fromRaw : null;

@@ -590,3 +590,31 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
 
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+
+-- -------------------- Notifications --------------------
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  read_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id) WHERE read_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+
+  in_app_milestones BOOLEAN NOT NULL DEFAULT TRUE,
+  in_app_crew_requests BOOLEAN NOT NULL DEFAULT TRUE,
+  push_milestones BOOLEAN NOT NULL DEFAULT TRUE,
+  push_crew_requests BOOLEAN NOT NULL DEFAULT TRUE,
+
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

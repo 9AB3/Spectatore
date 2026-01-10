@@ -22,6 +22,7 @@ import ViewConnections from './pages/ViewConnections';
 import AdminUsers from './pages/AdminUsers';
 import Settings from './pages/Settings';
 import NotificationPreferences from './pages/NotificationPreferences';
+import NotificationPreferences from './pages/NotificationPreferences';
 import Feedback from './pages/Feedback';
 import Notifications from './pages/Notifications';
 import SiteAdminLogin from './pages/SiteAdminLogin';

@@ -42,6 +42,9 @@ export default function SiteAdminMenu() {
           <button className="btn w-full" onClick={() => nav('/SiteAdmin/Export')}>
             Export Data
           </button>
+          <button className="btn w-full" onClick={() => nav('/SiteAdmin/PowerBiTokens')}>
+            Power BI Tokens
+          </button>
           <div className="text-xs text-sky-600 cursor-pointer" onClick={logout}>
             Logout
           </div>
