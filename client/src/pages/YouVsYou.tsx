@@ -527,7 +527,11 @@ function LineChart({
                 x={toX(i)}
                 y={h - 20}
                 textAnchor={points.length > 10 ? "end" : "middle"}
+<<<<<<< HEAD
                 transform={points.length > 10 ? `rotate(-35 ${toX(i)} ${h - 20})` : undefined}
+=======
+                transform={points.length > 10 ? `rotate(-35 ${toXCenter(i)} ${h - 20})` : undefined}
+>>>>>>> d01b99cd41124f43384004784ea9e0708dbd39cc
                 fontSize="11"
                 fill="rgba(226, 232, 240, 0.82)"
                 stroke="rgba(0, 0, 0, 0.45)"
