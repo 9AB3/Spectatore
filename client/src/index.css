@@ -456,15 +456,23 @@ a.link {
 .startup-splash {
   position: fixed;
   inset: 0;
+  /* iOS Safari dynamic viewport: keep splash stable when the URL bar/keyboard changes */
+  height: 100dvh;
+  min-height: 100dvh;
   z-index: 9999;
   display: flex;
-  align-items: center;
+  /* Keep the splash content visible even if the keyboard appears */
+  align-items: flex-start;
   justify-content: center;
   background: radial-gradient(1200px 700px at 50% 20%, rgba(184, 135, 47, 0.18), transparent 60%),
               radial-gradient(1000px 600px at 50% 10%, rgba(10, 132, 255, 0.14), transparent 55%),
               var(--bg);
   backdrop-filter: blur(12px);
   transition: opacity 280ms ease;
+
+  /* Respect iPhone safe area and give breathing room from the top */
+  padding-top: calc(env(safe-area-inset-top, 0px) + 18px);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
 }
 
 .startup-splash--leave {
