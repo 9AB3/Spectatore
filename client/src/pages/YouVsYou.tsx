@@ -370,9 +370,19 @@ function LineChart({
   const padB = 34;
 
   const xs = points.map((p) => p.value);
-  const max = Math.max(1, ...xs);
-  const min = Math.min(0, ...xs);
+
+  // Nice rounded Y scale so tick labels are readable (Power BI-style).
+  const rawMax = Math.max(1, ...xs);
+  const approxStep = rawMax / 4;
+  const pow10 = Math.pow(10, Math.floor(Math.log10(Math.max(1e-9, approxStep))));
+  const frac = approxStep / pow10;
+  const niceFrac = frac <= 1 ? 1 : frac <= 2 ? 2 : frac <= 5 ? 5 : 10;
+  const step = niceFrac * pow10;
+  const max = Math.max(step, Math.ceil(rawMax / step) * step);
+  const min = 0;
   const range = Math.max(1e-9, max - min);
+
+  const yTicks = [0, max * 0.25, max * 0.5, max * 0.75, max];
 
   const toX = (i: number) =>
     padL + (i / Math.max(1, points.length - 1)) * (w - padL - padR);
@@ -420,10 +430,28 @@ function LineChart({
           onMouseLeave={onLeave}
           className="select-none text-[color:var(--text)]"
         >
-          {/* y grid */}
+          {/* y grid + ticks */}
           {[0, 0.25, 0.5, 0.75, 1].map((t) => {
             const y = padT + t * (h - padT - padB);
             return <line key={t} x1={padL} y1={y} x2={w - padR} y2={y} stroke="var(--chart-grid)" />;
+          })}
+
+          {yTicks.map((v) => {
+            const y = toY(v);
+            return (
+              <text
+                key={`y-${v}`}
+                x={padL - 8}
+                y={y + 3}
+                textAnchor="end"
+                fontSize="10"
+                fill="var(--chart-tick)"
+                opacity={0.95}
+                style={{ paintOrder: 'stroke', stroke: 'rgba(2,6,23,0.85)', strokeWidth: 3 }}
+              >
+                {Math.round(v).toLocaleString()}
+              </text>
+            );
           })}
 
           {/* axes */}
@@ -452,8 +480,11 @@ function LineChart({
                 x={padL - 8}
                 y={y + 4}
                 textAnchor="end"
-                fontSize="10"
-                fill="var(--chart-label)"
+                fontSize="11"
+                fill="rgba(226, 232, 240, 0.82)"
+                stroke="rgba(0, 0, 0, 0.45)"
+                strokeWidth="2"
+                paintOrder="stroke"
               >
                 {Math.round(v)}
               </text>
@@ -494,17 +525,21 @@ function LineChart({
               <text
                 key={p.date}
                 x={toX(i)}
-                y={h - 12}
-                textAnchor="middle"
-                fontSize="10"
-                fill="var(--chart-label)"
+                y={h - 20}
+                textAnchor={points.length > 10 ? "end" : "middle"}
+                transform={points.length > 10 ? `rotate(-35 ${toXCenter(i)} ${h - 20})` : undefined}
+                fontSize="11"
+                fill="rgba(226, 232, 240, 0.82)"
+                stroke="rgba(0, 0, 0, 0.45)"
+                strokeWidth="2"
+                paintOrder="stroke"
               >
                 {p.label}
               </text>
             ))}
 
           {/* axis title */}
-          <text x={(padL + (w - padR)) / 2} y={h - 2} textAnchor="middle" fontSize="12" fill="var(--chart-point)">
+          <text x={(padL + (w - padR)) / 2} y={h - 4} textAnchor="middle" fontSize="12" fill="var(--chart-point)">
             Date
           </text>
 
@@ -520,13 +555,14 @@ function LineChart({
         {hover && (
           <div
             className="absolute pointer-events-none px-3 py-2 rounded-xl border tv-border shadow-sm tv-surface-soft text-xs"
-            style={{ left: `${(hx / w) * 100}%`, top: `${(hy / h) * 100}%`, transform: 'translate(-50%, -120%)' }}
+            // Center tooltip so it never gets clipped above the chart on small screens.
+            style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
           >
             <div className="font-semibold text-[color:var(--text)]">
               {hover.date} ({hover.label})
             </div>
             <div className="text-slate-700">
-              {Math.round(hover.value)} {unit}
+              {Math.round(hover.value).toLocaleString()} {unit}
             </div>
           </div>
         )}
@@ -534,6 +570,226 @@ function LineChart({
     </div>
   );
 }
+
+
+function ColumnChart({
+  points,
+  unit,
+  yLabel,
+}: {
+  points: { label: string; date: string; value: number }[];
+  unit: string;
+  yLabel: string;
+}) {
+  if (!points || points.length === 0) {
+    return (
+      <div className="w-full rounded-xl border tv-border tv-surface-soft p-4 text-sm tv-muted">
+        No data to chart for this metric yet.
+      </div>
+    );
+  }
+
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [hover, setHover] = useState<{ i: number } | null>(null);
+
+  // Reset hover when points change (window / metric change)
+  useEffect(() => {
+    setHover(null);
+  }, [points]);
+
+  const pts = useMemo(() => {
+    const w = 900;
+    const h = 260;
+    const pad = 34;
+
+    const xs = points.map((p) => Number(p.value || 0));
+    const rawMax = Math.max(1, ...xs);
+
+    // Nice rounded Y scale (match You vs Crew line chart)
+    const approxStep = rawMax / 4;
+    const pow10 = Math.pow(10, Math.floor(Math.log10(Math.max(1e-9, approxStep))));
+    const frac = approxStep / pow10;
+    const niceFrac = frac <= 1 ? 1 : frac <= 2 ? 2 : frac <= 5 ? 5 : 10;
+    const step = niceFrac * pow10;
+    const maxV = Math.max(step, Math.ceil(rawMax / step) * step);
+    const yTicks = [0, maxV * 0.25, maxV * 0.5, maxV * 0.75, maxV];
+
+    const ts = points.map((_, i) => (points.length <= 1 ? 0.5 : i / (points.length - 1)));
+    const mapX = (t: number) => pad + t * (w - pad * 2);
+    const mapY = (v: number) => h - pad - (v / maxV) * (h - pad * 2);
+
+    // tick labels: aim for ~7 labels + always include first/last
+    const tickEvery = points.length <= 8 ? 1 : Math.ceil(points.length / 7);
+    const ticks = points
+      .map((p, i) => ({ i, label: p.label }))
+      .filter((t, idx) => idx === 0 || idx === points.length - 1 || idx % tickEvery === 0);
+
+    // bar sizing (slot-based)
+    const plotW = w - pad * 2;
+    const slotW = plotW / Math.max(1, points.length);
+    const barW = Math.max(10, Math.min(28, slotW * 0.65));
+
+    const avgV = avgNonZero(xs);
+
+    return { w, h, pad, maxV, yTicks, ts, mapX, mapY, ticks, barW, avgV };
+  }, [points]);
+
+  const onMove = (e: React.MouseEvent) => {
+    const el = ref.current;
+    if (!el || points.length === 0) return;
+
+    const r = el.getBoundingClientRect();
+    const xPx = e.clientX - r.left;
+
+    // Convert pixels → SVG viewBox units
+    const x = (xPx / Math.max(1, r.width)) * pts.w;
+    const rel = Math.max(0, Math.min(1, (x - pts.pad) / (pts.w - pts.pad * 2)));
+    const i = Math.round(rel * (points.length - 1));
+    setHover({ i: Math.max(0, Math.min(points.length - 1, i)) });
+  };
+
+  const idx = hover?.i ?? null;
+  const p = idx === null ? null : points[idx];
+  const hx = idx === null ? 0 : pts.mapX(pts.ts[idx]);
+  const hy = idx === null ? 0 : pts.mapY(Number(points[idx]?.value || 0));
+
+  const fmtTick = (v: number) => (v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(1));
+
+  return (
+    <div ref={ref} className="w-full relative" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+      <svg viewBox={`0 0 ${pts.w} ${pts.h}`} className="w-full h-[280px] select-none">
+        <defs>
+          <linearGradient id="youGoldBar_v2" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(242, 211, 128, 0.95)" />
+            <stop offset="45%" stopColor="rgba(184,135,47,0.92)" />
+            <stop offset="100%" stopColor="rgba(96, 62, 18, 0.92)" />
+          </linearGradient>
+          <filter id="youGoldGlow_v2" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="rgba(184,135,47,0.35)" />
+          </filter>
+        </defs>
+
+        {/* Y axis label */}
+        <text
+          x={12}
+          y={pts.pad + (pts.h - pts.pad * 2) / 2}
+          transform={`rotate(-90 12 ${pts.pad + (pts.h - pts.pad * 2) / 2})`}
+          textAnchor="middle"
+          fontSize="12"
+          fontWeight={700}
+          fill="var(--chart-title)"
+        >
+          {yLabel} ({unit})
+        </text>
+
+        {/* axes */}
+        <path
+          d={`M${pts.pad},${pts.pad} V${pts.h - pts.pad} H${pts.w - pts.pad}`}
+          fill="none"
+          stroke="currentColor"
+          opacity={0.25}
+        />
+
+        {/* X axis title */}
+        <text
+          x={(pts.w + pts.pad) / 2}
+          y={pts.h - 8}
+          textAnchor="middle"
+          fontSize="12"
+          fontWeight={700}
+          fill="var(--chart-title)"
+        >
+          Date
+        </text>
+
+        {/* Y ticks + labels */}
+        {pts.yTicks.map((v, idx2) => {
+          const y = pts.mapY(v);
+          return (
+            <g key={idx2}>
+              <line x1={pts.pad - 4} y1={y} x2={pts.pad} y2={y} stroke="currentColor" opacity={0.25} />
+              <line x1={pts.pad} y1={y} x2={pts.w - pts.pad} y2={y} stroke="currentColor" opacity={0.08} />
+              <text x={pts.pad - 8} y={y + 3} textAnchor="end" fontSize="10" fill="var(--chart-title)" opacity={0.85}>
+                {fmtTick(v)}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* Avg (non-zero) dashed line */}
+        <line
+          x1={pts.pad}
+          y1={pts.mapY(pts.avgV)}
+          x2={pts.w - pts.pad}
+          y2={pts.mapY(pts.avgV)}
+          stroke="rgba(184,135,47,0.55)"
+          strokeDasharray="8 6"
+        />
+
+        {/* Bars */}
+        {points.map((pp, i) => {
+          const cx = pts.mapX(pts.ts[i]);
+          const x = cx - pts.barW / 2;
+          const baseY = pts.mapY(0);
+          const yv = pts.mapY(Number(pp.value || 0));
+          const top = Math.min(baseY, yv);
+          const height = Math.max(2, Math.abs(baseY - yv));
+          const isHover = idx === i;
+          return (
+            <rect
+              key={pp.date + i}
+              x={x}
+              y={top}
+              width={pts.barW}
+              height={height}
+              rx={8}
+              fill="url(#youGoldBar_v2)"
+              opacity={isHover ? 1 : 0.92}
+              filter={isHover ? 'url(#youGoldGlow_v2)' : undefined}
+            />
+          );
+        })}
+
+        {/* X ticks + labels */}
+        {pts.ticks.map((t) => {
+          const x = pts.mapX(pts.ts[t.i]);
+          return (
+            <g key={t.i}>
+              <line x1={x} y1={pts.h - pts.pad} x2={x} y2={pts.h - pts.pad + 6} stroke="currentColor" opacity={0.25} />
+              <text x={x} y={pts.h - pts.pad + 18} textAnchor="middle" fontSize="10" fill="var(--chart-title)" opacity={0.85}>
+                {t.label}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* hover marker */}
+        {p && idx !== null ? (
+          <>
+            <line x1={hx} y1={pts.pad} x2={hx} y2={pts.h - pts.pad} stroke="currentColor" opacity={0.12} />
+            <circle cx={hx} cy={hy} r={4} fill="rgba(242, 211, 128, 0.95)" />
+          </>
+        ) : null}
+      </svg>
+
+      {/* Tooltip centered so it never clips */}
+      {p && idx !== null ? (
+        <div
+          className="absolute pointer-events-none text-xs px-3 py-2 rounded-xl border tv-border shadow-sm tv-surface-soft"
+          style={{ left: '50%', top: '50%', transform: 'translate(-50%, -55%)' }}
+        >
+          <div className="font-semibold text-[color:var(--text)]">
+            {p.date} ({p.label})
+          </div>
+          <div className="text-slate-700">
+            {Math.round(Number(p.value || 0)).toLocaleString()} {unit}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 
 function HeatmapMonth({
   points,
@@ -580,7 +836,24 @@ function HeatmapMonth({
           if (!d) return <div key={i} className="h-8 rounded-lg tv-surface-soft" />;
           const v = byDate[d] || 0;
           const ratio = Math.min(1, v / max);
-          const bg = v <= 0 ? '#e2e8f0' : `rgba(15, 23, 42, ${0.12 + ratio * 0.65})`;
+
+          // Higher-contrast phone-friendly palette (easier to distinguish levels)
+          // 0 = no output; 1..4 = increasing output buckets (relative to month max)
+          const level = v <= 0 ? 0 : ratio < 0.25 ? 1 : ratio < 0.5 ? 2 : ratio < 0.75 ? 3 : 4;
+
+          // Gold-only palette using opacity steps (phone-friendly).
+          // Brighter = higher output. Keep the hue consistent (gold), vary opacity for clarity.
+          const GOLD = '184,135,47'; // bronze/gold RGB
+          const bg =
+            level === 0
+              ? 'rgba(148,163,184,0.18)'
+              : level === 1
+                ? `rgba(${GOLD},0.22)`
+                : level === 2
+                  ? `rgba(${GOLD},0.38)`
+                  : level === 3
+                    ? `rgba(${GOLD},0.58)`
+                    : `rgba(${GOLD},0.82)`;
           const isSel = selectedDate === d;
           return (
             <button
@@ -588,13 +861,17 @@ function HeatmapMonth({
               type="button"
               onClick={() => onSelect(d)}
               className="h-8 rounded-lg border"
-              style={{ background: bg, borderColor: isSel ? 'var(--brand)' : 'rgba(148,163,184,0.35)' }}
+              style={{
+                background: bg,
+                borderColor: isSel ? 'var(--brand)' : 'rgba(148,163,184,0.35)',
+                boxShadow: isSel ? '0 0 0 2px rgba(10,132,255,0.22)' : 'none',
+              }}
               title={`${d} • ${Math.round(v)}`}
             />
           );
         })}
       </div>
-      <div className="mt-2 text-[11px] tv-muted">Darker = higher output (relative to your month max)</div>
+      <div className="mt-2 text-[11px] tv-muted">Lighter → darker = higher output (relative to your month max)</div>
     </div>
   );
 }
@@ -1079,16 +1356,12 @@ export default function YouVsYou() {
           </div>
 
          <div className="mt-3">
-  <LineChart
-    points={series}
-    unit={selected.unit}
-    yLabel={selected.title}
-  />
+  <ColumnChart points={series} unit={selected.unit} yLabel={selected.title} />
 </div>
 
 
           <div className="mt-3 text-xs tv-muted">
-            Dashed line = your average for the selected window. Hover a point to see the value.
+            Dashed line = your average for the selected window (non‑zero shifts). Hover a bar to see the value.
           </div>
         </div>
 

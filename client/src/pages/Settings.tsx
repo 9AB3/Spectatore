@@ -461,9 +461,9 @@ export default function Settings() {
 
       {confirmLeave ? (
         <div className="fixed inset-0 z-[1000] flex items-start justify-center bg-black/40 overflow-auto pt-6 pb-24">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl w-full max-w-md mx-4 p-4">
+          <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-2xl shadow-xl w-full max-w-md mx-4 p-4">
             <div className="font-semibold text-lg mb-2">Leave site?</div>
-            <div className="text-sm opacity-80 mb-4">
+            <div className="text-sm text-slate-700 dark:text-slate-300 mb-4">
               Are you sure you want to leave <b>{confirmLeave.site}</b>?
             </div>
             <div className="flex justify-end gap-2">
