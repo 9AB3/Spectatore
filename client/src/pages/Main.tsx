@@ -5,28 +5,7 @@ import { useEffect, useState } from 'react';
 import { getDB } from '../lib/idb';
 import { api } from '../lib/api';
 
-function IconPortal({ className = '' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true">
-      <path d="M12 3a7 7 0 1 0 7 7" strokeLinecap="round" />
-      <path d="M12 3v4" strokeLinecap="round" />
-      <path d="M16 7h4" strokeLinecap="round" />
-      <path d="M21 12a9 9 0 1 1-9-9" strokeLinecap="round" />
-    </svg>
-  );
-}
 
-function IconSignOut({ className = '' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true">
-      <path d="M10 17l-1 0a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4h1" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M15 12H9" strokeLinecap="round" />
-      <path d="M15 12l-3-3" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M15 12l-3 3" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M14 7h3a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-3" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 function FeedbackIcon({ className = '' }: { className?: string }) {
   return (
@@ -166,7 +145,7 @@ export default function Main() {
                   <div className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Choose date &amp; DS/NS</div>
                 </div>
                 <div className="h-12 w-12 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(184, 135, 47, 0.16)', border: '1px solid var(--hairline)' }} aria-hidden="true">
-                  <IconPortal className="h-6 w-6" />
+                  <img src="/start-shift.png" alt="" className="h-8 w-8 object-contain" />
                 </div>
               </div>
               <div className="mt-4">
@@ -189,7 +168,7 @@ export default function Main() {
                   <div className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Sign out of the app</div>
                 </div>
                 <div className="h-12 w-12 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(10, 132, 255, 0.14)', border: '1px solid var(--hairline)' }} aria-hidden="true">
-                  <IconSignOut className="h-6 w-6" />
+                  <img src="/tag-out.png" alt="" className="h-8 w-8 object-contain" />
                 </div>
               </div>
               <div className="mt-4">

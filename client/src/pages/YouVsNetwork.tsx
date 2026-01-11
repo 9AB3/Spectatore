@@ -109,6 +109,15 @@ function LineChart({
     return arr.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
   };
 
+  const areaPath = (arr: Array<{ x: number; y: number }>) => {
+    if (arr.length === 0) return '';
+    const baseY = pts.h - pts.pad;
+    const first = arr[0];
+    const last = arr[arr.length - 1];
+    const top = arr.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    return `${top} L${last.x.toFixed(1)},${baseY.toFixed(1)} L${first.x.toFixed(1)},${baseY.toFixed(1)} Z`;
+  };
+
   const onMove = (e: React.MouseEvent) => {
     const el = ref.current;
     if (!el || rows.length === 0) return;
@@ -130,6 +139,24 @@ function LineChart({
   return (
     <div ref={ref} className="w-full relative" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
       <svg viewBox={`0 0 ${pts.w} ${pts.h}`} className="w-full h-[280px]">
+        <defs>
+          <linearGradient id="goldLine" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(242, 211, 128, 0.95)" />
+            <stop offset="60%" stopColor="rgba(184,135,47,0.92)" />
+            <stop offset="100%" stopColor="rgba(96, 62, 18, 0.92)" />
+          </linearGradient>
+          <linearGradient id="goldArea" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(242, 211, 128, 0.22)" />
+            <stop offset="100%" stopColor="rgba(184,135,47,0.02)" />
+          </linearGradient>
+          <linearGradient id="crewBlue" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(110, 231, 255, 0.95)" />
+            <stop offset="100%" stopColor="rgba(10,132,255,0.85)" />
+          </linearGradient>
+          <filter id="goldGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="rgba(184,135,47,0.35)" />
+          </filter>
+        </defs>
         {/* Y axis label */}
         <text
           x={12}
@@ -211,14 +238,17 @@ function LineChart({
           );
         })}
 
+        {/* area fill (you) */}
+        <path d={areaPath(pts.a)} fill="url(#goldArea)" />
+
         {/* lines */}
-        <path d={path(pts.a)} fill="none" stroke="currentColor" strokeWidth={2} />
+        <path d={path(pts.a)} fill="none" stroke="url(#goldLine)" strokeWidth={3} filter="url(#goldGlow)" />
         <path
           d={path(pts.b)}
           fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-          strokeDasharray="6 6"
+          stroke="url(#crewBlue)"
+          strokeWidth={3}
+          strokeDasharray="8 6"
           opacity={0.85}
         />
 
@@ -240,8 +270,8 @@ function LineChart({
                     stroke="currentColor"
                     opacity={0.12}
                   />
-                  <circle cx={aPt.x} cy={aPt.y} r={4} fill="currentColor" />
-                  <circle cx={bPt.x} cy={bPt.y} r={4} fill="currentColor" opacity={0.6} />
+                  <circle cx={aPt.x} cy={aPt.y} r={4} fill="rgba(242, 211, 128, 0.95)" />
+                  <circle cx={bPt.x} cy={bPt.y} r={4} fill="rgba(10,132,255,0.9)" opacity={0.9} />
                 </>
               );
             })()
@@ -272,6 +302,233 @@ function LineChart({
     </div>
   );
 }
+
+
+function ColumnChartDaily({
+  rows,
+  bLabel,
+  yLabel,
+}: {
+  rows: Array<{ x: string; a: number; b: number }>;
+  bLabel: string;
+  yLabel: string;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [hover, setHover] = useState<{ i: number } | null>(null);
+
+  // Reset hover when data changes
+  useEffect(() => {
+    setHover(null);
+  }, [rows]);
+
+  const pts = useMemo(() => {
+    const w = 900;
+    const h = 260;
+    const pad = 34;
+
+    const rawMax = Math.max(1, ...rows.flatMap((r) => [Number(r.a || 0), Number(r.b || 0)]));
+
+    // Nice rounded Y scale (match line chart)
+    const approxStep = rawMax / 4;
+    const pow10 = Math.pow(10, Math.floor(Math.log10(Math.max(1e-9, approxStep))));
+    const frac = approxStep / pow10;
+    const niceFrac = frac <= 1 ? 1 : frac <= 2 ? 2 : frac <= 5 ? 5 : 10;
+    const step = niceFrac * pow10;
+    const maxV = Math.max(step, Math.ceil(rawMax / step) * step);
+    const yTicks = [0, maxV * 0.25, maxV * 0.5, maxV * 0.75, maxV];
+
+    const mapX = (t: number) => pad + t * (w - pad * 2);
+    const mapY = (v: number) => h - pad - (v / maxV) * (h - pad * 2);
+
+    const xs = rows.map((_, i) => (rows.length <= 1 ? 0.5 : i / (rows.length - 1)));
+
+    // tick labels: aim for ~7 labels + always include first/last
+    const tickEvery = rows.length <= 8 ? 1 : Math.ceil(rows.length / 7);
+    const ticks = rows
+      .map((r, i) => ({ i, label: r.x }))
+      .filter((t, idx) => idx === 0 || idx === rows.length - 1 || idx % tickEvery === 0);
+
+    // bar sizing (slot-based, responsive-looking)
+    const plotW = w - pad * 2;
+    const slotW = plotW / Math.max(1, rows.length);
+    const groupW = Math.max(14, Math.min(34, slotW * 0.75)); // total width for the pair
+    const gap = Math.max(4, Math.min(8, groupW * 0.18));
+    const barW = Math.max(6, (groupW - gap) / 2);
+
+    return { w, h, pad, maxV, yTicks, xs, mapX, mapY, ticks, groupW, gap, barW };
+  }, [rows]);
+
+  const onMove = (e: React.MouseEvent) => {
+    const el = ref.current;
+    if (!el || rows.length === 0) return;
+
+    const r = el.getBoundingClientRect();
+    const xPx = e.clientX - r.left;
+
+    // Convert pixels → SVG viewBox units so the hover aligns at any screen width
+    const x = (xPx / Math.max(1, r.width)) * pts.w;
+    const rel = Math.max(0, Math.min(1, (x - pts.pad) / (pts.w - pts.pad * 2)));
+    const i = Math.round(rel * (rows.length - 1));
+    setHover({ i: Math.max(0, Math.min(rows.length - 1, i)) });
+  };
+
+  const idx = hover?.i ?? null;
+  const row = idx === null ? null : rows[idx];
+
+  // Hover marker x coordinate (center of group)
+  const hx = idx === null ? 0 : pts.mapX(pts.xs[idx]);
+
+  const fmtTick = (v: number) => (v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(1));
+
+  return (
+    <div ref={ref} className="w-full relative" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+      <svg viewBox={`0 0 ${pts.w} ${pts.h}`} className="w-full h-[280px] select-none">
+        <defs>
+          <linearGradient id="goldBarDaily_v2" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(242, 211, 128, 0.95)" />
+            <stop offset="45%" stopColor="rgba(184,135,47,0.92)" />
+            <stop offset="100%" stopColor="rgba(96, 62, 18, 0.92)" />
+          </linearGradient>
+          <linearGradient id="blueBarDaily_v2" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(110,231,255,0.95)" />
+            <stop offset="100%" stopColor="rgba(10,132,255,0.85)" />
+          </linearGradient>
+          <filter id="goldGlowDaily_v2" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="rgba(184,135,47,0.35)" />
+          </filter>
+        </defs>
+
+        {/* Y axis label (match line chart) */}
+        <text
+          x={12}
+          y={pts.pad + (pts.h - pts.pad * 2) / 2}
+          transform={`rotate(-90 12 ${pts.pad + (pts.h - pts.pad * 2) / 2})`}
+          textAnchor="middle"
+          fontSize="12"
+          fontWeight={700}
+          fill="var(--chart-title)"
+        >
+          {yLabel}
+        </text>
+
+        {/* axes */}
+        <path
+          d={`M${pts.pad},${pts.pad} V${pts.h - pts.pad} H${pts.w - pts.pad}`}
+          fill="none"
+          stroke="currentColor"
+          opacity={0.25}
+        />
+
+        {/* X axis title */}
+        <text
+          x={(pts.w + pts.pad) / 2}
+          y={pts.h - 8}
+          textAnchor="middle"
+          fontSize="12"
+          fontWeight={700}
+          fill="var(--chart-title)"
+        >
+          Date
+        </text>
+
+        {/* Y ticks + labels */}
+        {pts.yTicks.map((v, idx2) => {
+          const y = pts.mapY(v);
+          return (
+            <g key={idx2}>
+              <line x1={pts.pad - 4} y1={y} x2={pts.pad} y2={y} stroke="currentColor" opacity={0.25} />
+              <line x1={pts.pad} y1={y} x2={pts.w - pts.pad} y2={y} stroke="currentColor" opacity={0.08} />
+              <text
+                x={pts.pad - 8}
+                y={y + 3}
+                textAnchor="end"
+                fontSize="10"
+                fill="var(--chart-title)"
+                opacity={0.85}
+              >
+                {fmtTick(v)}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* X ticks + labels */}
+        {pts.ticks.map((t) => {
+          const x = pts.mapX(pts.xs[t.i]);
+          return (
+            <g key={t.i}>
+              <line x1={x} y1={pts.h - pts.pad} x2={x} y2={pts.h - pts.pad + 6} stroke="currentColor" opacity={0.25} />
+              <text x={x} y={pts.h - pts.pad + 18} textAnchor="middle" fontSize="10" fill="var(--chart-title)" opacity={0.85}>
+                {fmtYmd(t.label)}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* Bars */}
+        {rows.map((r, i) => {
+          const cx = pts.mapX(pts.xs[i]);
+          const baseY = pts.mapY(0);
+
+          const ya = pts.mapY(Number(r.a || 0));
+          const yb = pts.mapY(Number(r.b || 0));
+
+          const aTop = Math.min(baseY, ya);
+          const bTop = Math.min(baseY, yb);
+          const aH = Math.max(2, Math.abs(baseY - ya));
+          const bH = Math.max(2, Math.abs(baseY - yb));
+
+          const x0 = cx - pts.groupW / 2;
+          const isHover = idx === i;
+
+          return (
+            <g key={r.x + i} opacity={isHover ? 1 : 0.92}>
+              <rect
+                x={x0}
+                y={aTop}
+                width={pts.barW}
+                height={aH}
+                rx={8}
+                fill="url(#goldBarDaily_v2)"
+                filter={isHover ? 'url(#goldGlowDaily_v2)' : undefined}
+              />
+              <rect
+                x={x0 + pts.barW + pts.gap}
+                y={bTop}
+                width={pts.barW}
+                height={bH}
+                rx={8}
+                fill="url(#blueBarDaily_v2)"
+                opacity={0.9}
+              />
+            </g>
+          );
+        })}
+
+        {/* hover marker */}
+        {row ? (
+          <>
+            <line x1={hx} y1={pts.pad} x2={hx} y2={pts.h - pts.pad} stroke="currentColor" opacity={0.12} />
+          </>
+        ) : null}
+      </svg>
+
+      {/* Tooltip: always centered in the card (never clipped) */}
+      {row && idx !== null ? (
+        <div
+          className="absolute pointer-events-none text-xs px-3 py-2 rounded-xl border tv-border shadow-sm tv-surface-soft"
+          style={{ left: '50%', top: '50%', transform: 'translate(-50%, -55%)' }}
+        >
+          <div className="font-semibold text-[color:var(--text)]">{fmtYmd(row.x)}</div>
+          <div className="text-slate-700">
+            You: {Number(row.a || 0).toFixed(1)} • {bLabel}: {Number(row.b || 0).toFixed(1)}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 
 export default function YouVsNetwork() {
   const location = useLocation();
@@ -374,6 +631,11 @@ export default function YouVsNetwork() {
     const name = data?.compare?.name?.trim();
     return name ? name : 'Crew avg';
   }, [data]);
+
+  const fmtInt = (n: number) =>
+    new Intl.NumberFormat('en-AU', { maximumFractionDigits: 0 }).format(Math.round(Number(n || 0)));
+
+
 
 
   const leaderboard = useMemo(() => {
@@ -504,29 +766,40 @@ export default function YouVsNetwork() {
         {rows.length ? (
           <>
             {/* Card 2: KPI strip */}
-            <div className="card">
+			    <div className="card">
               <div className="grid grid-cols-3 gap-3">
-                <div className="p-3 rounded-2xl border" >
+			        {(() => {
+			          const delta = kpiSummary.a - kpiSummary.b;
+			          const deltaPos = delta >= 0;
+			          const deltaBorder = delta === 0 ? 'rgba(148,163,184,0.22)' : deltaPos ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)';
+			          const deltaText = delta === 0 ? 'rgba(148,163,184,0.95)' : deltaPos ? 'rgba(34,197,94,0.98)' : 'rgba(239,68,68,0.98)';
+			          const shell = 'p-3 rounded-2xl border bg-[rgba(10,12,16,0.35)] md:bg-transparent backdrop-blur-sm md:backdrop-blur-0 shadow-sm md:shadow-none';
+			          return (
+			            <>
+			              <div className={`${shell} border-[rgba(96,165,250,0.25)]`}>
                   <div className="text-xs opacity-70">{bLabel}</div>
-                  <div className="text-2xl font-semibold">{kpiSummary.b.toFixed(1)}</div>
+                  <div className="text-[clamp(1.15rem,4.2vw,1.6rem)] font-semibold tabular-nums tracking-tight leading-none">{fmtInt(kpiSummary.b)}</div>
                   <div className="text-[11px] opacity-70 mt-1">{mode === 'daily' ? 'avg / day' : 'total'}</div>
-                </div>
-                <div className="p-3 rounded-2xl border" >
+			              </div>
+			              <div className={`${shell} border-[rgba(242,211,128,0.28)]`}>
                   <div className="text-xs opacity-70">You</div>
-                  <div className="text-2xl font-semibold">{kpiSummary.a.toFixed(1)}</div>
+                  <div className="text-[clamp(1.15rem,4.2vw,1.6rem)] font-semibold tabular-nums tracking-tight leading-none">{fmtInt(kpiSummary.a)}</div>
                   <div className="text-[11px] opacity-70 mt-1">{mode === 'daily' ? 'avg / day' : 'total'}</div>
-                </div>
-                <div className="p-3 rounded-2xl border" >
+			              </div>
+			              <div className={shell} style={{ borderColor: deltaBorder }}>
                   <div className="text-xs opacity-70">Delta</div>
-                  <div className="text-2xl font-semibold">
-                    {kpiSummary.a - kpiSummary.b >= 0 ? '+' : ''}
-                    {(kpiSummary.a - kpiSummary.b).toFixed(1)}
+			          <div className="text-[clamp(1.15rem,4.2vw,1.6rem)] font-semibold tabular-nums tracking-tight leading-none" style={{ color: deltaText }}>
+			            {delta >= 0 ? '+' : ''}
+			            {fmtInt(delta)}
                   </div>
                   <div className="text-sm opacity-70">
-                    {kpiSummary.pct >= 0 ? '+' : ''}
-                    {kpiSummary.pct.toFixed(1)}%
+			            {kpiSummary.pct >= 0 ? '+' : ''}
+			            {kpiSummary.pct.toFixed(1)}%
                   </div>
-                </div>
+			              </div>
+			            </>
+			          );
+			        })()}
               </div>
             </div>
 
@@ -543,17 +816,18 @@ export default function YouVsNetwork() {
                     <div key={r.key} className="p-2 rounded-2xl border" >
                       <div className="flex items-center justify-between gap-2 mb-1">
                         <div className="text-sm font-semibold">
-                          {idx + 1}. {r.label}
+                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full mr-2" style={{ background: idx === 0 ? 'rgba(242,211,128,0.22)' : 'rgba(148,163,184,0.16)', border: '1px solid rgba(148,163,184,0.28)' }}>{idx + 1}</span>{r.label}
                           {r.kind === 'you' ? <span className="ml-2 text-xs opacity-70">(you)</span> : null}
                         </div>
                         <div className="text-sm font-semibold">{(r.total || 0).toFixed(1)}</div>
                       </div>
-                      <div className="h-2 rounded-xl border overflow-hidden" >
+                      <div className="h-3 rounded-xl border overflow-hidden" style={{ background: "rgba(2,6,23,0.55)", borderColor: "rgba(148,163,184,0.28)" }}>
                         <div
                           className="h-full"
                           style={{
                             width: `${pct * 100}%`,
-                            background: r.kind === 'you' ? '#111827' : '#d1d5db',
+                            boxShadow: r.kind === 'avg' ? '0 0 10px rgba(10,132,255,0.25)' : '0 0 10px rgba(184,135,47,0.25)',
+                            background: r.kind === 'avg' ? 'linear-gradient(180deg, rgba(110,231,255,0.95), rgba(10,132,255,0.85))' : 'linear-gradient(180deg, rgba(242,211,128,0.95), rgba(184,135,47,0.92), rgba(96,62,18,0.92))',
                           }}
                         />
                       </div>
@@ -565,8 +839,12 @@ export default function YouVsNetwork() {
 
             {/* Card 4: chart */}
             <div className="card">
-              <div className="text-xs tv-muted mb-2">Solid = you, dashed = {bLabel} • {mode === 'cumulative' ? 'cumulative total' : 'daily average'}</div>
-              <LineChart rows={rows} bLabel={bLabel} yLabel={metric} />
+              <div className="text-xs tv-muted mb-2">Gold = you, blue dashed = {bLabel} • {mode === 'cumulative' ? 'cumulative total' : 'daily average'}</div>
+			      {mode === 'daily' ? (
+			        <ColumnChartDaily rows={rows} bLabel={bLabel} yLabel={metric} />
+			      ) : (
+			        <LineChart rows={rows} bLabel={bLabel} yLabel={metric} />
+			      )}
             </div>
           </>
         ) : (
