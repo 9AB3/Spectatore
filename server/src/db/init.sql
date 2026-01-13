@@ -175,6 +175,22 @@ BEGIN
     ALTER TABLE site_memberships ADD COLUMN site_name TEXT;
   END IF;
 
+  -- site_memberships site data consent
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name='site_memberships' AND column_name='site_consent_accepted_at'
+  ) THEN
+    ALTER TABLE site_memberships ADD COLUMN site_consent_accepted_at TIMESTAMPTZ;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name='site_memberships' AND column_name='site_consent_version'
+  ) THEN
+    ALTER TABLE site_memberships ADD COLUMN site_consent_version TEXT;
+  END IF;
+
+
   -- If legacy column `site` exists, copy to site_name.
   IF EXISTS (
     SELECT 1 FROM information_schema.columns

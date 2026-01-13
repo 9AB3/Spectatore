@@ -5,8 +5,44 @@ import bcrypt from 'bcryptjs';
 import { pool } from '../lib/pg.js';
 import { siteAdminMiddleware } from '../lib/auth.js';
 
+async function hasLegacySiteColumn(pool: any) {
+  const q = `
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_name = 'site_memberships'
+      AND column_name = 'site'
+    LIMIT 1
+  `;
+  const r = await pool.query(q);
+  return r.rowCount > 0;
+}
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
+
+// ---- schema helpers (support older DB variants) ----
+// Some local/dev DBs still use the legacy `site_memberships.site` column (sometimes NOT NULL).
+// If we insert/update memberships without also setting `site`, Postgres will throw:
+//   null value in column "site" of relation "site_memberships" violates not-null constraint
+let _colsCache: Record<string, Set<string>> = {};
+
+async function tableColumns(table: string): Promise<Set<string>> {
+  if (_colsCache[table]) return _colsCache[table];
+  const r = await pool.query(
+    `SELECT column_name
+       FROM information_schema.columns
+      WHERE table_schema='public'
+        AND table_name=$1`,
+    [table],
+  );
+  const set = new Set<string>((r.rows || []).map((x: any) => String(x.column_name)));
+  _colsCache[table] = set;
+  return set;
+}
+
+async function hasColumn(table: string, col: string): Promise<boolean> {
+  const cols = await tableColumns(table);
+  return cols.has(col);
+}
 
 function makePowerBiToken() {
   // Short, URL-safe token.
@@ -23,6 +59,17 @@ function isManager(req: any) {
 
 function assertManager(req: any) {
   if (!isManager(req)) {
+    const e: any = new Error('forbidden');
+    e.status = 403;
+    throw e;
+  }
+}
+
+// Super-admin only (legacy: users.is_admin=true).
+// In siteAdminMiddleware this maps to req.site_admin.sites = ['*'].
+function assertSuperAdmin(req: any) {
+  const sites = allowedSites(req);
+  if (!sites.includes('*')) {
     const e: any = new Error('forbidden');
     e.status = 403;
     throw e;
@@ -64,7 +111,7 @@ router.get('/admin-sites', siteAdminMiddleware, async (_req, res) => {
 
 router.get('/powerbi-tokens', siteAdminMiddleware, async (req: any, res) => {
   try {
-    assertManager(req);
+    assertSuperAdmin(req);
     const site = normalizeSiteParam(req);
     if (site !== '*') assertSiteAccess(req, site);
 
@@ -94,7 +141,7 @@ router.get('/powerbi-tokens', siteAdminMiddleware, async (req: any, res) => {
 
 router.post('/powerbi-tokens', siteAdminMiddleware, async (req: any, res) => {
   try {
-    assertManager(req);
+    assertSuperAdmin(req);
     const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
     const label = String(req.body?.label || '').trim() || null;
     if (!site || site === '*') {
@@ -134,7 +181,7 @@ router.post('/powerbi-tokens', siteAdminMiddleware, async (req: any, res) => {
 
 router.post('/powerbi-tokens/:id/revoke', siteAdminMiddleware, async (req: any, res) => {
   try {
-    assertManager(req);
+    assertSuperAdmin(req);
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: 'Invalid id' });
 
@@ -514,6 +561,8 @@ router.post('/members/approve', siteAdminMiddleware, async (req: any, res) => {
     const site_id = Number(sid.rows?.[0]?.id || 0);
     if (!site_id) return res.status(500).json({ ok: false, error: 'failed to resolve site_id' });
 
+    const hasLegacySiteCol = await hasLegacySiteColumn(pool);
+
     // Guardrail: "invited" memberships must only transition via the user's accept/deny (or revoke).
     // Admins should NOT be able to approve an invited row (that would bypass user acceptance).
     try {
@@ -534,19 +583,39 @@ router.post('/members/approve', siteAdminMiddleware, async (req: any, res) => {
 
 
     // Update first (works even if there is no UNIQUE constraint for ON CONFLICT)
-    const upd = await pool.query(
-      `UPDATE site_memberships
-          SET role=$3, status='active', approved_at=NOW(), approved_by=$4, site_name=COALESCE(site_name,$2)
-        WHERE user_id=$1 AND site_id=$5`,
-      [user_id, site, role, req.user_id || null, site_id],
-    );
+    const updSql = hasLegacySiteCol
+      ? `UPDATE site_memberships
+          SET role=$3,
+              status='active',
+              approved_at=NOW(),
+              approved_by=$4,
+              site_name=COALESCE(site_name,$2),
+              site=COALESCE(site,$2)
+        WHERE user_id=$1 AND site_id=$5`
+      : `UPDATE site_memberships
+          SET role=$3,
+              status='active',
+              approved_at=NOW(),
+              approved_by=$4,
+              site_name=COALESCE(site_name,$2)
+        WHERE user_id=$1 AND site_id=$5`;
+
+    const upd = await pool.query(updSql, [user_id, site, role, req.user_id || null, site_id]);
 
     if ((upd.rowCount || 0) === 0) {
-      await pool.query(
-        `INSERT INTO site_memberships (user_id, site_id, site_name, role, status, approved_at, approved_by)
-         VALUES ($1,$2,$3,$4,'active',NOW(),$5)`,
-        [user_id, site_id, site, role, req.user_id || null],
-      );
+      if (hasLegacySiteCol) {
+        await pool.query(
+          `INSERT INTO site_memberships (user_id, site_id, site_name, site, role, status, approved_at, approved_by)
+           VALUES ($1,$2,$3,$3,$4,'active',NOW(),$5)`,
+          [user_id, site_id, site, role, req.user_id || null],
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO site_memberships (user_id, site_id, site_name, role, status, approved_at, approved_by)
+           VALUES ($1,$2,$3,$4,'active',NOW(),$5)`,
+          [user_id, site_id, site, role, req.user_id || null],
+        );
+      }
     }
 
     return res.json({ ok: true });
@@ -624,23 +693,42 @@ router.post('/members/add', siteAdminMiddleware, async (req: any, res) => {
     const site_id = Number(sid.rows?.[0]?.id || 0);
     if (!site_id) return res.status(500).json({ ok: false, error: 'failed to resolve site_id' });
 
-    const upd = await pool.query(
-      `UPDATE site_memberships
+    const hasLegacySiteCol = await hasLegacySiteColumn(pool);
+
+    const updSql = hasLegacySiteCol
+      ? `UPDATE site_memberships
+          SET role=$3,
+              status='invited',
+              requested_at=NOW(),
+              approved_at=NULL,
+              approved_by=NULL,
+              site_name=COALESCE(site_name,$2),
+              site=COALESCE(site,$2)
+        WHERE user_id=$1 AND site_id=$4 AND status <> 'active'`
+      : `UPDATE site_memberships
           SET role=$3,
               status='invited',
               requested_at=NOW(),
               approved_at=NULL,
               approved_by=NULL,
               site_name=COALESCE(site_name,$2)
-        WHERE user_id=$1 AND site_id=$4 AND status <> 'active'`,
-      [user_id, site, role, site_id],
-    );
+        WHERE user_id=$1 AND site_id=$4 AND status <> 'active'`;
+
+    const upd = await pool.query(updSql, [user_id, site, role, site_id]);
     if ((upd.rowCount || 0) === 0) {
-      await pool.query(
-        `INSERT INTO site_memberships (user_id, site_id, site_name, role, status, requested_at)
-         VALUES ($1,$2,$3,$4,'invited',NOW())`,
-        [user_id, site_id, site, role],
-      );
+      if (hasLegacySiteCol) {
+        await pool.query(
+          `INSERT INTO site_memberships (user_id, site_id, site_name, site, role, status, requested_at)
+           VALUES ($1,$2,$3,$3,$4,'invited',NOW())`,
+          [user_id, site_id, site, role],
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO site_memberships (user_id, site_id, site_name, role, status, requested_at)
+           VALUES ($1,$2,$3,$4,'invited',NOW())`,
+          [user_id, site_id, site, role],
+        );
+      }
     }
 
     return res.json({ ok: true, user_id });
@@ -2063,7 +2151,7 @@ router.post('/reconciliation/unlock', siteAdminMiddleware, async (req: any, res)
 
 router.get('/powerbi-tokens', siteAdminMiddleware, async (req: any, res) => {
   try {
-    assertManager(req);
+    assertSuperAdmin(req);
     const site = normalizeSiteParam(req);
     assertSiteAccess(req, site);
 
@@ -2082,7 +2170,7 @@ router.get('/powerbi-tokens', siteAdminMiddleware, async (req: any, res) => {
 
 router.post('/powerbi-tokens', siteAdminMiddleware, async (req: any, res) => {
   try {
-    assertManager(req);
+    assertSuperAdmin(req);
     const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
     const label = String(req.body?.label || '').trim() || null;
     if (!site || site === '*') return res.status(400).json({ ok: false, error: 'Site is required' });
@@ -2115,7 +2203,7 @@ router.post('/powerbi-tokens', siteAdminMiddleware, async (req: any, res) => {
 
 router.post('/powerbi-tokens/:id/revoke', siteAdminMiddleware, async (req: any, res) => {
   try {
-    assertManager(req);
+    assertSuperAdmin(req);
     const id = Number(req.params.id);
     if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ ok: false, error: 'Invalid id' });
 

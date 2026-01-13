@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import BottomNav from './BottomNav';
+import TermsContent from './TermsContent';
 import { api } from '../lib/api';
 import { getDB } from '../lib/idb';
 import { enablePush, isPushSupported, getExistingSubscription } from '../lib/push';
@@ -17,11 +18,49 @@ export default function ProtectedLayout() {
   const [checked, setChecked] = useState(false);
   const [needsTerms, setNeedsTerms] = useState(false);
   const [termsTick, setTermsTick] = useState(false);
+  const [termsScrolled, setTermsScrolled] = useState(false);
+  const termsBoxRef = useRef<HTMLDivElement | null>(null);
+  const [inviteConsent, setInviteConsent] = useState<{ id: number; site: string; role: string } | null>(null);
+  const [inviteConsentTick, setInviteConsentTick] = useState(false);
+  const [inviteConsentScrolled, setInviteConsentScrolled] = useState(false);
+  const inviteConsentBoxRef = useRef<HTMLDivElement | null>(null);
+
   const [pushPrompt, setPushPrompt] = useState(false);
   const [invites, setInvites] = useState<Array<{ id: number; site: string; role: string }>>([]);
   const [invitesPrompt, setInvitesPrompt] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+
+  // Reset & ensure scroll gating works even when the content doesn't overflow.
+  useEffect(() => {
+    if (!needsTerms) return;
+    setTermsTick(false);
+    setTermsScrolled(false);
+
+    // If the terms content fits (no scroll needed), allow proceeding after tick.
+    const t = setTimeout(() => {
+      const el = termsBoxRef.current;
+      if (!el) return;
+      const noScrollNeeded = el.scrollHeight <= el.clientHeight + 2;
+      if (noScrollNeeded) setTermsScrolled(true);
+    }, 0);
+    return () => clearTimeout(t);
+  }, [needsTerms]);
+
+  // Same logic for site-invite consent: if content doesn't overflow, don't block the button.
+  useEffect(() => {
+    if (!inviteConsent) return;
+    setInviteConsentTick(false);
+    setInviteConsentScrolled(false);
+
+    const t = setTimeout(() => {
+      const el = inviteConsentBoxRef.current;
+      if (!el) return;
+      const noScrollNeeded = el.scrollHeight <= el.clientHeight + 2;
+      if (noScrollNeeded) setInviteConsentScrolled(true);
+    }, 0);
+    return () => clearTimeout(t);
+  }, [inviteConsent]);
 
   useEffect(() => {
     (async () => {
@@ -120,13 +159,13 @@ export default function ProtectedLayout() {
     localStorage.setItem('spectatore-push-prompted', '1');
   }
 
-  async function respondInvite(membership_id: number, accept: boolean) {
+  async function respondInvite(membership_id: number, accept: boolean, site_consent_version?: string) {
     setBusy(true);
     setErr('');
     try {
       await api('/api/user/site-invites/respond', {
         method: 'POST',
-        body: JSON.stringify({ membership_id, accept }),
+        body: JSON.stringify({ membership_id, accept, site_consent_version }),
       });
       const inv: any = await api('/api/user/site-invites');
       const list = Array.isArray(inv?.invites) ? inv.invites : [];
@@ -177,8 +216,12 @@ export default function ProtectedLayout() {
                     <button type="button" className="btn" disabled={busy} onClick={() => respondInvite(inv.id, false)}>
                       Decline
                     </button>
-                    <button type="button" className="btn btn-primary" disabled={busy} onClick={() => respondInvite(inv.id, true)}>
-                      {busy ? 'Working…' : 'Accept'}
+                    <button type="button" className="btn btn-primary" disabled={busy} onClick={() => {
+                      setInviteConsent(inv);
+                      setInviteConsentTick(false);
+                      setInviteConsentScrolled(false);
+                    }}>
+                      {busy ? 'Working…' : 'Review & Accept'}
                     </button>
                   </div>
                 </div>
@@ -186,56 +229,127 @@ export default function ProtectedLayout() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* Terms gate */}
+      )}      {/* Terms gate */}
       {needsTerms && (
-        <div className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center bg-black/50 p-3">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
-            <div className="text-lg font-semibold">Terms &amp; Conditions</div>
-            <div className="text-sm text-slate-600 mt-2">
-              Before using Spectatore you need to accept the Terms &amp; Conditions.
+        <div className="fixed inset-0 z-[9999] bg-black/70">
+          <div className="h-full w-full flex flex-col">
+            <div className="px-5 pt-6 pb-4 text-white">
+              <div className="text-xl font-semibold">Terms &amp; Conditions</div>
+              <div className="text-sm opacity-90 mt-1">
+                Please scroll to the bottom, then tick the box to enable <b>Accept &amp; Continue</b>.
+              </div>
             </div>
 
-            <div className="mt-4 space-y-3">
-              <label className="flex gap-3 items-start text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  checked={termsTick}
-                  onChange={(e) => setTermsTick(e.target.checked)}
-                />
-                <span>
-                  I have read and agree to the{' '}
-                  <button
-                    type="button"
-                    className="underline text-blue-700"
-                    onClick={() => nav('/Terms')}
-                  >
-                    Terms &amp; Conditions
-                  </button>
-                  .
-                </span>
-              </label>
-
-              {err && <div className="text-sm text-red-600">{err}</div>}
-
-              <button
-                type="button"
-                disabled={busy}
-                className="btn btn-primary w-full"
-                onClick={acceptTerms}
+            <div className="px-4 pb-4 flex-1 min-h-0 flex flex-col gap-4">
+              <div
+                ref={termsBoxRef}
+                className="bg-white rounded-2xl shadow-xl flex-1 min-h-0 overflow-y-auto p-5"
+                onScroll={(e) => {
+                  const el = e.currentTarget;
+                  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 8) setTermsScrolled(true);
+                }}
               >
-                {busy ? 'Saving…' : 'Accept & Continue'}
-              </button>
+                <TermsContent />
+              </div>
 
-              <div className="text-xs text-slate-500">
-                Version: v1
+              <div className="bg-white rounded-2xl shadow-xl p-4">
+                <label className="flex gap-3 items-start text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={termsTick}
+                    onChange={(e) => setTermsTick(e.target.checked)}
+                  />
+                  <span>I have read and agree to the Terms &amp; Conditions.</span>
+                </label>
+
+                {err && <div className="text-sm text-red-600 mt-2">{err}</div>}
+
+                <button
+                  type="button"
+                  disabled={busy || !termsTick || !termsScrolled}
+                  className="btn btn-primary w-full mt-3"
+                  onClick={acceptTerms}
+                >
+                  {busy ? 'Saving…' : 'Accept & Continue'}
+                </button>
+
+                <div className="text-xs text-slate-500 mt-2">Version: v1</div>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {/* Site data consent (invites) */}
+      {!needsTerms && inviteConsent ? (
+        <div className="fixed inset-0 z-[9998] flex items-start justify-center bg-black/60 overflow-auto pt-6 pb-24 p-3">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-5">
+            <div className="text-lg font-semibold">Site data consent</div>
+            <div className="text-sm text-slate-600 mt-1">
+              Before joining <b>{inviteConsent.site}</b>, please review how site-linked data is shared.
+            </div>
+
+            <div
+              ref={inviteConsentBoxRef}
+              className="mt-4 border rounded-2xl p-4 bg-slate-50"
+              style={{ maxHeight: 320, overflowY: 'auto' }}
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                if (el.scrollTop + el.clientHeight >= el.scrollHeight - 6) setInviteConsentScrolled(true);
+              }}
+            >
+              <div className="space-y-3 text-sm text-slate-800">
+                <div className="font-semibold">What changes when you join a site</div>
+                <ul className="list-disc pl-5 space-y-2">
+                  <li>
+                    Your <b>validated</b> shift data for that site may be visible to site admins/validators for reporting, reconciliation,
+                    and Power BI dashboards.
+                  </li>
+                  <li>
+                    You should only record/submit information you are authorised to share under employer/site policies.
+                  </li>
+                  <li>You can leave a site at any time from Settings.</li>
+                </ul>
+                <div className="text-xs opacity-70 pt-2">Scroll to the bottom to enable consent.</div>
+              </div>
+            </div>
+
+            <label className="flex gap-3 items-start text-sm mt-4">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={inviteConsentTick}
+                onChange={(e) => setInviteConsentTick(e.target.checked)}
+              />
+              <span>
+                I understand and consent to site-linked data visibility for <b>{inviteConsent.site}</b>.
+              </span>
+            </label>
+
+            {err && <div className="text-sm text-red-600 mt-2">{err}</div>}
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="btn btn-outline" onClick={() => setInviteConsent(null)} disabled={busy}>
+                Back
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={busy || !inviteConsentTick || !inviteConsentScrolled}
+                onClick={async () => {
+                  const c = inviteConsent;
+                  if (!c) return;
+                  setInviteConsent(null);
+                  await respondInvite(c.id, true, 'v1');
+                }}
+              >
+                {busy ? 'Working…' : 'I consent & Accept invite'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Push prompt */}
       {!needsTerms && pushPrompt && (

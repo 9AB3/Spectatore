@@ -5,6 +5,15 @@ import { getDB } from '../lib/idb';
 import { useNavigate } from 'react-router-dom';
 import useToast from '../hooks/useToast';
 import { loadEquipment, loadLocations } from '../lib/datalists';
+import HaulingIcon from '../assets/activity-icons/Hauling.png';
+import LoadingIcon from '../assets/activity-icons/Loading.png';
+import DevelopmentIcon from '../assets/activity-icons/Development.png';
+import ProductionDrillingIcon from '../assets/activity-icons/Production Drilling.png';
+import ChargingIcon from '../assets/activity-icons/Charging.png';
+import FiringIcon from '../assets/activity-icons/Firing.png';
+import BackfillingIcon from '../assets/activity-icons/Backfilling.png';
+import HoistingIcon from '../assets/activity-icons/Hoisting.png';
+
 
 type Field = { field: string; required: number; unit: string; input: string };
 type EquipRow = { id?: number; type: string; equipment_id: string };
@@ -41,6 +50,23 @@ const EQUIPMENT_ACTIVITY_MAP: Record<string, string[]> = {
   Agi: ['Development'],
   'Charge Rig': ['Charging'],
 };
+
+type ActivityTile = { key: string; label: string; img?: string };
+
+const ACTIVITY_TILES: Record<string, ActivityTile> = {
+  Hauling: { key: 'Hauling', label: 'Hauling', img: HaulingIcon },
+  Loading: { key: 'Loading', label: 'Loading', img: LoadingIcon },
+  Development: { key: 'Development', label: 'Development', img: DevelopmentIcon },
+  'Production Drilling': { key: 'Production Drilling', label: 'Production Drilling', img: ProductionDrillingIcon },
+  Charging: { key: 'Charging', label: 'Charging', img: ChargingIcon },
+  Firing: { key: 'Firing', label: 'Firing', img: FiringIcon },
+  Backfilling: { key: 'Backfilling', label: 'Backfilling', img: BackfillingIcon },
+  Hoisting: { key: 'Hoisting', label: 'Hoisting', img: HoistingIcon },
+};
+
+function tileForActivity(key: string): ActivityTile {
+  return ACTIVITY_TILES[key] || { key, label: key };
+}
 
 function parseRule(input: string) {
   const [kind, rest] = input.split('|', 2);
@@ -135,6 +161,8 @@ export default function Activity() {
   const activityKeys = Object.keys(data);
   const [activity, setActivity] = useState<string>(activityKeys[0] || '');
   const [sub, setSub] = useState<string>('');
+  const [pickerOpen, setPickerOpen] = useState<boolean>(true);
+
   const [fields, setFields] = useState<Field[]>([]);
   const [values, setValues] = useState<Record<string, any>>({});
   const [equipmentRows, setEquipmentRows] = useState<EquipRow[]>([]);
@@ -933,42 +961,159 @@ await db.add('activities', {
       .sort((a, b) => a.localeCompare(b));
   }, [equipmentRows, activity]);
 
+  const applyActivity = useCallback(
+    (next: string) => {
+      const k = String(next || '').trim();
+      if (!k) return;
+
+      setActivity(k);
+
+      // Reset hauling-only state when leaving Hauling (matches previous dropdown behavior)
+      if (k !== 'Hauling') {
+        setHaulLoads([]);
+        setHaulDefaultWeight('');
+        setHaulLoadCount('');
+        setHaulSameWeight(true);
+      }
+
+      // Auto-pick a valid sub-activity
+      const nextSubKeys = Object.keys((data as any)[k] || {});
+      const nextHideSub = k === 'Hoisting' || (nextSubKeys.length === 1 && (nextSubKeys[0] === '' || nextSubKeys[0] == null));
+      if (nextHideSub) setSub('');
+      else setSub(String(nextSubKeys[0] || ''));
+
+      // Persist for Quick Actions
+      try {
+        localStorage.setItem(
+          'spectatore-last-activity-state',
+          JSON.stringify({ activity: k, sub: nextHideSub ? '' : String(nextSubKeys[0] || '') }),
+        );
+      } catch {}
+
+      setPickerOpen(false);
+    },
+    [setActivity, setSub, setPickerOpen, setHaulLoads, setHaulDefaultWeight, setHaulLoadCount, setHaulSameWeight],
+  );
+
+
   return (
     <div className="min-h-screen flex flex-col">
       <Toast />
       <Header />
       <div className="p-4 max-w-2xl mx-auto w-full flex-1">
         {/* ✅ ONE CARD: main form + bolts inside for Dev GS/Rehab */}
-        <div className="card space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium">Activity</label>
-              <select className="input" value={activity} onChange={(e) => {
-                      const next = e.target.value;
-                      setActivity(next);
-                      if (next !== 'Hauling') {
-                        setHaulLoads([]);
-                        setHaulDefaultWeight('');
-                        setHaulLoadCount('');
-                        setHaulSameWeight(true);
-                      }
-                    }}>
-                {activityKeys.map((k) => (
-                  <option key={k}>{k}</option>
-                ))}
-              </select>
+        {pickerOpen ? (
+          <div className="card">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-xs tv-muted font-semibold tracking-wide">NEW ACTIVITY</div>
+                <div className="text-2xl font-extrabold">Pick what you’re doing</div>
+                <div className="mt-1 text-sm tv-muted">Swipe/scroll to browse. Tap a tile to start.</div>
+              </div>
+              <button
+                type="button"
+                className="tv-pill"
+                onClick={() => {
+                  if (activity) nav('/Shift');
+                  else nav('/Shift');
+                }}
+              >
+                {activity ? 'Close' : 'Back'}
+              </button>
             </div>
-            {!hideSub && (<div>
-              <label className="block text-sm font-medium">Sub-Activity</label>
-              <select className="input" value={sub} onChange={(e) => setSub(e.target.value)}>
-                {subKeys.map((k) => (
-                  <option key={k}>{k}</option>
-                ))}
-              </select>
-            </div>)}
-          </div>
 
-          <div className="space-y-3">
+            {/* Quick Actions */}
+            {(() => {
+              let last: any = null;
+              try {
+                last = JSON.parse(localStorage.getItem('spectatore-last-activity-state') || 'null');
+              } catch {}
+              if (!last?.activity) return null;
+              const t = tileForActivity(String(last.activity));
+              const desired = String(last.sub || '');
+              return (
+                <div className="mt-5">
+                  <div className="text-xs tv-muted font-semibold tracking-wide mb-2">QUICK ACTIONS</div>
+                  <div className="flex gap-4 overflow-x-auto pb-2">
+                    <button
+                      type="button"
+                      className="tv-tile min-w-[220px] md:min-w-[260px] text-left hover:brightness-[1.03]"
+                      onClick={() => {
+                        applyActivity(String(last.activity));
+                        if (desired) window.setTimeout(() => setSub(desired), 0);
+                      }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-16 h-16 rounded-2xl tv-surface/10 border border-white/15 flex items-center justify-center overflow-hidden">
+                          {t.img ? <img src={t.img} alt={t.label} className="w-full h-full object-contain p-2" /> : null}
+                        </div>
+                        <div>
+                          <div className="text-sm tv-muted font-semibold">Last used</div>
+                          <div className="text-lg font-extrabold">{t.label}</div>
+                          {desired ? <div className="text-xs tv-muted mt-1">{desired}</div> : null}
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Activity tiles */}
+            <div className="mt-6">
+              <div className="text-xs tv-muted font-semibold tracking-wide mb-2">ACTIVITIES</div>
+              <div className="flex gap-4 overflow-x-auto pb-2">
+                {activityKeys.map((k) => {
+                  const t = tileForActivity(k);
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      className="tv-tile min-w-[220px] md:min-w-[260px] text-left hover:brightness-[1.03]"
+                      onClick={() => applyActivity(k)}
+                    >
+                      <div className="flex flex-col items-center text-center gap-3">
+                        <div className="w-full h-32 md:h-36 rounded-2xl tv-surface/10 border border-white/15 flex items-center justify-center overflow-hidden">
+                          {t.img ? (
+                            <img src={t.img} alt={t.label} className="w-full h-full object-contain p-4" />
+                          ) : (
+                            <div className="tv-muted text-sm">No image</div>
+                          )}
+                        </div>
+                        <div className="w-full">
+                          <div className="text-lg font-extrabold leading-tight">{t.label}</div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="card space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-xs tv-muted font-semibold tracking-wide">ACTIVITY</div>
+                <div className="text-lg font-extrabold">{activity}</div>
+              </div>
+              <button type="button" className="tv-pill" onClick={() => setPickerOpen(true)}>
+                Change
+              </button>
+            </div>
+
+            {!hideSub && (
+              <div>
+                <label className="block text-sm font-medium">Sub-Activity</label>
+                <select className="input" value={sub} onChange={(e) => setSub(e.target.value)}>
+                  {subKeys.map((k) => (
+                    <option key={k}>{k}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="space-y-3">
             {fields.map((f, idx) => {
               const rule = parseRule(f.input);
               const err = errors[f.field];
@@ -1363,9 +1508,9 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
             </div>
           )}
         </div>
+        )}
       </div>
 
-      
       {countModal ? (
         <div className="fixed inset-0 z-[1000] bg-black/85" onPointerDown={(e) => {
           // Keep a focus target active so bluetooth key events are captured.
@@ -2281,6 +2426,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
         </div>
       ) : null}
 
+      {!pickerOpen && (
       <div className="sticky bottom-0 left-0 right-0 tv-surface tv-border border-t">
         <div className="max-w-2xl mx-auto p-4 flex gap-2">
           <button className="btn btn-primary flex-1" onClick={finishTask} disabled={!canFinish}>
@@ -2291,6 +2437,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
           </a>
         </div>
       </div>
+      )}
     </div>
   );
 }

@@ -195,11 +195,100 @@ body::before {
   gap: 14px;
   overflow-x: auto;
   padding-bottom: 6px;
-  scroll-snap-type: x mandatory;
+  /* smoother horizontal feel on iOS (like trend cards) */
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
 }
 
 .tv-row > * {
   scroll-snap-align: start;
+}
+
+/*
+ * New: centered snap tile rows (used for metric selector + crew tiles)
+ * Ensures the first/last tile can sit perfectly centered (no awkward edges).
+ */
+.tv-tileRow {
+  display: flex;
+  gap: var(--tileGap, 14px);
+  overflow-x: auto;
+  padding-top: 2px;
+  padding-bottom: 10px;
+  /* Match the free-scrolling feel of the You vs You “Trend cards” row */
+  padding-left: 0;
+  padding-right: 0;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: none;
+}
+
+.tv-tileRowItem {
+  flex: 0 0 var(--tileW, 220px);
+  scroll-snap-align: none;
+}
+
+
+/* Metric selector tiles (You vs Crew) */
+.metricTile {
+  min-height: 100px;
+  background: rgba(0, 0, 0, 0.02);
+  border-color: rgba(148, 163, 184, 0.35);
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.metricTile--active {
+  border-color: rgba(10, 132, 255, 0.9);
+  box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.22);
+  background: rgba(10, 132, 255, 0.10);
+}
+
+@media (max-width: 640px) {
+  /* Stronger selection cue on phones */
+  .metricTile--active {
+    background: rgba(10, 132, 255, 0.18);
+    box-shadow:
+      0 0 0 2px rgba(10, 132, 255, 0.28),
+      0 8px 22px rgba(10, 132, 255, 0.10);
+  }
+}
+
+
+/* Calendar heatmap: month-by-month swipe */
+.heatmapMonthScroller {
+  display: flex;
+  overflow-x: auto;
+  gap: 12px;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  padding-bottom: 6px;
+}
+
+.heatmapMonthSnap {
+  flex: 0 0 100%;
+  scroll-snap-align: start;
+}
+
+.heatmapMonthPane {
+  width: 100%;
+}
+
+/* Prevent large numbers from overflowing compact KPI stacks */
+.stackRow {
+  min-width: 0;
+}
+
+.stackVal {
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+  /* never hide values — we format + clamp instead */
+  overflow: visible;
+  text-overflow: clip;
+  font-size: clamp(16px, 4.6vw, 22px);
 }
 
 /* Inputs */
@@ -591,4 +680,68 @@ a.link {
 
 @media (max-width: 420px) {
   .startup-splash__wordmark { font-size: 28px; }
+}
+
+
+/* --- You vs Crew (Apple TV tiles) refinements --- */
+.tv-date-pill{
+  width: 100%;
+  text-align: center;
+  padding: 10px 12px;
+  border-radius: 9999px;
+  border: 1px solid var(--hairline);
+  background: var(--input);
+  color: var(--text);
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  white-space: nowrap;
+}
+
+/* Compact crew stacks inside tiles */
+.stackCard{
+  border-radius: 18px;
+  padding: 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.stackLabel{
+  font-size: 12px;
+  opacity: .75;
+  margin-bottom: 8px;
+}
+
+.stackRow{
+  display:flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.stackCap{
+  font-size: 12px;
+  opacity: .7;
+}
+
+.stackVal{
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: .2px;
+}
+
+.stackDelta{
+  margin: 8px 0;
+  padding: 6px 8px;
+  border-radius: 12px;
+  text-align:center;
+  font-weight: 900;
+  font-size: 14px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+@media (max-width: 420px){
+  .tv-date-pill{ font-size: 14px; padding: 9px 10px; }
+  .stackVal{ font-size: 18px; }
 }

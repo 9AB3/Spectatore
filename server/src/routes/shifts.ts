@@ -17,6 +17,8 @@ const MILESTONE_METRICS = [
   'Production drillm',
   'Primary Production buckets',
   'Primary Development buckets',
+  'Backfill volume',
+  'Backfill buckets',
   'Tonnes charged',
   'Headings Fired',
   'Tonnes Fired',
@@ -78,6 +80,9 @@ function computeMilestoneMetricMapForShift(
     out['Production drillm'] = n(flat['Metres Drilled'] || 0) + n(flat['Cleanouts Drilled'] || 0) + n(flat['Redrills'] || 0);
     out['Primary Production buckets'] = n(flat['Stope to Truck'] || 0) + n(flat['Stope to SP'] || 0);
     out['Primary Development buckets'] = n(flat['Heading to Truck'] || 0) + n(flat['Heading to SP'] || 0);
+    // Backfilling (Surface/Underground)
+    out['Backfill volume'] = n(shiftRow?.totals_json?.Backfilling?.Surface?.Volume ?? flat['Volume'] ?? 0);
+    out['Backfill buckets'] = n(shiftRow?.totals_json?.Backfilling?.Underground?.Buckets ?? flat['Buckets'] ?? 0);
     out['Tonnes charged'] = n(flat['Charge kg'] || 0) / 1000;
     out['Headings Fired'] = n(flat['Headings Fired'] || 0);
     out['Tonnes Fired'] = n(flat['Tonnes Fired'] || 0);

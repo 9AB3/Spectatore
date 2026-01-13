@@ -60,6 +60,8 @@ const MILESTONE_METRICS = [
   'Production drillm',
   'Primary Production buckets',
   'Primary Development buckets',
+  'Backfill volume',
+  'Backfill buckets',
   'Tonnes charged',
   'Headings Fired',
   'Tonnes Fired',
@@ -132,6 +134,9 @@ function computeMilestoneMetricMapForShift(
     out['Production drillm'] = n(flat['Metres Drilled'] || 0) + n(flat['Cleanouts Drilled'] || 0) + n(flat['Redrills'] || 0);
     out['Primary Production buckets'] = n(flat['Stope to Truck'] || 0) + n(flat['Stope to SP'] || 0);
     out['Primary Development buckets'] = n(flat['Heading to Truck'] || 0) + n(flat['Heading to SP'] || 0);
+    // Backfilling is split by sub-activity, so prefer the nested totals_json shape when available.
+    out['Backfill volume'] = n(shiftRow?.totals_json?.Backfilling?.Surface?.Volume ?? flat['Volume'] ?? 0);
+    out['Backfill buckets'] = n(shiftRow?.totals_json?.Backfilling?.Underground?.Buckets ?? flat['Buckets'] ?? 0);
     out['Tonnes charged'] = n(flat['Charge kg'] || 0) / 1000;
     out['Tonnes Fired'] = n(flat['Tonnes Fired'] || 0);
     out['Ore tonnes hoisted'] = n(flat['Ore Tonnes'] || 0);
@@ -236,6 +241,9 @@ function computeMilestoneMetricMapForShift(
   out['Production drillm'] = prodDrillm;
   out['Primary Production buckets'] = primProdBuckets;
   out['Primary Development buckets'] = primDevBuckets;
+  // Backfilling metrics live under totals_json by sub-activity.
+  out['Backfill volume'] = n(shiftRow?.totals_json?.Backfilling?.Surface?.Volume ?? 0);
+  out['Backfill buckets'] = n(shiftRow?.totals_json?.Backfilling?.Underground?.Buckets ?? 0);
   out['Tonnes charged'] = chargeKg / 1000;
   out['Headings Fired'] = devChargeLocs.size;
   out['Tonnes Fired'] = tonnesFired;
@@ -625,6 +633,34 @@ router.get('/network', authMiddleware, async (req: any, res: any) => {
       return { daily, best };
     }
 
+
+
+    function avgNonZero(values: number[]) {
+      const vals = values.filter((v) => Number.isFinite(v) && v > 0);
+      if (!vals.length) return 0;
+      return vals.reduce((acc, v) => acc + v, 0) / vals.length;
+    }
+
+    // All-time best (PB) for this metric (best single-day total across all shifts).
+    // Uses totals_json only (fast).
+    async function loadAllTimeBest(userId: number): Promise<{ total: number; date: string }> {
+      const shiftR = await pool.query(
+        `SELECT date::text as date, totals_json
+           FROM shifts
+          WHERE user_id=$1
+          ORDER BY date ASC`,
+        [userId],
+      );
+      const rows = shiftR.rows || [];
+      let best = { total: 0, date: rows?.[0]?.date ? String(rows[0].date) : '' };
+      for (const r of rows) {
+        const mm = computeMilestoneMetricMapForShift({ totals_json: asObj(r.totals_json) }, undefined as any);
+        const v = n((mm as any)[metric] || 0);
+        const d = String(r.date || '');
+        if (v > best.total) best = { total: v, date: d };
+      }
+      return best;
+    }
     const user = await loadDaily(authUserId);
 
     const crewDailyList: Array<{ id: number; name: string; email: string; daily: Map<string, number>; best: any }> = [];
@@ -632,6 +668,39 @@ router.get('/network', authMiddleware, async (req: any, res: any) => {
       const uid = Number(m.id);
       const d = await loadDaily(uid);
       crewDailyList.push({ id: uid, name: String(m.name || ''), email: String(m.email || ''), daily: d.daily, best: d.best });
+    }
+
+
+    const userAllTimeBest = await loadAllTimeBest(authUserId);
+    const userPeriodAvg = avgNonZero(Array.from(user.daily.values()).map((v) => n(v)));
+
+    // Precompute crew all-time PBs and period avgs for tiles
+    const crewTiles = [] as Array<{
+      id: number;
+      name: string;
+      email: string;
+      theirAllTimeBest: { total: number; date: string };
+      theirPeriodAvg: number;
+      yourAllTimeBest: { total: number; date: string };
+      yourPeriodAvg: number;
+      deltaPct: number;
+    }>;
+
+    for (const cm of crewDailyList) {
+      const theirAllTimeBest = await loadAllTimeBest(cm.id);
+      const theirPeriodAvg = avgNonZero(Array.from(cm.daily.values()).map((v) => n(v)));
+      const base = theirPeriodAvg;
+      const deltaPct = base > 0 ? ((userPeriodAvg - base) / base) * 100 : userPeriodAvg > 0 ? 100 : 0;
+      crewTiles.push({
+        id: cm.id,
+        name: cm.name,
+        email: cm.email,
+        theirAllTimeBest,
+        theirPeriodAvg,
+        yourAllTimeBest: userAllTimeBest,
+        yourPeriodAvg: userPeriodAvg,
+        deltaPct,
+      });
     }
 
     // Optional: compare against a specific crew mate (must be an accepted connection)
@@ -688,6 +757,9 @@ router.get('/network', authMiddleware, async (req: any, res: any) => {
 
     return res.json({
       metric,
+      userAllTimeBest,
+      userPeriodAvg,
+      crewTiles,
       members: crewDailyList.map((x) => ({ id: x.id, name: x.name, email: x.email })),
       userBest: user.best,
       networkBest,

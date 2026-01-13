@@ -54,7 +54,8 @@ export default function SiteAdminPowerBiTokens() {
     if (!ok) throw new Error(me?.error || 'Not authorized');
     const sites = Array.isArray(me?.sites) ? me.sites : [];
     const superAdmin = !!me?.is_super || sites.includes('*');
-    const manage = !!me?.can_manage || superAdmin;
+    // Power BI token management is super-admin only (users.is_admin=true).
+    const manage = superAdmin;
     setIsSuper(superAdmin);
     setCanManage(manage);
     setSiteRows(Array.isArray(me?.site_rows) ? me.site_rows : []);

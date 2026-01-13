@@ -1,5 +1,5 @@
 import Header from '../components/Header';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import useToast from '../hooks/useToast';
@@ -50,6 +50,27 @@ export default function Settings() {
   const [showAddSite, setShowAddSite] = useState(false);
   const [joinSiteId, setJoinSiteId] = useState<number>(0);
   const [joinRole, setJoinRole] = useState<'member' | 'validator' | 'admin'>('member');
+  const [siteConsent, setSiteConsent] = useState<{ site_id: number; site: string; role: 'member' | 'validator' | 'admin' } | null>(null);
+  const [siteConsentTick, setSiteConsentTick] = useState(false);
+  const [siteConsentScrolled, setSiteConsentScrolled] = useState(false);
+  const siteConsentBoxRef = useRef<HTMLDivElement | null>(null);
+
+  // Ensure scroll-to-bottom gating doesn't deadlock when content doesn't overflow.
+  useEffect(() => {
+    if (!siteConsent) return;
+    setSiteConsentTick(false);
+    setSiteConsentScrolled(false);
+
+    const t = setTimeout(() => {
+      const el = siteConsentBoxRef.current;
+      if (!el) return;
+      const noScrollNeeded = el.scrollHeight <= el.clientHeight + 2;
+      if (noScrollNeeded) setSiteConsentScrolled(true);
+    }, 0);
+
+    return () => clearTimeout(t);
+  }, [siteConsent]);
+
   const [confirmLeave, setConfirmLeave] = useState<{ site_id: number; site: string } | null>(null);
 
   // push notifications
@@ -184,16 +205,16 @@ export default function Settings() {
     }
   }
 
-  async function requestJoin() {
+  async function requestJoinWithConsent(site_id: number, role: 'member' | 'validator' | 'admin', consentVersion = 'v1') {
     try {
-      if (!joinSiteId) {
+      if (!site_id) {
         setMsg('Please select a site');
         return;
       }
       await api('/api/user/site-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ site_id: joinSiteId, role: joinRole }),
+        body: JSON.stringify({ site_id, role, site_consent_version: consentVersion }),
       });
       await refreshMe();
       setShowAddSite(false);
@@ -206,6 +227,16 @@ export default function Settings() {
     }
   }
 
+  function beginJoinFlow() {
+    if (!joinSiteId) {
+      setMsg('Please select a site');
+      return;
+    }
+    const site = officialSites.find((s) => Number(s.id) === Number(joinSiteId))?.name || 'Site';
+    setSiteConsent({ site_id: joinSiteId, site, role: joinRole });
+    setSiteConsentTick(false);
+    setSiteConsentScrolled(false);
+  }
   async function leaveSite(site_id: number) {
     try {
       await api('/api/user/memberships/leave', {
@@ -409,6 +440,19 @@ export default function Settings() {
             {me?.email ? <div className="text-xs opacity-70">Signed in as: {me.email}</div> : null}
           </form>
         )}
+
+        <div className="card mt-4">
+          <div className="font-semibold mb-2">Legal</div>
+          <div className="text-sm opacity-80 mb-3">Terms and privacy documents.</div>
+          <div className="flex gap-2 flex-wrap">
+            <button type="button" className="btn btn-outline" onClick={() => nav('/Terms')}>
+              Terms &amp; Conditions
+            </button>
+            <button type="button" className="btn btn-outline" onClick={() => nav('/Privacy')}>
+              Privacy &amp; Data Use
+            </button>
+          </div>
+        </div>
       </div>
 
       {showAddSite ? (
@@ -450,7 +494,7 @@ export default function Settings() {
                 >
                   Cancel
                 </button>
-                <button type="button" className="btn" onClick={requestJoin} disabled={!joinSiteId}>
+                <button type="button" className="btn" onClick={beginJoinFlow} disabled={!joinSiteId}>
                   Request access
                 </button>
               </div>
@@ -458,6 +502,82 @@ export default function Settings() {
           </div>
         </div>
       ) : null}
+      {siteConsent ? (
+        <div className="fixed inset-0 z-[1001] flex items-start justify-center bg-black/60 overflow-auto pt-6 pb-24">
+          <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-2xl shadow-xl w-full max-w-2xl mx-4 p-5">
+            <div className="text-lg font-semibold">Site data consent</div>
+            <div className="text-sm text-slate-600 dark:text-slate-300 mt-1">
+              You&apos;re requesting access to <b>{siteConsent.site}</b> as <b>{siteConsent.role}</b>. Before we send the request,
+              please review how site-linked data is shared.
+            </div>
+
+            <div
+              ref={siteConsentBoxRef}
+              className="mt-4 border rounded-2xl p-4 bg-slate-50 dark:bg-slate-800/40"
+              style={{ maxHeight: 320, overflowY: 'auto' }}
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                if (el.scrollTop + el.clientHeight >= el.scrollHeight - 6) setSiteConsentScrolled(true);
+              }}
+            >
+              <div className="space-y-3 text-sm text-slate-800 dark:text-slate-200">
+                <div className="font-semibold">What changes when you join a site</div>
+                <ul className="list-disc pl-5 space-y-2">
+                  <li>
+                    Your <b>validated</b> shift data for that site may be visible to site admins/validators for reporting, reconciliation,
+                    and Power BI dashboards.
+                  </li>
+                  <li>
+                    Your personal (non-site) data remains available in personal mode, but site-linked lists (equipment/locations) may be
+                    available when the active site is selected.
+                  </li>
+                  <li>
+                    You should only record/submit information you are authorised to share under your employer/site policies.
+                  </li>
+                  <li>You can leave a site at any time from Settings.</li>
+                </ul>
+                <div className="text-xs opacity-70 pt-2">Scroll to the bottom to enable consent.</div>
+              </div>
+            </div>
+
+            <label className="flex gap-3 items-start text-sm mt-4">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={siteConsentTick}
+                onChange={(e) => setSiteConsentTick(e.target.checked)}
+              />
+              <span>
+                I understand and consent to site-linked data visibility for <b>{siteConsent.site}</b>.
+              </span>
+            </label>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setSiteConsent(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!siteConsentTick || !siteConsentScrolled}
+                onClick={async () => {
+                  const c = siteConsent;
+                  if (!c) return;
+                  await requestJoinWithConsent(c.site_id, c.role, 'v1');
+                  setSiteConsent(null);
+                }}
+              >
+                Confirm &amp; send request
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
 
       {confirmLeave ? (
         <div className="fixed inset-0 z-[1000] flex items-start justify-center bg-black/40 overflow-auto pt-6 pb-24">

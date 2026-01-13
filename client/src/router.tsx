@@ -15,6 +15,7 @@ import EquipmentLocations from './pages/EquipmentLocations';
 import YouVsYou from './pages/YouVsYou';
 import YouVsNetwork from './pages/YouVsNetwork';
 import Terms from './pages/Terms';
+import Privacy from './pages/Privacy';
 import ClearShifts from './pages/ClearShifts';
 import ClearData from './pages/ClearData';
 import AddConnection from './pages/AddConnection';
@@ -230,6 +231,7 @@ export default function App() {
         <Route path="/Feedback" element={<Feedback />} />
         <Route path="/Notifications" element={<Notifications />} />
           <Route path="/Terms" element={<Terms />} />
+        <Route path="/Privacy" element={<Privacy />} />
 
         <Route path="/ClearShifts" element={<ClearShifts />} />
         <Route path="/AddConnection" element={<AddConnection />} />

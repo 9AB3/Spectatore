@@ -138,22 +138,30 @@ export default function Main() {
               className="tv-tile min-w-[260px] w-[260px] md:w-[320px] text-left transition-transform"
               onClick={() => setOpen(true)}
             >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="text-xs" style={{ color: 'var(--muted)' }}>Shift</div>
-                  <div className="text-xl font-extrabold leading-tight">Start new shift</div>
-                  <div className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Choose date &amp; DS/NS</div>
+              
+              <div className="flex flex-col">
+                <div className="text-xs" style={{ color: 'var(--muted)' }}>Shift</div>
+                <div className="text-xl font-extrabold leading-tight mt-1">Start new shift</div>
+
+                <div className="mt-4 flex items-center justify-center">
+                  <img
+                    src="/start-shift.png"
+                    alt=""
+                    className="h-[120px] md:h-[140px] w-full object-contain select-none pointer-events-none"
+                    draggable={false}
+                  />
                 </div>
-                <div className="h-12 w-12 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(184, 135, 47, 0.16)', border: '1px solid var(--hairline)' }} aria-hidden="true">
-                  <img src="/start-shift.png" alt="" className="h-8 w-8 object-contain" />
+
+                <div className="text-sm mt-3" style={{ color: 'var(--muted)' }}>Choose date &amp; DS/NS</div>
+
+                <div className="mt-4">
+                  <div className="inline-flex items-center gap-2 text-xs font-semibold" style={{ color: 'var(--muted)' }}>
+                    <span className="h-2 w-2 rounded-full" style={{ background: 'var(--accent)' }} />
+                    Enter portal
+                  </div>
                 </div>
               </div>
-              <div className="mt-4">
-                <div className="inline-flex items-center gap-2 text-xs font-semibold" style={{ color: 'var(--muted)' }}>
-                  <span className="h-2 w-2 rounded-full" style={{ background: 'var(--accent)' }} />
-                  Enter portal
-                </div>
-              </div>
+
             </button>
 
             <button
@@ -161,22 +169,30 @@ export default function Main() {
               className="tv-tile min-w-[260px] w-[260px] md:w-[320px] text-left transition-transform"
               onClick={tagOut}
             >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="text-xs" style={{ color: 'var(--muted)' }}>Session</div>
-                  <div className="text-xl font-extrabold leading-tight">Tag out</div>
-                  <div className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Sign out of the app</div>
+              
+              <div className="flex flex-col">
+                <div className="text-xs" style={{ color: 'var(--muted)' }}>Session</div>
+                <div className="text-xl font-extrabold leading-tight mt-1">Tag out</div>
+
+                <div className="mt-4 flex items-center justify-center">
+                  <img
+                    src="/tag-out.png"
+                    alt=""
+                    className="h-[120px] md:h-[140px] w-full object-contain select-none pointer-events-none"
+                    draggable={false}
+                  />
                 </div>
-                <div className="h-12 w-12 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(10, 132, 255, 0.14)', border: '1px solid var(--hairline)' }} aria-hidden="true">
-                  <img src="/tag-out.png" alt="" className="h-8 w-8 object-contain" />
+
+                <div className="text-sm mt-3" style={{ color: 'var(--muted)' }}>Sign out of the app</div>
+
+                <div className="mt-4">
+                  <div className="inline-flex items-center gap-2 text-xs font-semibold" style={{ color: 'var(--muted)' }}>
+                    <span className="h-2 w-2 rounded-full" style={{ background: 'var(--accent-2)' }} />
+                    End session
+                  </div>
                 </div>
               </div>
-              <div className="mt-4">
-                <div className="inline-flex items-center gap-2 text-xs font-semibold" style={{ color: 'var(--muted)' }}>
-                  <span className="h-2 w-2 rounded-full" style={{ background: 'var(--accent-2)' }} />
-                  End session
-                </div>
-              </div>
+
             </button>
 
             <div className="tv-tile min-w-[260px] w-[260px] md:w-[320px]">

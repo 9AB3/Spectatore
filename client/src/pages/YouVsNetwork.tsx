@@ -1,8 +1,44 @@
 import Header from '../components/Header';
 import BottomNav from '../components/BottomNav';
+import TvTileRow from '../components/TvTileRow';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+
+
+const fmtInt = (n: number | null | undefined) =>
+  new Intl.NumberFormat('en-AU', { maximumFractionDigits: 0 }).format(Math.round(Number(n || 0)));
+
+const fmtFull = (n: number | null | undefined) =>
+  new Intl.NumberFormat('en-AU', { maximumFractionDigits: 0 }).format(Math.round(Number(n || 0)));
+
+// Compact display that never truncates (no ellipsis): 12,400 -> 12.4k, 1,250,000 -> 1.3m
+function fmtCompact(n: number | null | undefined) {
+  const v = Math.round(Number(n || 0));
+  const a = Math.abs(v);
+  const sign = v < 0 ? '-' : '';
+  if (a >= 1_000_000) {
+    const m = a / 1_000_000;
+    const dp = m < 10 ? 1 : 0;
+    return `${sign}${m.toFixed(dp)}m`;
+  }
+  if (a >= 100_000) {
+    // keep it short at high 100k+ values
+    const k = a / 1000;
+    return `${sign}${k.toFixed(0)}k`;
+  }
+  if (a >= 10_000) {
+    const k = a / 1000;
+    return `${sign}${k.toFixed(1)}k`;
+  }
+  return fmtFull(v);
+}
+
+const fmtPct0 = (n: number | null | undefined) => {
+  const v = Number(n || 0);
+  const sign = v > 0 ? '+' : '';
+  return `${sign}${Math.round(v)}%`;
+};
 
 const MILESTONE_METRICS = [
   'GS Drillm',
@@ -15,6 +51,8 @@ const MILESTONE_METRICS = [
   'Production drillm',
   'Primary Production buckets',
   'Primary Development buckets',
+  'Backfill volume',
+  'Backfill buckets',
   'Tonnes charged',
   'Headings Fired',
   'Tonnes Fired',
@@ -34,6 +72,18 @@ type NetworkResp = {
   timeline: Array<{ date: string; user: number; network_avg: number; network_best: number; compare?: number }>;
   userPeriodTotal?: number;
   crewTotals?: Array<{ id: number; name: string; email: string; total: number }>;
+  userAllTimeBest?: { total: number; date: string };
+  userPeriodAvg?: number;
+  crewTiles?: Array<{
+    id: number;
+    name: string;
+    email: string;
+    theirAllTimeBest: { total: number; date: string };
+    theirPeriodAvg: number;
+    yourAllTimeBest: { total: number; date: string };
+    yourPeriodAvg: number;
+    deltaPct: number;
+  }>;
 };
 
 function ymd(d: Date) {
@@ -55,6 +105,17 @@ function fmtYmd(ymdStr: string) {
   }
 }
 
+function fmtShortDate(ymdStr: string) {
+  // e.g. 13 Jan 26 (compact for iPhone tiles)
+  try {
+    const d = new Date(ymdStr + 'T00:00:00');
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: '2-digit' });
+  } catch {
+    return ymdStr;
+  }
+}
+
+
 function LineChart({
   rows,
   bLabel,
@@ -75,7 +136,7 @@ function LineChart({
   const pts = useMemo(() => {
     const w = 900;
     const h = 260; // <- a bit taller for x labels
-    const pad = 34; // <- more padding for x labels
+    let pad = 34; // dynamic: adjusted below for large Y-axis labels
 
     const xs = rows.map((_, i) => (rows.length <= 1 ? 0.5 : i / (rows.length - 1)));
     const rawMax = Math.max(1, ...rows.flatMap((r) => [r.a, r.b]));
@@ -88,6 +149,9 @@ function LineChart({
     const step = niceFrac * pow10;
     const maxV = Math.max(step, Math.ceil(rawMax / step) * step);
     const yTicks = [0, maxV * 0.25, maxV * 0.5, maxV * 0.75, maxV];
+
+    const maxLabelLen = Math.max(...yTicks.map((v) => fmtCompact(v).length));
+    pad = Math.max(pad, 18 + maxLabelLen * 7);
 
     const mapX = (t: number) => pad + t * (w - pad * 2);
     const mapY = (v: number) => h - pad - (v / maxV) * (h - pad * 2);
@@ -205,7 +269,7 @@ function LineChart({
                 fill="var(--chart-title)"
                 opacity={0.85}
               >
-                {v >= 100 ? Math.round(v) : v.toFixed(1)}
+                {fmtCompact(v)}
               </text>
             </g>
           );
@@ -293,9 +357,9 @@ function LineChart({
           }}
         >
           <div className="font-semibold">{fmtYmd(rows[hover.i].x)}</div>
-          <div>You: {rows[hover.i].a.toFixed(1)}</div>
+          <div>You: {fmtInt(rows[hover.i].a)}</div>
           <div>
-            {bLabel}: {rows[hover.i].b.toFixed(1)}
+            {bLabel}: {fmtInt(rows[hover.i].b)}
           </div>
         </div>
       );})() : null}
@@ -324,7 +388,7 @@ function ColumnChartDaily({
   const pts = useMemo(() => {
     const w = 900;
     const h = 260;
-    const pad = 34;
+    let pad = 34; // dynamic: adjusted below for large Y-axis labels
 
     const rawMax = Math.max(1, ...rows.flatMap((r) => [Number(r.a || 0), Number(r.b || 0)]));
 
@@ -336,6 +400,9 @@ function ColumnChartDaily({
     const step = niceFrac * pow10;
     const maxV = Math.max(step, Math.ceil(rawMax / step) * step);
     const yTicks = [0, maxV * 0.25, maxV * 0.5, maxV * 0.75, maxV];
+
+    const maxLabelLen = Math.max(...yTicks.map((v) => fmtCompact(v).length));
+    pad = Math.max(pad, 18 + maxLabelLen * 7);
 
     const mapX = (t: number) => pad + t * (w - pad * 2);
     const mapY = (v: number) => h - pad - (v / maxV) * (h - pad * 2);
@@ -378,7 +445,7 @@ function ColumnChartDaily({
   // Hover marker x coordinate (center of group)
   const hx = idx === null ? 0 : pts.mapX(pts.xs[idx]);
 
-  const fmtTick = (v: number) => (v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(1));
+  const fmtTick = (v: number) => fmtInt(v);
 
   return (
     <div ref={ref} className="w-full relative" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
@@ -521,7 +588,7 @@ function ColumnChartDaily({
         >
           <div className="font-semibold text-[color:var(--text)]">{fmtYmd(row.x)}</div>
           <div className="text-slate-700">
-            You: {Number(row.a || 0).toFixed(1)} • {bLabel}: {Number(row.b || 0).toFixed(1)}
+            You: {fmtInt(Number(row.a || 0))} • {bLabel}: {fmtInt(Number(row.b || 0))}
           </div>
         </div>
       ) : null}
@@ -632,9 +699,6 @@ export default function YouVsNetwork() {
     return name ? name : 'Crew avg';
   }, [data]);
 
-  const fmtInt = (n: number) =>
-    new Intl.NumberFormat('en-AU', { maximumFractionDigits: 0 }).format(Math.round(Number(n || 0)));
-
 
 
 
@@ -694,66 +758,61 @@ export default function YouVsNetwork() {
             </div>
           </div>
 
-          <div className="grid md:grid-cols-4 gap-3 mb-3">
-            <div>
-              <label className="block text-xs opacity-70 mb-1">From</label>
-              <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div className="tv-tile tv-hoverable p-4">
+              <div className="text-xs tv-muted mb-2">From date</div>
+              <div className="relative">
+                <div className="tv-date-pill">{fmtShortDate(from)}</div>
+                <input
+                  className="absolute inset-0 w-full h-full opacity-0"
+                  type="date"
+                  value={from}
+                  onChange={(e) => setFrom(e.target.value)}
+                  aria-label="From date"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-xs opacity-70 mb-1">To</label>
-              <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-xs opacity-70 mb-1">Metric</label>
-              <select className="input" value={metric} onChange={(e) => setMetric(e.target.value as Metric)}>
-                {MILESTONE_METRICS.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs opacity-70 mb-1">Compare to</label>
-              <select
-                className="input"
-                value={String(compareUserId)}
-                onChange={(e) => setCompareUserId(parseInt(e.target.value || '0', 10) || 0)}
-              >
-                <option value="0">Crew avg</option>
-                {(data?.members || []).map((m) => (
-                  <option key={m.id} value={String(m.id)}>
-                    {m.name || `Crew mate ${m.id}` }
-                  </option>
-                ))}
-              </select>
-              <div className="text-[11px] opacity-70 mt-1">Choose a crew mate to compare one-on-one, or leave on Crew avg.</div>
+            <div className="tv-tile tv-hoverable p-4">
+              <div className="text-xs tv-muted mb-2">To date</div>
+              <div className="relative">
+                <div className="tv-date-pill">{fmtShortDate(to)}</div>
+                <input
+                  className="absolute inset-0 w-full h-full opacity-0"
+                  type="date"
+                  value={to}
+                  onChange={(e) => setTo(e.target.value)}
+                  aria-label="To date"
+                />
+              </div>
             </div>
           </div>
 
-          <div className="flex gap-2 mb-3"><div className="flex rounded-xl border tv-border overflow-hidden">
-              <button
-                className={`px-3 py-2 text-sm ${mode === 'daily' ? 'font-semibold' : 'opacity-70'}`}
-                onClick={() => setMode('daily')}
-                type="button"
-              >
-                Daily
-              </button>
-              <button
-                className={`px-3 py-2 text-sm border-l ${mode === 'cumulative' ? 'font-semibold' : 'opacity-70'}`}
-                
-                onClick={() => setMode('cumulative')}
-                type="button"
-              >
-                Cumulative
-              </button>
-            </div>
-
-            <div className="text-sm opacity-70 flex items-center">
-              {data?.members?.length ? `${data.members.length} crew mates in network` : 'No crew mates yet'}
-            </div>
+          <div className="mb-3">
+            <div className="text-xs tv-muted mb-2">Metric</div>
+            {/* Free-scrolling row (same feel as You vs You trend cards). */}
+            <TvTileRow itemWidth={250}>
+              {MILESTONE_METRICS.map((m) => {
+                const active = metric === m;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMetric(m as Metric)}
+                    className={`metricTile w-full text-left rounded-2xl border p-4 tv-hoverable ${active ? "metricTile--active" : ""}`}
+                  >
+                    <div className="text-sm font-semibold leading-snug break-words" style={{ minHeight: 44 }}>
+                      {m}
+                    </div>
+                    <div className="text-xs tv-muted mt-1">Tap to select</div>
+                  </button>
+                );
+              })}
+            </TvTileRow>
           </div>
+
+	          <div className="text-sm opacity-70 flex items-center">
+	            {data?.members?.length ? `${data.members.length} crew mates in network` : 'No crew mates yet'}
+	          </div>
 
           {err ? (
             <div className="text-sm" style={{ color: '#b00020' }}>
@@ -765,42 +824,106 @@ export default function YouVsNetwork() {
         {/* Data cards */}
         {rows.length ? (
           <>
-            {/* Card 2: KPI strip */}
-			    <div className="card">
-              <div className="grid grid-cols-3 gap-3">
-			        {(() => {
-			          const delta = kpiSummary.a - kpiSummary.b;
-			          const deltaPos = delta >= 0;
-			          const deltaBorder = delta === 0 ? 'rgba(148,163,184,0.22)' : deltaPos ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)';
-			          const deltaText = delta === 0 ? 'rgba(148,163,184,0.95)' : deltaPos ? 'rgba(34,197,94,0.98)' : 'rgba(239,68,68,0.98)';
-			          const shell = 'p-3 rounded-2xl border bg-[rgba(10,12,16,0.35)] md:bg-transparent backdrop-blur-sm md:backdrop-blur-0 shadow-sm md:shadow-none';
-			          return (
-			            <>
-			              <div className={`${shell} border-[rgba(96,165,250,0.25)]`}>
-                  <div className="text-xs opacity-70">{bLabel}</div>
-                  <div className="text-[clamp(1.15rem,4.2vw,1.6rem)] font-semibold tabular-nums tracking-tight leading-none">{fmtInt(kpiSummary.b)}</div>
-                  <div className="text-[11px] opacity-70 mt-1">{mode === 'daily' ? 'avg / day' : 'total'}</div>
-			              </div>
-			              <div className={`${shell} border-[rgba(242,211,128,0.28)]`}>
-                  <div className="text-xs opacity-70">You</div>
-                  <div className="text-[clamp(1.15rem,4.2vw,1.6rem)] font-semibold tabular-nums tracking-tight leading-none">{fmtInt(kpiSummary.a)}</div>
-                  <div className="text-[11px] opacity-70 mt-1">{mode === 'daily' ? 'avg / day' : 'total'}</div>
-			              </div>
-			              <div className={shell} style={{ borderColor: deltaBorder }}>
-                  <div className="text-xs opacity-70">Delta</div>
-			          <div className="text-[clamp(1.15rem,4.2vw,1.6rem)] font-semibold tabular-nums tracking-tight leading-none" style={{ color: deltaText }}>
-			            {delta >= 0 ? '+' : ''}
-			            {fmtInt(delta)}
-                  </div>
-                  <div className="text-sm opacity-70">
-			            {kpiSummary.pct >= 0 ? '+' : ''}
-			            {kpiSummary.pct.toFixed(1)}%
-                  </div>
-			              </div>
-			            </>
-			          );
-			        })()}
+
+
+            {/* Card 2: crew comparison tiles */}
+            <div className="card">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm font-semibold">Crew comparison (date range)</div>
+                <div className="text-xs tv-muted">{metric}</div>
               </div>
+
+              {data?.crewTiles?.length ? (
+                <TvTileRow itemWidth={300}>
+                  {data.crewTiles.map((t) => {
+                    return (
+                      <div
+                        key={t.id}
+                        className="w-full rounded-2xl border p-4"
+                        style={{ borderColor: 'rgba(148,163,184,0.35)', background: 'rgba(0,0,0,0.02)' }}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold">{t.name || t.email}</div>
+                            <div className="text-xs tv-muted mt-1">All-time PB + avg in range</div>
+                          </div>
+                        </div>
+
+                        {(() => {
+                          const theirPB = Number(t.theirAllTimeBest?.total || 0);
+                          const yourPB = Number(t.yourAllTimeBest?.total || 0);
+                          const theirAvg = Number(t.theirPeriodAvg || 0);
+                          const yourAvg = Number(t.yourPeriodAvg || 0);
+
+                          const pct = (you: number, them: number) => (them > 0 ? ((you - them) / them) * 100 : (you > 0 ? 100 : 0));
+
+                          const pbDelta = pct(yourPB, theirPB);
+                          const avgDelta = pct(yourAvg, theirAvg);
+
+                          const colorFor = (v: number) =>
+                            v === 0
+                              ? 'rgba(148,163,184,0.9)'
+                              : v > 0
+                              ? 'rgba(34,197,94,0.98)'
+                              : 'rgba(239,68,68,0.98)';
+
+                          return (
+                            <div className="grid grid-cols-2 gap-3 mt-3">
+                              {/* PB stack */}
+                              <div className="stackCard">
+                                <div className="stackLabel">PB</div>
+
+                                <div className="stackRow">
+                                  <div className="stackCap">Their</div>
+                                  <div className="stackVal tabular-nums" title={fmtFull(theirPB)}>
+                                    {fmtCompact(theirPB)}
+                                  </div>
+                                </div>
+
+                                <div className="stackDelta tabular-nums" style={{ color: colorFor(pbDelta) }}>
+                                  {fmtPct0(pbDelta)}
+                                </div>
+
+                                <div className="stackRow">
+                                  <div className="stackCap">You</div>
+                                  <div className="stackVal tabular-nums" title={fmtFull(yourPB)}>
+                                    {fmtCompact(yourPB)}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* AVG stack */}
+                              <div className="stackCard">
+                                <div className="stackLabel">Avg (range)</div>
+
+                                <div className="stackRow">
+                                  <div className="stackCap">Their</div>
+                                  <div className="stackVal tabular-nums" title={fmtFull(theirAvg)}>
+                                    {fmtCompact(theirAvg)}
+                                  </div>
+                                </div>
+
+                                <div className="stackDelta tabular-nums" style={{ color: colorFor(avgDelta) }}>
+                                  {fmtPct0(avgDelta)}
+                                </div>
+
+                                <div className="stackRow">
+                                  <div className="stackCap">You</div>
+                                  <div className="stackVal tabular-nums" title={fmtFull(yourAvg)}>
+                                    {fmtCompact(yourAvg)}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    );
+                  })}
+                </TvTileRow>
+              ) : (
+                <div className="text-sm tv-muted">No crew connections yet — add crew mates to unlock comparisons.</div>
+              )}
             </div>
 
             {/* Card 3: crew rank */}
@@ -819,7 +942,7 @@ export default function YouVsNetwork() {
                           <span className="inline-flex items-center justify-center w-6 h-6 rounded-full mr-2" style={{ background: idx === 0 ? 'rgba(242,211,128,0.22)' : 'rgba(148,163,184,0.16)', border: '1px solid rgba(148,163,184,0.28)' }}>{idx + 1}</span>{r.label}
                           {r.kind === 'you' ? <span className="ml-2 text-xs opacity-70">(you)</span> : null}
                         </div>
-                        <div className="text-sm font-semibold">{(r.total || 0).toFixed(1)}</div>
+                        <div className="text-sm font-semibold tabular-nums">{fmtInt(r.total || 0)}</div>
                       </div>
                       <div className="h-3 rounded-xl border overflow-hidden" style={{ background: "rgba(2,6,23,0.55)", borderColor: "rgba(148,163,184,0.28)" }}>
                         <div
@@ -839,7 +962,39 @@ export default function YouVsNetwork() {
 
             {/* Card 4: chart */}
             <div className="card">
-              <div className="text-xs tv-muted mb-2">Gold = you, blue dashed = {bLabel} • {mode === 'cumulative' ? 'cumulative total' : 'daily average'}</div>
+              <div className="flex flex-wrap items-end justify-between gap-3 mb-2">
+                <div className="text-xs tv-muted">Gold = you, blue dashed = {bLabel} • {mode === 'cumulative' ? 'cumulative total' : 'daily average'}</div>
+                <div className="flex rounded-xl border tv-border overflow-hidden">
+                  <button
+                    className={`px-3 py-2 text-sm ${mode === 'daily' ? 'font-semibold' : 'opacity-70'}`}
+                    onClick={() => setMode('daily')}
+                    type="button"
+                  >
+                    Daily
+                  </button>
+                  <button
+                    className={`px-3 py-2 text-sm border-l ${mode === 'cumulative' ? 'font-semibold' : 'opacity-70'}`}
+                    onClick={() => setMode('cumulative')}
+                    type="button"
+                  >
+                    Cumulative
+                  </button>
+                </div>
+
+                <div className="min-w-[220px]">
+                  <div className="text-xs tv-muted mb-1">Compare line</div>
+                  <select
+                    className="input"
+                    value={String(compareUserId)}
+                    onChange={(e) => setCompareUserId(parseInt(e.target.value || '0', 10) || 0)}
+                  >
+                    <option value="0">Crew avg</option>
+                    {(data?.members || []).map((m) => (
+                      <option key={m.id} value={String(m.id)}>{m.name || `Crew mate ${m.id}`}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 			      {mode === 'daily' ? (
 			        <ColumnChartDaily rows={rows} bLabel={bLabel} yLabel={metric} />
 			      ) : (

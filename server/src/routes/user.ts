@@ -370,6 +370,7 @@ router.post('/site-requests', authMiddleware, async (req: any, res) => {
     const site_id = Number(req.body?.site_id || 0);
     const roleRaw = String(req.body?.role || 'member').toLowerCase();
     const role = roleRaw === 'admin' || roleRaw === 'validator' ? roleRaw : 'member';
+    const consentVersion = String(req.body?.site_consent_version || '').trim();
     if (!site_id) return res.status(400).json({ error: 'site_id required' });
 
     const siteName = await adminSitesSelectNameById(site_id);
@@ -391,12 +392,23 @@ router.post('/site-requests', authMiddleware, async (req: any, res) => {
       vals.splice(2, 0, siteName);
     }
 
+
+    if (consentVersion && mcols.has('site_consent_version')) {
+      cols.push('site_consent_version');
+      vals.push(consentVersion);
+    }
+    if (consentVersion && mcols.has('site_consent_accepted_at')) {
+      cols.push('site_consent_accepted_at');
+      // accepted_at uses now() literal in the values builder
+    }
+
     // rebuild placeholders in order
     const valueParts: string[] = [];
     let idx = 1;
     for (const c of cols) {
       if (c === 'status') valueParts.push(`'requested'`);
       else if (c === 'requested_at') valueParts.push('now()');
+      else if (c === 'site_consent_accepted_at') valueParts.push('now()');
       else {
         valueParts.push(`$${idx}`);
         idx++;
@@ -407,8 +419,21 @@ router.post('/site-requests', authMiddleware, async (req: any, res) => {
 
     // Prefer upsert if a suitable unique constraint exists. If not, fall back to delete+insert.
     try {
+      const updateSets: string[] = ["role=EXCLUDED.role", "status='requested'", 'requested_at=now()'];
+
+      if (consentVersion) {
+        if (mcols.has('site_consent_version')) {
+          updateSets.push('site_consent_version=EXCLUDED.site_consent_version');
+        }
+        if (mcols.has('site_consent_accepted_at')) {
+          updateSets.push('site_consent_accepted_at=COALESCE(EXCLUDED.site_consent_accepted_at, site_memberships.site_consent_accepted_at)');
+        }
+      }
+
       await pool.query(
-        `${insertSql}\n       ON CONFLICT (user_id, site_id)\n       DO UPDATE SET role=EXCLUDED.role, status='requested', requested_at=now()`,
+        `${insertSql}
+       ON CONFLICT (user_id, site_id)
+       DO UPDATE SET ${updateSets.join(', ')}`,
         vals,
       );
     } catch (e: any) {
@@ -625,6 +650,8 @@ router.post('/site-invites/respond', authMiddleware, async (req: any, res) => {
     const user_id = req.user_id;
     const membership_id = Number(req.body?.membership_id || 0);
     const accept = !!req.body?.accept;
+    const consentVersion = String(req.body?.site_consent_version || '').trim();
+
     if (!membership_id) return res.status(400).json({ ok: false, error: 'missing membership_id' });
 
     const m = await pool.query(
@@ -641,12 +668,43 @@ router.post('/site-invites/respond', authMiddleware, async (req: any, res) => {
     }
 
     if (accept) {
-      await pool.query(
-        `UPDATE site_memberships
-            SET status='active', approved_at=NOW(), approved_by=NULL
-          WHERE id=$1 AND user_id=$2`,
-        [membership_id, user_id],
-      );
+      const cols = await tableColumns('site_memberships');
+      const sets: string[] = ["status='active'", 'approved_at=NOW()', 'approved_by=NULL'];
+      const params: any[] = [membership_id, user_id];
+      let pidx = 3;
+
+      if (consentVersion) {
+        if (cols.has('site_consent_accepted_at')) {
+          sets.push('site_consent_accepted_at = COALESCE(site_consent_accepted_at, NOW())');
+        }
+        if (cols.has('site_consent_version')) {
+          sets.push(`site_consent_version = COALESCE(site_consent_version, $${pidx})`);
+          params.push(consentVersion);
+          pidx++;
+        }
+      }
+
+      try {
+        await pool.query(
+          `UPDATE site_memberships
+              SET ${sets.join(', ')}
+            WHERE id=$1 AND user_id=$2`,
+          params,
+        );
+      } catch (e: any) {
+        if (String(e?.code) === '42703') {
+          // older schema without consent columns
+          await pool.query(
+            `UPDATE site_memberships
+                SET status='active', approved_at=NOW(), approved_by=NULL
+              WHERE id=$1 AND user_id=$2`,
+            [membership_id, user_id],
+          );
+        } else {
+          throw e;
+        }
+      }
+
       return res.json({ ok: true, status: 'active' });
     }
 

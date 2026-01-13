@@ -119,6 +119,33 @@ function n2(v: any) {
   return Number.isFinite(x) ? x : 0;
 }
 
+// Number formatting helpers (module-scope so chart helpers can use them)
+const fmtInt = (n: number | null | undefined) =>
+  new Intl.NumberFormat('en-AU', { maximumFractionDigits: 0 }).format(Math.round(Number(n || 0)));
+
+// Compact display for axis labels: 12,400 -> 12.4k, 1,250,000 -> 1.3m
+function fmtCompact(n: number | null | undefined) {
+  const v = Math.round(Number(n || 0));
+  const a = Math.abs(v);
+  const sign = v < 0 ? '-' : '';
+  if (a >= 1_000_000) {
+    const m = a / 1_000_000;
+    const dp = m < 10 ? 1 : 0;
+    return `${sign}${m.toFixed(dp)}m`;
+  }
+  if (a >= 100_000) {
+    const k = a / 1000;
+    return `${sign}${k.toFixed(0)}k`;
+  }
+  if (a >= 10_000) {
+    const k = a / 1000;
+    return `${sign}${k.toFixed(1)}k`;
+  }
+  return fmtInt(v);
+}
+
+
+
 // ---- Development helpers ----
 function devBolts(payloadsAll: any[]): number {
   let sum = 0;
@@ -167,6 +194,29 @@ function headingsBored(payloadsAll: any[]): number {
     locs.push(locOf(p0));
   }
   return uniqCount(locs);
+}
+
+// ---- Backfilling helpers ----
+function backfillVolume(payloadsAll: any[]): number {
+  let sum = 0;
+  for (const p0 of payloadsAll || []) {
+    if (actOf(p0) !== 'Backfilling') continue;
+    if (subOf(p0) !== 'Surface') continue;
+    const v = vOf(p0);
+    sum += n2(v['Volume']);
+  }
+  return sum;
+}
+
+function backfillBuckets(payloadsAll: any[]): number {
+  let sum = 0;
+  for (const p0 of payloadsAll || []) {
+    if (actOf(p0) !== 'Backfilling') continue;
+    if (subOf(p0) !== 'Underground') continue;
+    const v = vOf(p0);
+    sum += n2(v['Buckets']);
+  }
+  return sum;
 }
 function prodDrillmFromPayloads(payloadsAll: any[]): number {
   let sum = 0;
@@ -600,7 +650,7 @@ function ColumnChart({
   const pts = useMemo(() => {
     const w = 900;
     const h = 260;
-    const pad = 34;
+    let pad = 34; // dynamic: adjusted below for large Y-axis labels
 
     const xs = points.map((p) => Number(p.value || 0));
     const rawMax = Math.max(1, ...xs);
@@ -613,6 +663,9 @@ function ColumnChart({
     const step = niceFrac * pow10;
     const maxV = Math.max(step, Math.ceil(rawMax / step) * step);
     const yTicks = [0, maxV * 0.25, maxV * 0.5, maxV * 0.75, maxV];
+
+    const maxLabelLen = Math.max(...yTicks.map((v) => fmtCompact(v).length));
+    pad = Math.max(pad, 18 + maxLabelLen * 7);
 
     const ts = points.map((_, i) => (points.length <= 1 ? 0.5 : i / (points.length - 1)));
     const mapX = (t: number) => pad + t * (w - pad * 2);
@@ -653,7 +706,7 @@ function ColumnChart({
   const hx = idx === null ? 0 : pts.mapX(pts.ts[idx]);
   const hy = idx === null ? 0 : pts.mapY(Number(points[idx]?.value || 0));
 
-  const fmtTick = (v: number) => (v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(1));
+  const fmtTick = (v: number) => fmtCompact(v);
 
   return (
     <div ref={ref} className="w-full relative" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
@@ -800,78 +853,169 @@ function HeatmapMonth({
   selectedDate: string | null;
   onSelect: (d: string) => void;
 }) {
-  // current month view (simple + fast)
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const first = new Date(y, m, 1);
-  const startDow = first.getDay();
-  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
 
-  const byDate: Record<string, number> = {};
-  for (const p of points) byDate[p.date] = p.value;
+  // Build a month list from available data (min -> max), then default to the latest month.
+  const months = useMemo(() => {
+    if (!points?.length) return [] as Array<{ y: number; m: number; title: string }>;
+    const ds = points
+      .map((p) => new Date(p.date + 'T00:00:00'))
+      .filter((d) => !isNaN(d.getTime()))
+      .sort((a, b) => a.getTime() - b.getTime());
 
-  const monthDates: string[] = [];
-  for (let d = 1; d <= daysInMonth; d++) {
-    monthDates.push(ymd(new Date(y, m, d)));
+    const min = ds[0];
+    const max = ds[ds.length - 1];
+    const out: Array<{ y: number; m: number; title: string }> = [];
+
+    let cy = min.getFullYear();
+    let cm = min.getMonth();
+    const endY = max.getFullYear();
+    const endM = max.getMonth();
+
+    while (cy < endY || (cy === endY && cm <= endM)) {
+      const title = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(new Date(cy, cm, 1));
+      out.push({ y: cy, m: cm, title });
+      cm++;
+      if (cm > 11) {
+        cm = 0;
+        cy++;
+      }
+    }
+    return out;
+  }, [points]);
+
+  const [monthIdx, setMonthIdx] = useState<number>(() => (months.length ? months.length - 1 : 0));
+
+  // Keep index valid if months change
+  useEffect(() => {
+    if (!months.length) return;
+    setMonthIdx((i) => Math.max(0, Math.min(months.length - 1, i || months.length - 1)));
+  }, [months.length]);
+
+  // Scroll to the selected month on mount / when monthIdx changes (snap container will do the rest).
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const child = el.children.item(monthIdx) as HTMLElement | null;
+    if (!child) return;
+    el.scrollTo({ left: child.offsetLeft, behavior: 'smooth' });
+  }, [monthIdx]);
+
+  const byDate: Record<string, number> = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const p of points || []) m[p.date] = Number(p.value || 0);
+    return m;
+  }, [points]);
+
+  function renderMonth(y: number, m: number) {
+    const first = new Date(y, m, 1);
+    const startDow = first.getDay();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+
+    const monthDates: string[] = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      monthDates.push(ymd(new Date(y, m, d)));
+    }
+
+    const vals = monthDates.map((d) => byDate[d] || 0);
+    const max = Math.max(1, ...vals);
+
+    const cells: Array<string | null> = [];
+    for (let i = 0; i < startDow; i++) cells.push(null);
+    for (const d of monthDates) cells.push(d);
+    while (cells.length % 7 !== 0) cells.push(null);
+
+    return (
+      <div className="heatmapMonthPane">
+        <div className="text-sm font-semibold mb-2">{new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(new Date(y, m, 1))}</div>
+        <div className="grid grid-cols-7 gap-1">
+          {cells.map((d, i) => {
+            if (!d) return <div key={i} className="h-8 rounded-lg tv-surface-soft" />;
+            const v = byDate[d] || 0;
+            const ratio = Math.min(1, v / max);
+
+            // Higher-contrast phone-friendly palette (easier to distinguish levels)
+            const level = v <= 0 ? 0 : ratio < 0.25 ? 1 : ratio < 0.5 ? 2 : ratio < 0.75 ? 3 : 4;
+
+            const GOLD = '184,135,47';
+            const bg =
+              level === 0
+                ? 'rgba(148,163,184,0.18)'
+                : level === 1
+                  ? `rgba(${GOLD},0.22)`
+                  : level === 2
+                    ? `rgba(${GOLD},0.38)`
+                    : level === 3
+                      ? `rgba(${GOLD},0.58)`
+                      : `rgba(${GOLD},0.82)`;
+            const isSel = selectedDate === d;
+            return (
+              <button
+                key={d}
+                type="button"
+                onClick={() => onSelect(d)}
+                className="h-8 rounded-lg border"
+                style={{
+                  background: bg,
+                  borderColor: isSel ? 'var(--brand)' : 'rgba(148,163,184,0.35)',
+                  boxShadow: isSel ? '0 0 0 2px rgba(10,132,255,0.22)' : 'none',
+                }}
+                title={`${d} • ${Math.round(v)}`}
+              />
+            );
+          })}
+        </div>
+        <div className="mt-2 text-[11px] tv-muted">Swipe left/right for more months • lighter → darker = higher output (relative to month max)</div>
+      </div>
+    );
   }
 
-  const vals = monthDates.map((d) => byDate[d] || 0);
-  const max = Math.max(1, ...vals);
-
-  const cells: Array<string | null> = [];
-  for (let i = 0; i < startDow; i++) cells.push(null);
-  for (const d of monthDates) cells.push(d);
-  while (cells.length % 7 !== 0) cells.push(null);
-
-  const title = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(
-    new Date(y, m, 1),
-  );
+  if (!months.length) {
+    return <div className="text-sm tv-muted">No data yet.</div>;
+  }
 
   return (
     <div>
-      <div className="text-sm font-semibold mb-2">{title}</div>
-      <div className="grid grid-cols-7 gap-1">
-        {cells.map((d, i) => {
-          if (!d) return <div key={i} className="h-8 rounded-lg tv-surface-soft" />;
-          const v = byDate[d] || 0;
-          const ratio = Math.min(1, v / max);
-
-          // Higher-contrast phone-friendly palette (easier to distinguish levels)
-          // 0 = no output; 1..4 = increasing output buckets (relative to month max)
-          const level = v <= 0 ? 0 : ratio < 0.25 ? 1 : ratio < 0.5 ? 2 : ratio < 0.75 ? 3 : 4;
-
-          // Gold-only palette using opacity steps (phone-friendly).
-          // Brighter = higher output. Keep the hue consistent (gold), vary opacity for clarity.
-          const GOLD = '184,135,47'; // bronze/gold RGB
-          const bg =
-            level === 0
-              ? 'rgba(148,163,184,0.18)'
-              : level === 1
-                ? `rgba(${GOLD},0.22)`
-                : level === 2
-                  ? `rgba(${GOLD},0.38)`
-                  : level === 3
-                    ? `rgba(${GOLD},0.58)`
-                    : `rgba(${GOLD},0.82)`;
-          const isSel = selectedDate === d;
-          return (
-            <button
-              key={d}
-              type="button"
-              onClick={() => onSelect(d)}
-              className="h-8 rounded-lg border"
-              style={{
-                background: bg,
-                borderColor: isSel ? 'var(--brand)' : 'rgba(148,163,184,0.35)',
-                boxShadow: isSel ? '0 0 0 2px rgba(10,132,255,0.22)' : 'none',
-              }}
-              title={`${d} • ${Math.round(v)}`}
-            />
-          );
-        })}
+      <div className="flex items-center justify-between mb-2">
+        <button
+          type="button"
+          className="px-3 py-2 rounded-xl border tv-border text-sm"
+          onClick={() => setMonthIdx((i) => Math.max(0, i - 1))}
+          disabled={monthIdx <= 0}
+          aria-label="Previous month"
+          style={{ opacity: monthIdx <= 0 ? 0.45 : 1 }}
+        >
+          ‹
+        </button>
+        <div className="text-xs tv-muted">{months[monthIdx]?.title}</div>
+        <button
+          type="button"
+          className="px-3 py-2 rounded-xl border tv-border text-sm"
+          onClick={() => setMonthIdx((i) => Math.min(months.length - 1, i + 1))}
+          disabled={monthIdx >= months.length - 1}
+          aria-label="Next month"
+          style={{ opacity: monthIdx >= months.length - 1 ? 0.45 : 1 }}
+        >
+          ›
+        </button>
       </div>
-      <div className="mt-2 text-[11px] tv-muted">Lighter → darker = higher output (relative to your month max)</div>
+
+      <div
+        ref={scrollerRef}
+        className="heatmapMonthScroller"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          const w = el.clientWidth || 1;
+          const i = Math.round(el.scrollLeft / w);
+          if (i !== monthIdx) setMonthIdx(Math.max(0, Math.min(months.length - 1, i)));
+        }}
+      >
+        {months.map((mm) => (
+          <div key={`${mm.y}-${mm.m}`} className="heatmapMonthSnap">
+            {renderMonth(mm.y, mm.m)}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1036,6 +1180,18 @@ export default function YouVsYou() {
           title: 'Dev buckets',
           unit: 'ea',
           get: (r: ShiftRow) => sumMetric(r.totals_json, 'loading', 'Heading to Truck') + sumMetric(r.totals_json, 'loading', 'Heading to SP'),
+        },
+        {
+          id: 'backfill_volume',
+          title: 'Backfill volume',
+          unit: 'm³',
+          get: (r: ShiftRow) => backfillVolume(payloads(r)),
+        },
+        {
+          id: 'backfill_buckets',
+          title: 'Backfill buckets',
+          unit: 'ea',
+          get: (r: ShiftRow) => backfillBuckets(payloads(r)),
         },
         {
           id: 'hoist_tonnes',
@@ -1292,7 +1448,7 @@ export default function YouVsYou() {
               const active = t.id === selectedId;
               const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '▬';
               const col = dir === 'up' ? 'var(--ok)' : dir === 'down' ? 'var(--warn)' : '#64748b';
-              const headline = t.id === 'shifts' ? `${Math.round(cur)} ${t.unit}` : `${Math.round(cur)} ${t.unit} / shift`;
+              const headline = t.id === 'shifts' ? `${fmtInt(cur)} ${t.unit}` : `${fmtInt(cur)} ${t.unit} / shift`;
               const sub = pct
                 ? `${arrow} ${Math.abs(pct).toFixed(0)}% vs prev 30`
                 : `▬ 0% vs prev 30`;
