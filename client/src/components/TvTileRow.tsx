@@ -19,9 +19,7 @@ export default function TvTileRow({ itemWidth = 220, gap = 14, className = '', c
   const styleVars = useMemo(
     () =>
       ({
-        // @ts-expect-error CSS custom props
         '--tileW': `${itemWidth}px`,
-        // @ts-expect-error CSS custom props
         '--tileGap': `${gap}px`,
       }) as React.CSSProperties,
     [itemWidth, gap],
