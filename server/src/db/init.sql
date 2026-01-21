@@ -51,7 +51,20 @@ CREATE TABLE IF NOT EXISTS user_work_site_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_work_site_history_user ON user_work_site_history(user_id);
-CREATE INDEX IF NOT EXISTS idx_user_work_site_history_site ON user_work_site_history(work_site_id);
+-- NOTE: When upgrading an existing DB, older tables may not yet have work_site_id.
+-- Creating an index on a missing column will abort the whole init script.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'user_work_site_history'
+      AND column_name = 'work_site_id'
+  ) THEN
+    CREATE INDEX IF NOT EXISTS idx_user_work_site_history_site ON user_work_site_history(work_site_id);
+  END IF;
+END $$;
 
 
 CREATE TABLE IF NOT EXISTS connections (
@@ -228,7 +241,18 @@ CREATE INDEX IF NOT EXISTS idx_shifts_user_date ON shifts(user_id, date);
 ALTER TABLE shifts ADD COLUMN IF NOT EXISTS admin_site_id INT;
 
 CREATE INDEX IF NOT EXISTS idx_shifts_admin_site_id ON shifts(admin_site_id);
-CREATE INDEX IF NOT EXISTS idx_shifts_work_site_id ON shifts(work_site_id);
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'shifts'
+      AND column_name = 'work_site_id'
+  ) THEN
+    CREATE INDEX IF NOT EXISTS idx_shifts_work_site_id ON shifts(work_site_id);
+  END IF;
+END $$;
 
 -- SHIFT ACTIVITIES (raw rows)
 CREATE TABLE IF NOT EXISTS shift_activities (
@@ -248,7 +272,18 @@ CREATE INDEX IF NOT EXISTS idx_shift_activities_shift_id ON shift_activities(shi
 ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS admin_site_id INT;
 
 CREATE INDEX IF NOT EXISTS idx_shift_activities_admin_site_id ON shift_activities(admin_site_id);
-CREATE INDEX IF NOT EXISTS idx_shift_activities_work_site_id ON shift_activities(work_site_id);
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'shift_activities'
+      AND column_name = 'work_site_id'
+  ) THEN
+    CREATE INDEX IF NOT EXISTS idx_shift_activities_work_site_id ON shift_activities(work_site_id);
+  END IF;
+END $$;
 
 -- VALIDATION LAYER (tenant-scoped, visible in Site Admin)
 CREATE TABLE IF NOT EXISTS validated_shifts (
