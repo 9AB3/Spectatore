@@ -1,4 +1,4 @@
--- USERSf
+-- USERS
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
   email TEXT UNIQUE,
@@ -51,20 +51,7 @@ CREATE TABLE IF NOT EXISTS user_work_site_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_work_site_history_user ON user_work_site_history(user_id);
--- NOTE: When upgrading an existing DB, older tables may not yet have work_site_id.
--- Creating an index on a missing column will abort the whole init script.
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'user_work_site_history'
-      AND column_name = 'work_site_id'
-  ) THEN
-    CREATE INDEX IF NOT EXISTS idx_user_work_site_history_site ON user_work_site_history(work_site_id);
-  END IF;
-END $$;
+CREATE INDEX IF NOT EXISTS idx_user_work_site_history_site ON user_work_site_history(work_site_id);
 
 
 CREATE TABLE IF NOT EXISTS connections (
@@ -241,18 +228,7 @@ CREATE INDEX IF NOT EXISTS idx_shifts_user_date ON shifts(user_id, date);
 ALTER TABLE shifts ADD COLUMN IF NOT EXISTS admin_site_id INT;
 
 CREATE INDEX IF NOT EXISTS idx_shifts_admin_site_id ON shifts(admin_site_id);
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'shifts'
-      AND column_name = 'work_site_id'
-  ) THEN
-    CREATE INDEX IF NOT EXISTS idx_shifts_work_site_id ON shifts(work_site_id);
-  END IF;
-END $$;
+CREATE INDEX IF NOT EXISTS idx_shifts_work_site_id ON shifts(work_site_id);
 
 -- SHIFT ACTIVITIES (raw rows)
 CREATE TABLE IF NOT EXISTS shift_activities (
@@ -270,20 +246,10 @@ CREATE TABLE IF NOT EXISTS shift_activities (
 
 CREATE INDEX IF NOT EXISTS idx_shift_activities_shift_id ON shift_activities(shift_id);
 ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS admin_site_id INT;
+ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS work_site_id INT;
 
 CREATE INDEX IF NOT EXISTS idx_shift_activities_admin_site_id ON shift_activities(admin_site_id);
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'shift_activities'
-      AND column_name = 'work_site_id'
-  ) THEN
-    CREATE INDEX IF NOT EXISTS idx_shift_activities_work_site_id ON shift_activities(work_site_id);
-  END IF;
-END $$;
+CREATE INDEX IF NOT EXISTS idx_shift_activities_work_site_id ON shift_activities(work_site_id);
 
 -- VALIDATION LAYER (tenant-scoped, visible in Site Admin)
 CREATE TABLE IF NOT EXISTS validated_shifts (
@@ -316,6 +282,14 @@ CREATE TABLE IF NOT EXISTS validated_shifts (
 -- Bootstrap safety: if this table already existed from an older run (without shift_key),
 -- add the column BEFORE creating indexes that reference it.
 ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS shift_key TEXT;
+
+-- Older databases may not have the newer denormalized columns. These MUST exist
+-- before we create indexes / unique constraints that reference them.
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS admin_site_id INT;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS work_site_id INT;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS date DATE;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS dn TEXT;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS user_email TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_validated_shifts_admin_site_id ON validated_shifts(admin_site_id);
 CREATE INDEX IF NOT EXISTS idx_validated_shifts_date ON validated_shifts(date);
@@ -351,6 +325,14 @@ CREATE TABLE IF NOT EXISTS validated_shift_activities (
 -- Bootstrap safety: if this table already existed from an older run (without shift_key),
 -- add the column BEFORE creating indexes that reference it.
 ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS shift_key TEXT;
+
+-- Older databases may not have the newer denormalized columns. Ensure they exist
+-- before we create indexes that reference them.
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS admin_site_id INT;
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS work_site_id INT;
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS date DATE;
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS dn TEXT;
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS user_email TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_validated_shift_activities_vshift_id ON validated_shift_activities(validated_shift_id);
 CREATE INDEX IF NOT EXISTS idx_validated_shift_activities_admin_site_id ON validated_shift_activities(admin_site_id);
