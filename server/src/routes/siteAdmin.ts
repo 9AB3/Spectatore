@@ -1957,6 +1957,7 @@ router.post('/validated/add-activity', siteAdminMiddleware, async (req: any, res
 
     await markValidatedDayUnvalidated(client, admin_site_id, date, 'add-activity');
     await client.query('COMMIT');
+    const inserted_activity_id = Number(insAct.rows?.[0]?.id || 0) || null;
     return res.json({ ok: true, inserted_activity_id, totals });
   } catch (e: any) {
     try { await client.query('ROLLBACK'); } catch {}
@@ -2126,16 +2127,12 @@ router.post('/validate', siteAdminMiddleware, async (req: any, res) => {
     await client.query('BEGIN');
 
     if (site === '*') {
-      await client.query(`UPDATE validated_shifts SET validated=TRUE WHERE date=$1::date`, [date],
-    );
-    const inserted_activity_id = Number(insAct.rows?.[0]?.id || 0) || null;
-
-} else {
+      await client.query(`UPDATE validated_shifts SET validated=TRUE WHERE date=$1::date`, [date]);
+    } else {
       await client.query(`UPDATE validated_shifts SET validated=TRUE WHERE admin_site_id=$1 AND date=$2::date`, [adminSiteId, date]);
     }
 
-
-    // Recompute validated_shifts.totals_json from validated_shift_activities so both layers stay in sync
+// Recompute validated_shifts.totals_json from validated_shift_activities so both layers stay in sync
     const vs = await client.query(
       `SELECT dn, user_email
          FROM validated_shifts
