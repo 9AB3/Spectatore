@@ -16,8 +16,8 @@ import HoistingIcon from '../assets/activity-icons/Hoisting.png';
 
 
 type Field = { field: string; required: number; unit: string; input: string };
-type EquipRow = { id?: number; type: string; equipment_id: string; is_site_asset?: boolean; site?: string };
-type LocationRow = { id?: number | string; name: string; type: 'Heading' | 'Stope' | 'Stockpile'; is_site_asset?: boolean; site?: string };
+type EquipRow = { id?: number; type: string; equipment_id: string };
+type LocationRow = { id?: number; name: string; type: 'Heading' | 'Stope' | 'Stockpile' };
 
 type ProdDrillBucket = 'Metres Drilled' | 'Cleanouts Drilled' | 'Redrills';
 type DrillHole = {
@@ -36,33 +36,6 @@ type BoltEntry = {
 };
 
 const HOLE_DIAMETER_OPTIONS = ['64mm', '76mm', '89mm', '102mm', '152mm', '203mm', '254mm', 'other'] as const;
-
-// --- Smart manual entry helpers ---
-// Normalizes a name/id so "Loader 1" matches "loader one", etc.
-function normalizeAssetName(input: string) {
-  const s = String(input || '').toLowerCase().trim();
-  const withNums = s
-    .replace(/\bone\b/g, '1')
-    .replace(/\btwo\b/g, '2')
-    .replace(/\bthree\b/g, '3')
-    .replace(/\bfour\b/g, '4')
-    .replace(/\bfive\b/g, '5')
-    .replace(/\bsix\b/g, '6')
-    .replace(/\bseven\b/g, '7')
-    .replace(/\beight\b/g, '8')
-    .replace(/\bnine\b/g, '9')
-    .replace(/\bten\b/g, '10');
-  return withNums.replace(/[^a-z0-9]/g, '');
-}
-
-function smartFindMatch(input: string, candidates: string[]) {
-  const n = normalizeAssetName(input);
-  if (!n) return null;
-  for (const c of candidates) {
-    if (normalizeAssetName(c) === n) return c;
-  }
-  return null;
-}
 
 function normalizePayload(raw: any) {
   let p: any = raw;
@@ -467,7 +440,7 @@ const editHydrateTargetRef = useRef<{ activity: string; sub: string } | null>(nu
       const cachedEq = (await db.getAll('equipment')) as any[];
       setEquipmentRows(
         (cachedEq || [])
-          .map((r) => ({ equipment_id: r.equipment_id, type: r.type, id: r.id, is_site_asset: !!r.is_site_asset, site: r.site }))
+          .map((r) => ({ equipment_id: r.equipment_id, type: r.type, id: r.id }))
           .filter((r) => r.equipment_id && r.type),
       );
 
@@ -479,7 +452,7 @@ const editHydrateTargetRef = useRef<{ activity: string; sub: string } | null>(nu
       const updatedEq = (await db2.getAll('equipment')) as any[];
       setEquipmentRows(
         (updatedEq || [])
-          .map((r) => ({ equipment_id: r.equipment_id, type: r.type, id: r.id, is_site_asset: !!r.is_site_asset, site: r.site }))
+          .map((r) => ({ equipment_id: r.equipment_id, type: r.type, id: r.id }))
           .filter((r) => r.equipment_id && r.type),
       );
 
@@ -1228,28 +1201,16 @@ if (activity === 'Production Drilling') {
   const hideSub = activity === 'Hoisting' || (subKeys.length === 1 && (subKeys[0] === '' || subKeys[0] == null));
 
   // ✅ Correct: filter equipment IDs by CURRENT selected Activity, using type->activities map
-  const filteredEquipment = useMemo(() => {
-    const rows = (equipmentRows || []).filter((r) => (EQUIPMENT_ACTIVITY_MAP[r.type] || []).includes(activity));
-
-    const personal = rows
-      .filter((r) => !r.is_site_asset)
-      .map((r) => String(r.equipment_id || '').trim())
-      .filter((x) => x)
-      .sort((a, b) => a.localeCompare(b));
-
-    const site = rows
-      .filter((r) => !!r.is_site_asset)
-      .map((r) => String(r.equipment_id || '').trim())
-      .filter((x) => x)
+  const filteredEquipment = useMemo<string[]>(() => {
+    const list = (equipmentRows || [])
+      .filter((r) => (EQUIPMENT_ACTIVITY_MAP[r.type] || []).includes(activity))
+      .map((r) => r.equipment_id)
+      .filter((x) => String(x || '').trim() !== '')
       .sort((a, b) => a.localeCompare(b));
 
     const currentEquip = String((values as any)?.['Equipment'] || '').trim();
-    const hasCurrent = !!currentEquip && [...personal, ...site].includes(currentEquip);
-
-    return {
-      personal: hasCurrent || !currentEquip ? personal : [currentEquip, ...personal],
-      site,
-    };
+    if (currentEquip && !list.includes(currentEquip)) return [currentEquip, ...list];
+    return list;
   }, [equipmentRows, activity, (values as any)?.['Equipment']]);
 
   const applyActivity = useCallback(
@@ -1578,20 +1539,11 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                         }
                       >
                         <option value="">-</option>
-                        {filteredEquipment.personal.map((o) => (
-                          <option key={`p-${o}`} value={o}>
+                        {filteredEquipment.map((o: string) => (
+                          <option key={o} value={o}>
                             {o}
                           </option>
                         ))}
-                        {filteredEquipment.site.length > 0 && (
-                          <optgroup label="────────── Site">
-                            {filteredEquipment.site.map((o) => (
-                              <option key={`s-${o}`} value={o}>
-                                {o}  [Site]
-                              </option>
-                            ))}
-                          </optgroup>
-                        )}
                         <option value="__manual__">Other (manual)</option>
                       </select>
 
@@ -1601,18 +1553,6 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                           placeholder="Enter equipment"
                           value={values.__manual_equipment || ''}
                           onChange={(e) => setValues((v) => ({ ...v, __manual_equipment: e.target.value }))}
-                          onBlur={() => {
-                            const typed = String(values.__manual_equipment || '').trim();
-                            const match = smartFindMatch(typed, [...filteredEquipment.personal, ...filteredEquipment.site]);
-                            if (match) {
-                              setValues((v) => ({ ...v, [f.field]: match, __manual_equipment: '' }));
-                            }
-                          }}
-                          onKeyDown={(ev) => {
-                            if (ev.key === 'Enter') {
-                              (ev.target as HTMLInputElement).blur();
-                            }
-                          }}
                         />
                       )}
                     </>
@@ -1634,36 +1574,16 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                       >
                         <option value="">-</option>
                         {(() => {
-                          const opts = (locationOptionsForField(f.field) as any[]) || [];
-                          const cur = String(values[f.field] || '').trim();
-                          const has = cur && opts.some((x: any) => String(x?.name || '').trim() === cur);
-                          const base = has || !cur ? opts : ([{ id: '__current__', name: cur, type: '' }, ...opts] as any);
-
-                          const personal = [...base]
-                            .filter((x: any) => !x?.is_site_asset && !x?.__divider)
-                            .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')));
-
-                          const site = [...base]
-                            .filter((x: any) => !!x?.is_site_asset && !x?.__divider)
-                            .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')));
-
-                          const merged = site.length
-                            ? [...personal, { id: '__divider__', __divider: true, name: '────────── Site', type: '' }, ...site]
-                            : personal;
-
-                          return merged;
-                        })().map((o: any) =>
-                          o?.__divider ? (
-                            <option key="__divider__" value="" disabled>
-                              {o.name}
-                            </option>
-                          ) : (
-                            <option key={o.id || o.name} value={o.name}>
-                              {o.name}
-                              {o.is_site_asset ? '  [Site]' : ''}
-                            </option>
-                          ),
-                        )}
+                        const opts = locationOptionsForField(f.field) as any[];
+                        const cur = String(values[f.field] || '').trim();
+                        const has = cur && opts.some((x: any) => String(x?.name || '').trim() === cur);
+                        const merged = has || !cur ? opts : ([{ id: '__current__', name: cur, type: '' }, ...opts] as any);
+                        return merged;
+                      })().map((o: any) => (
+                        <option key={o.id || o.name} value={o.name}>
+                            {o.name}
+                          </option>
+                        ))}
                         <option value="__manual__">Other (manual)</option>
                       </select>
 
@@ -1673,19 +1593,6 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                           placeholder="Enter location"
                           value={(values as any)[`__manual_location_${f.field}`] || ''}
                           onChange={(e) => setValues((v) => ({ ...v, [`__manual_location_${f.field}`]: e.target.value }))}
-                          onBlur={() => {
-                            const typed = String((values as any)[`__manual_location_${f.field}`] || '').trim();
-                            const opts = ((locationOptionsForField(f.field) as any[]) || []).map((x: any) => String(x?.name || '').trim()).filter(Boolean);
-                            const match = smartFindMatch(typed, opts);
-                            if (match) {
-                              setValues((v) => ({ ...v, [f.field]: match, [`__manual_location_${f.field}`]: '' }));
-                            }
-                          }}
-                          onKeyDown={(ev) => {
-                            if (ev.key === 'Enter') {
-                              (ev.target as HTMLInputElement).blur();
-                            }
-                          }}
                         />
                       )}
 
@@ -2620,7 +2527,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                             }}
                           >
                             <option value="">-</option>
-                            {devBoltLengthOptions.map((o) => (
+                            {devBoltLengthOptions.map((o: string) => (
                               <option key={o} value={o}>
                                 {o}
                               </option>
@@ -2659,7 +2566,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                           }}
                         >
                           <option value="">-</option>
-                          {devBoltTypeOptions.map((o) => (
+                          {devBoltTypeOptions.map((o: string) => (
                             <option key={o} value={o}>
                               {o}
                             </option>
