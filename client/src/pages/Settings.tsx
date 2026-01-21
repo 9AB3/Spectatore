@@ -21,6 +21,7 @@ type Me = {
   workSite?: { id: number; name: string } | null;
   subscribedSite?: { id: number; name: string } | null;
   name?: string | null;
+  community_state?: string | null;
   memberships?: Membership[];
 };
 
@@ -43,6 +44,7 @@ export default function Settings() {
 
   // profile
   const [email, setEmail] = useState('');
+  const [communityState, setCommunityState] = useState<string>('');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -106,6 +108,8 @@ export default function Settings() {
     const res = (await api('/api/user/me')) as Me;
     setMe(res);
     setEmail(res.email || '');
+        setCommunityState((res as any).community_state || '');
+    setCommunityState((res as any).community_state || '');
     setActiveSiteIdStr(res.subscribedSite?.id ? String(res.subscribedSite.id) : '0');
   }
 
@@ -215,6 +219,12 @@ export default function Settings() {
     e.preventDefault();
     try {
       const payload: any = { email: email.trim() };
+      const currentCommunityState = String((me as any)?.community_state || '').trim();
+      const desiredCommunityState = String(communityState || '').trim().toUpperCase();
+      if (desiredCommunityState !== currentCommunityState) {
+        payload.community_state = desiredCommunityState || 'UNK';
+      }
+
 
       // Apply Work Site change (separate from memberships / Subscribed Site)
       const currentWorkSite = String((me as any)?.workSite?.name || '').trim();
@@ -411,6 +421,24 @@ export default function Settings() {
                       <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
                     </div>
                     {me?.email ? <div className="text-xs opacity-70">Signed in as: {me.email}</div> : null}
+                    <div className="mt-2">
+                      <label className="block text-sm mb-1">State (Australia) <span className="opacity-60 text-xs">(optional)</span></label>
+                      <select className="input" value={communityState} onChange={(e) => setCommunityState(e.target.value)}>
+                        <option value="">Unknown</option>
+                        <option value="NSW">NSW</option>
+                        <option value="VIC">VIC</option>
+                        <option value="QLD">QLD</option>
+                        <option value="WA">WA</option>
+                        <option value="SA">SA</option>
+                        <option value="TAS">TAS</option>
+                        <option value="ACT">ACT</option>
+                        <option value="NT">NT</option>
+                      </select>
+                      <div className="text-xs opacity-60 mt-1">
+                        Used only for aggregated Community stats (state heatmap) when automatic geolocation headers aren&apos;t available.
+                      </div>
+                    </div>
+
                   </div>
                 </div>
 

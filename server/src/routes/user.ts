@@ -152,6 +152,7 @@ router.get('/me', authMiddleware, async (req: any, res) => {
     const r = await pool.query(
       `SELECT u.id, u.email, u.site, u.is_admin, u.name, u.terms_accepted_at, u.terms_version,
               u.work_site_id,
+              u.community_state,
               ws.name_display AS work_site_name,
               COALESCE(u.primary_admin_site_id, u.primary_site_id) AS primary_site_id,
               s.name AS subscribed_site_name
@@ -204,6 +205,7 @@ router.get('/me', authMiddleware, async (req: any, res) => {
         ? { id: Number(row.primary_site_id), name: String(row.subscribed_site_name || '') }
         : null,
       name: row.name || null,
+      community_state: row.community_state || null,
       is_admin: !!row.is_admin,
       memberships,
       termsAccepted: !!row.terms_accepted_at,
@@ -228,7 +230,8 @@ router.get('/work-site', authMiddleware, async (req: any, res) => {
   try {
     const user_id = req.user_id;
     const ur = await pool.query(
-      `SELECT u.work_site_id, ws.name_display AS work_site_name
+      `SELECT u.work_site_id,
+              u.community_state, ws.name_display AS work_site_name
          FROM users u
          LEFT JOIN work_sites ws ON ws.id=u.work_site_id
         WHERE u.id=$1`,
@@ -676,6 +679,7 @@ router.patch('/me', authMiddleware, async (req: any, res) => {
   const user_id = req.user_id;
   const nextEmail = req.body?.email != null ? normaliseEmail(req.body.email) : null;
   const nextSite = req.body?.site != null ? String(req.body.site).trim() : null;
+  const nextCommunityState = req.body?.community_state != null ? String(req.body.community_state).trim().toUpperCase() : null;
   const currentPassword = req.body?.current_password ? String(req.body.current_password) : '';
   const newPassword = req.body?.new_password ? String(req.body.new_password) : '';
 
@@ -708,6 +712,16 @@ router.patch('/me', authMiddleware, async (req: any, res) => {
       }
     }
 
+
+    // Validate community_state (AU state) if provided. This is used for public Community stats fallback
+    // when geo region headers are unavailable.
+    const allowedStates = new Set(['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT', 'UNK']);
+    const cleanedState =
+      nextCommunityState && nextCommunityState !== '' ? nextCommunityState.replace(/[^A-Z]/g, '') : null;
+    if (cleanedState && !allowedStates.has(cleanedState)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'invalid community_state' });
+    }
     if (nextEmail && nextEmail !== user.email) {
       const check = await client.query('SELECT id FROM users WHERE email=$1 AND id<>$2', [
         nextEmail,
@@ -731,6 +745,11 @@ router.patch('/me', authMiddleware, async (req: any, res) => {
       updates.push(`site=$${i++}`);
       params.push(nextSite || null);
     }
+
+    if (cleanedState !== null) {
+      updates.push(`community_state=$${i++}`);
+      params.push(cleanedState === 'UNK' ? null : cleanedState);
+    }
     if (newPassword) {
       updates.push(`password_hash=$${i++}`);
       params.push(bcrypt.hashSync(newPassword, 10));
@@ -741,14 +760,14 @@ router.patch('/me', authMiddleware, async (req: any, res) => {
       await client.query(`UPDATE users SET ${updates.join(', ')} WHERE id=$${i}`, params);
     }
 
-    const fresh = await client.query('SELECT id, email, site, is_admin FROM users WHERE id=$1', [
+    const fresh = await client.query('SELECT id, email, site, is_admin, community_state FROM users WHERE id=$1', [
       user_id,
     ]);
     await client.query('COMMIT');
 
     const f = fresh.rows[0];
     const token = tokenFor(f);
-    return res.json({ ok: true, token, me: { email: f.email, site: f.site || null } });
+    return res.json({ ok: true, token, me: { email: f.email, site: f.site || null, community_state: f.community_state || null } });
   } catch (err: any) {
     await client.query('ROLLBACK').catch(() => undefined);
     if (String(err?.code) === '23505') {

@@ -4,6 +4,8 @@ import { api } from '../lib/api';
 
 type CountryRow = { country_code: string; users: number };
 
+type StateRow = { state: string; users: number };
+
 function cx(...xs: Array<string | false | undefined | null>) {
   return xs.filter(Boolean).join(' ');
 }
@@ -25,12 +27,14 @@ function flagEmoji(cc: string) {
 
 export default function Community() {
   const [range, setRange] = useState<'today' | '7d' | '30d'>('today');
+  const [mapMode, setMapMode] = useState<'world' | 'aus'>('world');
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<{
     live_now: number;
     today: number;
     top_countries: CountryRow[];
     map: CountryRow[];
+    au_states: StateRow[];
     delay_minutes: number;
     live_window_minutes: number;
   } | null>(null);
@@ -57,10 +61,15 @@ export default function Community() {
 
   const top = data?.top_countries || [];
   const map = data?.map || [];
+  const auStates = (data as any)?.au_states || [] as StateRow[];
 
   const maxUsers = useMemo(() => {
     return Math.max(1, ...map.map((r) => Number(r.users || 0)));
   }, [map]);
+
+  const maxAuUsers = useMemo(() => {
+    return Math.max(1, ...auStates.map((r: any) => Number(r.users || 0)));
+  }, [auStates]);
 
   return (
     <div>
@@ -164,45 +173,87 @@ export default function Community() {
           </div>
 
           <div className="card p-5">
-            <div className="flex items-center justify-between">
-              <div className="font-semibold">World map (country heat)</div>
-              <div className="text-xs opacity-60">{range === 'today' ? '24h' : range}</div>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="font-semibold">{mapMode === 'aus' ? 'Australia map (state heat)' : 'World map (country heat)'}</div>
+              <div className="flex items-center gap-2">
+                <button
+                  className={cx('px-3 py-1 rounded-full text-xs border', mapMode === 'world' ? 'bg-white/10 border-white/15' : 'border-white/10 opacity-80')}
+                  onClick={() => setMapMode('world')}
+                  type="button"
+                >
+                  World
+                </button>
+                <button
+                  className={cx('px-3 py-1 rounded-full text-xs border', mapMode === 'aus' ? 'bg-white/10 border-white/15' : 'border-white/10 opacity-80')}
+                  onClick={() => setMapMode('aus')}
+                  type="button"
+                >
+                  Australia
+                </button>
+                <div className="text-xs opacity-60 ml-1">{range === 'today' ? '24h' : range}</div>
+              </div>
             </div>
 
             <div className="mt-4">
               {loading ? (
                 <div className="text-sm opacity-60">Loading…</div>
-              ) : map.length ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {map.slice(0, 36).map((r) => {
-                    const intensity = Math.max(0.15, Math.min(1, Number(r.users || 0) / maxUsers));
-                    return (
-                      <div
-                        key={r.country_code}
-                        className="rounded-xl p-3 flex items-center justify-between gap-2"
-                        style={{
-                          background: `rgba(255,255,255,${0.06 + intensity * 0.18})`,
-                          border: '1px solid rgba(255,255,255,0.08)',
-                        }}
-                        title={`${r.country_code}: ${fmtInt(r.users)}`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className="text-lg">{flagEmoji(r.country_code)}</div>
-                          <div className="text-sm font-semibold truncate">{r.country_code}</div>
+              ) : mapMode === 'world' ? (
+                map.length ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {map.slice(0, 36).map((r) => {
+                      const intensity = Math.max(0.15, Math.min(1, Number(r.users || 0) / maxUsers));
+                      return (
+                        <div
+                          key={r.country_code}
+                          className="rounded-xl p-3 flex items-center justify-between gap-2"
+                          style={{
+                            background: `rgba(255,255,255,${0.06 + intensity * 0.18})`,
+                            border: '1px solid rgba(255,255,255,0.08)',
+                          }}
+                          title={`${r.country_code}: ${fmtInt(r.users)}`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="text-lg">{flagEmoji(r.country_code)}</div>
+                            <div className="text-sm font-semibold truncate">{r.country_code}</div>
+                          </div>
+                          <div className="text-sm font-semibold">{fmtInt(r.users)}</div>
                         </div>
-                        <div className="text-sm font-bold">{fmtInt(r.users)}</div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-sm opacity-60">No data yet.</div>
+                )
               ) : (
-                <div className="text-sm opacity-60">Not enough data yet.</div>
-              )}
-            </div>
-
-            <div className="text-[11px] opacity-60 mt-4">
-              This is a country heat list to keep it fast + privacy-safe. We can upgrade to a true choropleth map later.
-            </div>
+                auStates.length ? (
+                  <div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {auStates.map((r: any) => {
+                        const intensity = Math.max(0.15, Math.min(1, Number(r.users || 0) / maxAuUsers));
+                        return (
+                          <div
+                            key={r.state}
+                            className="rounded-xl p-3 flex items-center justify-between gap-2"
+                            style={{
+                              background: `rgba(255,255,255,${0.06 + intensity * 0.18})`,
+                              border: '1px solid rgba(255,255,255,0.08)',
+                            }}
+                            title={`${r.state}: ${fmtInt(r.users)}`}
+                          >
+                            <div className="text-sm font-semibold">{r.state}</div>
+                            <div className="text-sm font-semibold">{fmtInt(r.users)}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="text-xs opacity-60 mt-3">
+                      State heat uses automatic Vercel geo headers when available; otherwise it falls back to your optional State setting.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-sm opacity-60">Not enough Australia data yet.</div>
+                )
+              )}</div>
           </div>
         </div>
 

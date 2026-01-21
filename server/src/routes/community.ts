@@ -28,17 +28,32 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
     const cc = rawCountry && rawCountry !== 'XX' ? rawCountry.toUpperCase().slice(0, 2) : '';
     const country: string | null = cc && /^[A-Z]{2}$/.test(cc) ? cc : null;
 
-    // Note: we intentionally do NOT store raw IPs. We store only country (coarse) + minute buckets.
+    const rawRegion = String(
+      (req.headers['x-vercel-ip-country-region'] ||
+        req.headers['x-geo-region'] ||
+        req.headers['x-country-region'] ||
+        req.headers['x-region-code'] ||
+        '') as any,
+    ).trim();
+
+    // Vercel's x-vercel-ip-country-region is the *region portion* of ISO 3166-2 (often up to 3 chars).
+    // We store full ISO 3166-2 code like "AU-NSW" when we can.
+    const regionPart = rawRegion ? rawRegion.toUpperCase() : '';
+    const regionCode: string | null =
+      country && regionPart && /^[A-Z0-9]{1,3}$/.test(regionPart) ? `${country}-${regionPart}` : null;
+
+        // Note: we intentionally do NOT store raw IPs. We store only country (coarse) + minute buckets.
 
     await pool.query(
       `
-      INSERT INTO presence_events (user_id, bucket, country_code, user_agent)
-      VALUES ($1, date_trunc('minute', now()), $2, $3)
+      INSERT INTO presence_events (user_id, bucket, country_code, region_code, user_agent)
+      VALUES ($1, date_trunc('minute', now()), $2, $3, $4)
       ON CONFLICT (user_id, bucket) DO UPDATE
         SET country_code = COALESCE(EXCLUDED.country_code, presence_events.country_code),
+            region_code = COALESCE(EXCLUDED.region_code, presence_events.region_code),
             user_agent = COALESCE(EXCLUDED.user_agent, presence_events.user_agent)
       `,
-      [userId, country, String(req.headers['user-agent'] || '').slice(0, 300)],
+      [userId, country, regionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
     );
 
     return res.json({ ok: true });
@@ -103,7 +118,42 @@ router.get('/public-stats', authMiddleware, async (req: any, res) => {
       `,
     );
 
-    // Privacy guardrail: suppress tiny counts by country
+    
+
+    // --- AU state/region heat (two-tier: geo region header OR user-selected state) ---
+    const byAuStateQ = await pool.query(
+      `
+      WITH base AS (
+        SELECT user_id, bucket, country_code, region_code
+        FROM presence_events
+        WHERE bucket >= ${startExpr} AND bucket < ${end}
+      ),
+      uniq AS (
+        SELECT DISTINCT b.user_id,
+          COALESCE(
+            CASE WHEN b.country_code = 'AU' AND b.region_code IS NOT NULL THEN b.region_code END,
+            CASE WHEN (b.country_code = 'AU' OR b.country_code IS NULL) AND u.community_state IS NOT NULL THEN 'AU-' || u.community_state END
+          ) AS region_code
+        FROM base b
+        LEFT JOIN users u ON u.id = b.user_id
+        WHERE (b.country_code = 'AU' OR u.community_state IS NOT NULL)
+      )
+      SELECT COALESCE(SPLIT_PART(region_code, '-', 2), 'UNK') AS state,
+             COUNT(*)::int AS users
+      FROM uniq
+      WHERE region_code IS NOT NULL
+      GROUP BY 1
+      ORDER BY users DESC
+      `,
+    );
+
+    const MIN_STATE = 5;
+    const auStatesAll = byAuStateQ.rows
+      .map((r: any) => ({ state: String(r.state || 'UNK'), users: Number(r.users || 0) }))
+      .filter((r: any) => r.users >= MIN_STATE)
+      .slice(0, 12);
+
+// Privacy guardrail: suppress tiny counts by country
     const MIN_COUNTRY = 5;
 
     const mapAll = byCountryQ.rows
@@ -124,6 +174,7 @@ router.get('/public-stats', authMiddleware, async (req: any, res) => {
       today: roundTo(today, roundedStep),
       top_countries: topCountries,
       map: mapAll,
+      au_states: auStatesAll,
     });
   } catch (e: any) {
     console.warn('[community] public-stats failed:', e?.message || e);

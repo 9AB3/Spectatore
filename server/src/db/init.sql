@@ -11,6 +11,9 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='work_site_id') THEN
       ALTER TABLE users ADD COLUMN work_site_id INT NULL;
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='community_state') THEN
+      ALTER TABLE users ADD COLUMN community_state TEXT NULL;
+    END IF;
   END IF;
 
   -- shifts
@@ -707,6 +710,7 @@ CREATE TABLE IF NOT EXISTS presence_events (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   bucket TIMESTAMPTZ NOT NULL,
   country_code TEXT NULL,
+  region_code TEXT NULL,
   user_agent TEXT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, bucket)
@@ -714,4 +718,5 @@ CREATE TABLE IF NOT EXISTS presence_events (
 
 CREATE INDEX IF NOT EXISTS idx_presence_events_bucket ON presence_events(bucket);
 CREATE INDEX IF NOT EXISTS idx_presence_events_country_bucket ON presence_events(country_code, bucket);
+CREATE INDEX IF NOT EXISTS idx_presence_events_region_bucket ON presence_events(region_code, bucket);
 
