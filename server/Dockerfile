@@ -25,8 +25,9 @@ RUN node -p "process.version" \
  && npm config get registry \
  && npm ci --registry=https://registry.npmjs.org/ --include=optional --no-audit --no-fund
 
-# 3) Copy source
+# 3) Copy source + build helpers
 COPY src ./src
+COPY scripts ./scripts
 
 # 4) Build TypeScript -> dist
 RUN npm run build

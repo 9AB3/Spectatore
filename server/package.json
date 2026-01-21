@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copyAssets.mjs",
     "clear:data": "tsx src/tools/clearData.ts",
     "db:check": "tsx src/tools/dbCheck.ts",
     "db:init": "tsx src/tools/dbInit.ts",
