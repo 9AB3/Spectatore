@@ -23,7 +23,8 @@
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.9.13",
     "pg": "^8.13.1",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "geoip-lite": "^1.4.10"
   },
   "devDependencies": {
     "nodemon": "^3.0.2",

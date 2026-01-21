@@ -11,6 +11,7 @@ import { pool } from './lib/pg.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
 import metaRoutes from './routes/meta.js';
+import communityRoutes from './routes/community.js';
 import powerBiRoutes from './routes/powerbi.js';
 import dataRoutes from './routes/data.js';
 import shiftsRoutes from './routes/shifts.js';
@@ -31,6 +32,7 @@ const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173')
   .filter(Boolean);
 
 const app = express();
+app.set('trust proxy', true);
 
 // Render/containers provide PORT at runtime; keep a sane default for local dev.
 const PORT = Number.parseInt(process.env.PORT || "5000", 10);
@@ -92,6 +94,7 @@ app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/meta', metaRoutes);
+app.use('/api/community', communityRoutes);
 app.use('/api/powerbi', powerBiRoutes);
 
 // Data endpoints (equipment, locations, connections, etc.) are rooted at /api

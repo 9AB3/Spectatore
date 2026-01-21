@@ -700,3 +700,18 @@ END $$;
 -- Ensure shifts has unique (user_id, date, dn) for ON CONFLICT
 CREATE UNIQUE INDEX IF NOT EXISTS uq_shifts_user_date_dn ON shifts(user_id, date, dn);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_shifts_shift_key ON shifts(shift_key);
+
+
+-- === COMMUNITY / PUBLIC STATS (APP USAGE) ===
+CREATE TABLE IF NOT EXISTS presence_events (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  bucket TIMESTAMPTZ NOT NULL,
+  country_code TEXT NULL,
+  user_agent TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, bucket)
+);
+
+CREATE INDEX IF NOT EXISTS idx_presence_events_bucket ON presence_events(bucket);
+CREATE INDEX IF NOT EXISTS idx_presence_events_country_bucket ON presence_events(country_code, bucket);
+

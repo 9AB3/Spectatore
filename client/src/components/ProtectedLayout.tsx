@@ -44,7 +44,42 @@ export default function ProtectedLayout() {
       const noScrollNeeded = el.scrollHeight <= el.clientHeight + 2;
       if (noScrollNeeded) setTermsScrolled(true);
     }, 0);
-    return () => clearTimeout(t);
+    
+
+// Community heartbeat (app usage telemetry)
+useEffect(() => {
+  let alive = true;
+  let t: any = null;
+
+  const send = async () => {
+    try {
+      await api('/api/community/heartbeat', { method: 'POST' });
+    } catch {
+      // ignore
+    }
+  };
+
+  const start = () => {
+    if (!alive) return;
+    // send quickly on load/visibility
+    send();
+    if (t) clearInterval(t);
+    t = setInterval(send, 60000);
+  };
+
+  const onVis = () => {
+    if (document.visibilityState === 'visible') start();
+  };
+
+  start();
+  document.addEventListener('visibilitychange', onVis);
+  return () => {
+    alive = false;
+    if (t) clearInterval(t);
+    document.removeEventListener('visibilitychange', onVis);
+  };
+}, []);
+return () => clearTimeout(t);
   }, [needsTerms]);
 
   // Same logic for site-invite consent: if content doesn't overflow, don't block the button.

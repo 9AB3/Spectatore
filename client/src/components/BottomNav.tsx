@@ -26,7 +26,7 @@ function Item({
       to={to}
       className={({ isActive }) =>
         cx(
-          'bottomnav-link flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-2xl min-w-[64px] transition-all',
+          'bottomnav-link flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-2xl min-w-[56px] transition-all',
           isActive ? 'is-active' : 'is-inactive',
         )
       }
@@ -53,6 +53,18 @@ function Item({
         </>
       )}
     </NavLink>
+  );
+}
+
+
+function IconGlobe(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18" />
+      <path d="M12 3c3.5 3 3.5 15 0 18" />
+      <path d="M12 3c-3.5 3-3.5 15 0 18" />
+    </svg>
   );
 }
 
@@ -107,7 +119,7 @@ export default function BottomNav() {
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
     >
-      <div className="max-w-2xl mx-auto px-2 py-1 grid grid-cols-5 text-[var(--text)]">
+      <div className="max-w-2xl mx-auto px-2 py-1 grid grid-cols-6 text-[var(--text)]">
         <Item to="/Main" label="Home" icon={<IconHome className="h-6 w-6" />} />
         <Item
           to="/Equipment&Locations"
@@ -126,6 +138,7 @@ export default function BottomNav() {
           badge={incomingCount}
           icon={<img src={crewIcon} className="h-6 w-6 nav-icon" alt="Crew" />}
         />
+        <Item to="/Community" label="Community" icon={<IconGlobe className="h-6 w-6" />} />
         <Item
           to="/You"
           label="You"

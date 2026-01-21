@@ -27,6 +27,7 @@ import NotificationPreferences from './pages/NotificationPreferences';
 
 import Feedback from './pages/Feedback';
 import Notifications from './pages/Notifications';
+import Community from './pages/Community';
 import SiteAdminLogin from './pages/SiteAdminLogin';
 import SiteAdmin from './pages/SiteAdmin';
 import SiteAdminValidate from './pages/SiteAdminValidate';
@@ -224,6 +225,7 @@ export default function App() {
         <Route path="/FinalizeShift" element={<FinalizeShift />} />
 
         <Route path="/Connections" element={<Connections />} />
+          <Route path="/Community" element={<Community />} />
         <Route path="/Equipment&Locations" element={<EquipmentLocations />} />
         {/* You Hub (tabs) */}
         <Route path="/You" element={<YouHub />}>
