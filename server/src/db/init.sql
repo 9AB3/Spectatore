@@ -114,6 +114,8 @@ CREATE TABLE IF NOT EXISTS admin_equipment (
   UNIQUE(admin_site_id, equipment_id)
 );
 
+ALTER TABLE admin_equipment ADD COLUMN IF NOT EXISTS admin_site_id INT;
+
 CREATE INDEX IF NOT EXISTS idx_admin_equipment_admin_site_id ON admin_equipment(admin_site_id);
 
 CREATE TABLE IF NOT EXISTS admin_locations (
@@ -124,6 +126,8 @@ CREATE TABLE IF NOT EXISTS admin_locations (
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(admin_site_id, name)
 );
+
+ALTER TABLE admin_locations ADD COLUMN IF NOT EXISTS admin_site_id INT;
 
 CREATE INDEX IF NOT EXISTS idx_admin_locations_admin_site_id ON admin_locations(admin_site_id);
 
@@ -221,6 +225,8 @@ CREATE TABLE IF NOT EXISTS shifts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_shifts_user_date ON shifts(user_id, date);
+ALTER TABLE shifts ADD COLUMN IF NOT EXISTS admin_site_id INT;
+
 CREATE INDEX IF NOT EXISTS idx_shifts_admin_site_id ON shifts(admin_site_id);
 CREATE INDEX IF NOT EXISTS idx_shifts_work_site_id ON shifts(work_site_id);
 
@@ -239,6 +245,8 @@ CREATE TABLE IF NOT EXISTS shift_activities (
 );
 
 CREATE INDEX IF NOT EXISTS idx_shift_activities_shift_id ON shift_activities(shift_id);
+ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS admin_site_id INT;
+
 CREATE INDEX IF NOT EXISTS idx_shift_activities_admin_site_id ON shift_activities(admin_site_id);
 CREATE INDEX IF NOT EXISTS idx_shift_activities_work_site_id ON shift_activities(work_site_id);
 
@@ -533,6 +541,8 @@ ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS computed_at TIMES
 ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
 ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
 
+ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS admin_site_id INT;
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_validated_reconciliations_key
   ON validated_reconciliations(admin_site_id, month_ym, metric_key);
 
@@ -540,6 +550,8 @@ ALTER TABLE validated_reconciliation_days ADD COLUMN IF NOT EXISTS admin_site_id
 ALTER TABLE validated_reconciliation_days ADD COLUMN IF NOT EXISTS month_ym TEXT;
 ALTER TABLE validated_reconciliation_days ADD COLUMN IF NOT EXISTS metric_key TEXT;
 ALTER TABLE validated_reconciliation_days ADD COLUMN IF NOT EXISTS allocated_value NUMERIC;
+
+ALTER TABLE validated_reconciliation_days ADD COLUMN IF NOT EXISTS admin_site_id INT;
 
 CREATE INDEX IF NOT EXISTS ix_validated_reconciliation_days_admin_site_month_metric
   ON validated_reconciliation_days(admin_site_id, month_ym, metric_key);
