@@ -414,6 +414,21 @@ CREATE INDEX IF NOT EXISTS idx_validated_shift_activities_shift_key ON validated
 ALTER TABLE shifts ADD COLUMN IF NOT EXISTS shift_key TEXT;
 ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS shift_key TEXT;
 
+-- Older DBs may have shift_key nullable; make it safe for ON CONFLICT(shift_key) upserts.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema='public' AND table_name='shifts' AND column_name='shift_key'
+  ) THEN
+    EXECUTE 'UPDATE shifts SET shift_key = COALESCE(shift_key, '''') WHERE shift_key IS NULL';
+    EXECUTE 'ALTER TABLE shifts ALTER COLUMN shift_key SET DEFAULT ''''';
+    EXECUTE 'ALTER TABLE shifts ALTER COLUMN shift_key SET NOT NULL';
+  END IF;
+EXCEPTION WHEN undefined_table THEN
+  -- no-op
+END $$;
+
 -- validated_shifts (older versions were keyed by shift_id and lacked date/dn/shift_key)
 -- (shift_key already handled above before index creation, keep this as an extra no-op guard)
 ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS shift_key TEXT;
@@ -684,3 +699,4 @@ END $$;
 
 -- Ensure shifts has unique (user_id, date, dn) for ON CONFLICT
 CREATE UNIQUE INDEX IF NOT EXISTS uq_shifts_user_date_dn ON shifts(user_id, date, dn);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_shifts_shift_key ON shifts(shift_key);

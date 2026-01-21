@@ -482,16 +482,20 @@ function buildMetaJson(items: any[]) {
 
       const site = await getUserSite(client, user_id);
 
-      // Use a stable identifier for shift_key + validation uniqueness.
+      // Use a stable identifier for validation uniqueness.
       // Some older local DBs / seed users may have empty email; avoid collisions by synthesizing one.
       const stable_email = (user_email || '').trim() || `user-${user_id}@local`;
-      const shift_key = `${admin_site_id || 0}|${date}|${dn}|${stable_email}`;
+
+      // Raw shifts should be uniquely keyed by (user_id,date,dn) regardless of admin_site changes.
+      // To be robust against schema drift (missing UNIQUE(user_id,date,dn) on older DBs), we upsert by
+      // a deterministic shift_key instead of relying on a particular unique constraint name or index.
+      const shift_key = `${user_id}|${date}|${dn}`;
 
       // Upsert the shift row and mark finalized
       const up = await client.query(
         `INSERT INTO shifts (user_id, work_site_id, admin_site_id, site, date, dn, totals_json, meta_json, finalized_at, user_email, user_name, shift_key)
          VALUES ($1,$2,$3,$4,$5::date,$6,$7::jsonb,$8::jsonb,NOW(),$9,$10,$11)
-         ON CONFLICT (user_id, date, dn)
+         ON CONFLICT (shift_key)
          DO UPDATE SET work_site_id=EXCLUDED.work_site_id,
                        admin_site_id=EXCLUDED.admin_site_id,
                        site=EXCLUDED.site,
@@ -603,11 +607,16 @@ function buildMetaJson(items: any[]) {
         await client.query(`DELETE FROM validated_shift_activities WHERE validated_shift_id=$1`, [validated_shift_id]);
       } else {
         // Insert new validation snapshot row for this shift.
-        // validated_shifts.shift_id is UNIQUE in your schema, so we must be able to re-finalize safely.
-        // If a row already exists for this shift_id:
+        // IMPORTANT: do NOT rely on validated_shifts.shift_id being UNIQUE across all deployed DBs.
+        // Older Render DBs have shown schema drift where the expected unique constraint/index is missing
+        // (or exists under different definitions), which makes `ON CONFLICT (shift_id)` fail with 42P10.
+        //
+        // We instead upsert by shift_key, which is deterministic for a validated snapshot and already
+        // has a dedicated unique index in our schema guards.
+        //
+        // If a row already exists:
         //  - If it is still unvalidated, update it.
         //  - If it has been validated by a validator, do not overwrite.
-        // Upsert by the unique shift_id constraint. Use ON CONSTRAINT so Postgres always targets the right unique index.
         // Also: be defensive against any edge-case double-submit by catching 23505 and selecting the existing row.
         let insShift: any;
         try {
@@ -616,8 +625,9 @@ function buildMetaJson(items: any[]) {
                 (shift_id, shift_key, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id, validated, totals_json)
              VALUES
                 ($1,$2,$3,$4,$5::date,$6,COALESCE($7,''),$8,$9,FALSE,$10::jsonb)
-             ON CONFLICT (shift_id) DO UPDATE
+             ON CONFLICT (shift_key) DO UPDATE
                 SET shift_key    = EXCLUDED.shift_key,
+                    shift_id     = EXCLUDED.shift_id,
                     admin_site_id = EXCLUDED.admin_site_id,
                     work_site_id  = EXCLUDED.work_site_id,
                     date          = EXCLUDED.date,
@@ -632,7 +642,7 @@ function buildMetaJson(items: any[]) {
           );
         } catch (e: any) {
           if (e?.code === '23505') {
-            insShift = await client.query(`SELECT id, validated FROM validated_shifts WHERE shift_id=$1 LIMIT 1`, [Number(shift_id)]);
+            insShift = await client.query(`SELECT id, validated FROM validated_shifts WHERE shift_key=$1 LIMIT 1`, [shiftKey]);
           } else {
             throw e;
           }
@@ -642,7 +652,7 @@ function buildMetaJson(items: any[]) {
           validated_shift_id = Number(insShift.rows?.[0]?.id);
         } else {
           // Conflict hit but row is already validated; do not overwrite.
-          const ex = await client.query(`SELECT id, validated FROM validated_shifts WHERE shift_id=$1 LIMIT 1`, [shift_id]);
+          const ex = await client.query(`SELECT id, validated FROM validated_shifts WHERE shift_key=$1 LIMIT 1`, [shiftKey]);
           if (ex.rows?.[0]?.validated) {
             await client.query('COMMIT');
             return res.json({ ok: true, shift_id, already_validated: true });
