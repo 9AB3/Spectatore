@@ -18,6 +18,8 @@ type Me = {
   id: number;
   email: string;
   site: string | null;
+  workSite?: { id: number; name: string } | null;
+  subscribedSite?: { id: number; name: string } | null;
   name?: string | null;
   memberships?: Membership[];
 };
@@ -32,6 +34,9 @@ function normaliseRole(raw: any): 'member' | 'validator' | 'admin' {
 export default function Settings() {
   const { Toast, setMsg } = useToast();
   const nav = useNavigate();
+
+  // Main Settings is a dashboard. Panels open into focused sub-views.
+  const [view, setView] = useState<'dashboard' | 'account' | 'sites' | 'notifications' | 'data'>('dashboard');
 
   const [loading, setLoading] = useState(true);
   const [me, setMe] = useState<Me | null>(null);
@@ -73,6 +78,11 @@ export default function Settings() {
 
   const [confirmLeave, setConfirmLeave] = useState<{ site_id: number; site: string } | null>(null);
 
+  // Work Site
+  const [workSiteOptions, setWorkSiteOptions] = useState<string[]>([]);
+  const [workSiteSelect, setWorkSiteSelect] = useState<string>('');
+  const [workSiteManual, setWorkSiteManual] = useState<string>('');
+
   // push notifications
   const [pushSupported, setPushSupported] = useState<boolean>(false);
   const [pushEnabled, setPushEnabled] = useState<boolean>(false);
@@ -96,14 +106,7 @@ export default function Settings() {
     const res = (await api('/api/user/me')) as Me;
     setMe(res);
     setEmail(res.email || '');
-
-    // Selector should match an active membership site (if current user.site corresponds), else Personal
-    const currentSiteName = String(res.site || '').trim();
-    const activeMatch = (Array.isArray(res?.memberships) ? res!.memberships! : []).find((m: any) => {
-      const st = String(m?.status || '').toLowerCase();
-      return st === 'active' && m.site_id && String(m.site || '').trim() === currentSiteName;
-    });
-    setActiveSiteIdStr(activeMatch ? String(activeMatch.site_id) : '0');
+    setActiveSiteIdStr(res.subscribedSite?.id ? String(res.subscribedSite.id) : '0');
   }
 
   useEffect(() => {
@@ -114,12 +117,12 @@ export default function Settings() {
         if (cancelled) return;
         setMe(res);
         setEmail(res.email || '');
-        const currentSiteName = String(res.site || '').trim();
-        const activeMatch = (Array.isArray(res?.memberships) ? res!.memberships! : []).find((m: any) => {
-          const st = String(m?.status || '').toLowerCase();
-          return st === 'active' && m.site_id && String(m.site || '').trim() === currentSiteName;
-        });
-        setActiveSiteIdStr(activeMatch ? String(activeMatch.site_id) : '0');
+        setActiveSiteIdStr((res as any).subscribedSite?.id ? String((res as any).subscribedSite.id) : '0');
+        const wsName = String((res as any).workSite?.name || '').trim();
+        if (wsName) {
+          setWorkSiteSelect(wsName);
+          setWorkSiteManual('');
+        }
       } catch (e: any) {
         console.error(e);
         setMsg(e?.message || 'Failed to load settings');
@@ -150,6 +153,49 @@ export default function Settings() {
     };
   }, []);
 
+  // Work Site directory for the chooser
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r: any = await api('/api/work-sites');
+        if (cancelled) return;
+        const names = Array.isArray(r?.sites)
+          ? r.sites
+              .map((s: any) => String(s?.name || '').trim())
+              .filter(Boolean)
+          : [];
+        if (names.length) setWorkSiteOptions(names);
+      } catch {
+        if (!cancelled) setWorkSiteOptions([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Keep the Work Site selector consistent when the official list loads.
+  useEffect(() => {
+    const current = String((me as any)?.workSite?.name || '').trim();
+    if (!current) return;
+
+    // If the current Work Site is not in the official list, show it as "Not in List" + manual value.
+    if (workSiteOptions.length && !workSiteOptions.includes(current)) {
+      setWorkSiteSelect('Not in List');
+      setWorkSiteManual(current);
+      return;
+    }
+
+    // If it is in the official list, select it.
+    if (workSiteOptions.length && workSiteOptions.includes(current)) {
+      setWorkSiteSelect(current);
+      setWorkSiteManual('');
+    }
+  }, [me, workSiteOptions]);
+
+
+
   useEffect(() => {
     (async () => {
       try {
@@ -170,6 +216,19 @@ export default function Settings() {
     try {
       const payload: any = { email: email.trim() };
 
+      // Apply Work Site change (separate from memberships / Subscribed Site)
+      const currentWorkSite = String((me as any)?.workSite?.name || '').trim();
+      const desiredWorkSite =
+        (workSiteSelect === 'Not in List' ? workSiteManual : workSiteSelect).trim();
+      const workSiteDirty = !!desiredWorkSite && desiredWorkSite !== currentWorkSite;
+
+      // Apply Subscribed Site change (requires active membership)
+      const currentSubscribedId = Number((me as any)?.subscribedSite?.id || 0);
+      const desiredSubscribedId = Number(activeSiteIdStr || '0') || 0;
+      const subscribedDirty = desiredSubscribedId !== currentSubscribedId;
+
+
+
       if (newPassword || confirmPassword || currentPassword) {
         if (!currentPassword) throw new Error('Enter your current password');
         if (!newPassword) throw new Error('Enter a new password');
@@ -184,6 +243,23 @@ export default function Settings() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })) as any;
+
+
+      // Save Work Site and/or Subscribed Site as part of the single "Save changes" action
+      if (workSiteDirty) {
+        await api('/api/user/work-site', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ work_site_name: desiredWorkSite }),
+        });
+      }
+      if (subscribedDirty) {
+        await api('/api/user/active-site', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ site_id: desiredSubscribedId }),
+        });
+      }
 
       if (res?.token) {
         const db = await getDB();
@@ -257,200 +333,323 @@ export default function Settings() {
       <Toast />
       <Header />
 
-      <div className="p-6 max-w-xl mx-auto">
-        <h2 className="text-xl font-semibold mb-4">Settings</h2>
-
-        <div className="card" style={{ marginBottom: 12 }}>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 style={{ margin: 0 }}>Notification preferences</h3>
-              <p style={{ marginTop: 6, opacity: 0.85 }}>
-                Control milestones vs crew request alerts (in-app and push).
-              </p>
+      <div className="p-6 max-w-4xl mx-auto">
+        {/* Title + in-page back */}
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <h2 className="text-2xl font-semibold">Settings</h2>
+            <div className="text-sm opacity-70 mt-1">
+              {view === 'dashboard'
+                ? 'Control dashboard for your account, sites, notifications and data.'
+                : 'Adjust one panel at a time.'}
             </div>
-            <button className="btn" onClick={() => nav('/NotificationPreferences')}>
-              Open
-            </button>
           </div>
+          {view !== 'dashboard' ? (
+            <button type="button" className="btn" onClick={() => setView('dashboard')}>Back</button>
+          ) : null}
         </div>
 
-        <div className="card" style={{ marginBottom: 12 }}>
-          <h3 style={{ margin: 0 }}>Push notifications</h3>
-          <p style={{ marginTop: 6, opacity: 0.85 }}>Get a phone/desktop notification for crew requests and milestones.</p>
-
-          {!pushSupported ? (
-            <p style={{ margin: 0, color: '#999' }}>Not supported on this browser/device.</p>
-          ) : (
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={{ opacity: 0.9 }}>
-                Status: <b>{pushEnabled ? 'Enabled' : 'Off'}</b>
-              </span>
-              <span style={{ opacity: 0.65, fontSize: 12 }}>(You may need to install the PWA for reliable push.)</span>
-
-              {!pushEnabled ? (
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={pushBusy}
-                  onClick={async () => {
-                    setPushBusy(true);
-                    const r = await enablePush();
-                    if (!r.ok) setMsg(r.error);
-                    setPushBusy(false);
-                    const sub = await getExistingSubscription();
-                    setPushEnabled(!!sub);
-                  }}
-                >
-                  Enable
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={pushBusy}
-                  onClick={async () => {
-                    setPushBusy(true);
-                    const r = await disablePush();
-                    if (!r.ok) setMsg(r.error);
-                    setPushBusy(false);
-                    const sub = await getExistingSubscription();
-                    setPushEnabled(!!sub);
-                  }}
-                >
-                  Disable
-                </button>
-              )}
+        {/* DASHBOARD */}
+        {view === 'dashboard' ? (
+          <div className="grid gap-4 md:grid-cols-2 mb-4">
+            <div className="card">
+              <div className="text-xs tracking-wider uppercase opacity-70">Account</div>
+              <div className="text-lg font-semibold mt-1">Profile & security</div>
+              <div className="text-sm opacity-80 mt-1">Email, password, and sign out.</div>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <div className="text-xs opacity-60 truncate">{me?.email ? `Signed in as ${me.email}` : ''}</div>
+                <button type="button" className="btn" onClick={() => setView('account')}>Open</button>
+              </div>
             </div>
-          )}
-        </div>
+
+            <div className="card">
+              <div className="text-xs tracking-wider uppercase opacity-70">Sites</div>
+              <div className="text-lg font-semibold mt-1">Work & subscribed</div>
+              <div className="text-sm opacity-80 mt-1">Memberships, roles, active subscribed site.</div>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <div className="text-xs opacity-60 truncate">
+                  Active: {activeSiteIdStr !== '0' ? (activeSites.find((s) => String(s.site_id) === activeSiteIdStr)?.site || 'Site') : 'Personal'}
+                </div>
+                <button type="button" className="btn" onClick={() => setView('sites')}>Open</button>
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="text-xs tracking-wider uppercase opacity-70">Notifications</div>
+              <div className="text-lg font-semibold mt-1">In-app & push</div>
+              <div className="text-sm opacity-80 mt-1">Milestones, crew requests, bundling and push status.</div>
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <button type="button" className="btn" onClick={() => setView('notifications')}>Open</button>
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="text-xs tracking-wider uppercase opacity-70">Data</div>
+              <div className="text-lg font-semibold mt-1">Storage & reset</div>
+              <div className="text-sm opacity-80 mt-1">Clear offline cache, troubleshooting and legal links.</div>
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <button type="button" className="btn" onClick={() => setView('data')}>Open</button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {loading ? (
-          <div className="opacity-70">Loading...</div>
+          <div className="text-sm opacity-70">Loading…</div>
         ) : (
-          <form className="grid gap-4" onSubmit={saveProfile}>
-            <div className="card">
-              <div className="grid gap-3">
-                <div>
-                  <label className="block text-sm mb-1">Email</label>
-                  <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+          <>
+            {/* ACCOUNT PANEL */}
+            {view === 'account' ? (
+              <form onSubmit={saveProfile} className="grid gap-4">
+                <div className="card">
+                  <div className="text-xs tracking-wider uppercase opacity-70">Account</div>
+                  <div className="text-lg font-semibold mt-1">Profile</div>
+
+                  <div className="mt-3 grid gap-3">
+                    <div>
+                      <label className="block text-sm mb-1">Email</label>
+                      <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+                    </div>
+                    {me?.email ? <div className="text-xs opacity-70">Signed in as: {me.email}</div> : null}
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-sm mb-1">Current site</label>
-                  <select
-                    className="input"
-                    value={activeSiteIdStr}
-                    onChange={async (e) => {
-                      const v = e.target.value;
-                      setActiveSiteIdStr(v);
-                      const sid = Number(v || '0') || 0;
-                      try {
-                        await api('/api/user/active-site', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ site_id: sid }),
-                        });
-                        await refreshMe();
-                      } catch (err: any) {
-                        setMsg(err?.message || 'Failed to change current site');
-                      }
+                <div className="card">
+                  <div className="text-xs tracking-wider uppercase opacity-70">Security</div>
+                  <div className="text-lg font-semibold mt-1">Password</div>
+
+                  <div className="mt-3 grid gap-3 md:grid-cols-3">
+                    <div>
+                      <label className="block text-sm mb-1">Current</label>
+                      <input type="password" className="input" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="block text-sm mb-1">New</label>
+                      <input type="password" className="input" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="block text-sm mb-1">Confirm</label>
+                      <input type="password" className="input" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <button className="btn" type="submit">Save</button>
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={() => {
+                      localStorage.removeItem('token');
+                      nav('/');
                     }}
                   >
-                    <option value="0">Personal (not linked to a site)</option>
-                    {activeSites.map((s) => (
-                      <option key={String(s.site_id)} value={String(s.site_id)}>
-                        {s.site}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="text-xs opacity-60 mt-1">
-                    Personal equipment/locations always stay available. If you select a site you&apos;re a member of, that site&apos;s equipment/locations are also available.
+                    Sign out
+                  </button>
+                </div>
+              </form>
+            ) : null}
+
+            {/* SITES PANEL */}
+            {view === 'sites' ? (
+              <form onSubmit={saveProfile} className="grid gap-4">
+                <div className="card">
+                  <div className="text-xs tracking-wider uppercase opacity-70">Sites</div>
+                  <div className="text-lg font-semibold mt-1">Work & subscribed</div>
+                  <div className="mt-3 grid gap-3">
+                    <div>
+                      <label className="block text-sm mb-1">Work Site</label>
+                      <select className="input" value={workSiteSelect} onChange={(e) => setWorkSiteSelect(e.target.value)}>
+                        {workSiteOptions.map((name) => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                        <option value="Not in List">Not in List</option>
+                      </select>
+                      {workSiteSelect === 'Not in List' ? (
+                        <input className="input mt-2" value={workSiteManual} onChange={(e) => setWorkSiteManual(e.target.value)} placeholder="Enter Work Site name" />
+                      ) : null}
+                      <div className="text-xs opacity-60 mt-1">Where you work (persists across moves). Independent of subscribed dashboards.</div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm mb-1">Subscribed Site</label>
+                      <select className="input" value={activeSiteIdStr} onChange={(e) => setActiveSiteIdStr(e.target.value)}>
+                        <option value="0">Personal (no subscribed site)</option>
+                        {activeSites.map((s) => (
+                          <option key={String(s.site_id)} value={String(s.site_id)}>{s.site}</option>
+                        ))}
+                      </select>
+                      <div className="text-xs opacity-60 mt-1">Controls site-scoped equipment/locations and crew comparisons.</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="card">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs tracking-wider uppercase opacity-70">Membership</div>
+                      <div className="text-lg font-semibold mt-1">Access & roles</div>
+                      <div className="text-sm opacity-80 mt-1">Join sites, manage roles, and leave when needed.</div>
+                    </div>
+                    <button type="button" className="btn" onClick={() => setShowAddSite(true)}>+ Add site</button>
+                  </div>
+
+                  <div className="mt-3 text-sm">
+                    {!memberships.length ? (
+                      <div className="text-xs opacity-70">No site memberships found.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {memberships.map((m) => {
+                          const st = String(m.status || '').toLowerCase();
+                          const siteId = Number(m.site_id || 0);
+                          const siteName = String(m.site || '');
+                          const key = String(siteId || m.id || siteName);
+                          return (
+                            <div key={key} className="tv-list-item">
+                              <div className="min-w-0">
+                                <div className="font-medium truncate">{siteName}</div>
+                                <div className="text-xs opacity-70">
+                                  Role: <b>{normaliseRole(m.role)}</b>
+                                  {st === 'requested' ? <span className="opacity-70"> (requested)</span> : null}
+                                </div>
+                              </div>
+                              {siteId ? (
+                                <button type="button" className="btn btn-outline" onClick={() => setConfirmLeave({ site_id: siteId, site: siteName })}>
+                                  {st === 'requested' ? 'Cancel' : 'Leave'}
+                                </button>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <button className="btn" type="submit">Save</button>
+                  <div className="text-xs opacity-60">Tip: membership requests apply immediately; Work/Subscribed site changes require Save.</div>
+                </div>
+              </form>
+            ) : null}
+
+            {/* NOTIFICATIONS PANEL */}
+            {view === 'notifications' ? (
+              <div className="grid gap-4 md:grid-cols-2 mb-4">
+                <div className="card">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-xs tracking-wider uppercase opacity-70">Notifications</div>
+                      <div className="text-lg font-semibold mt-1">Preferences</div>
+                      <div className="text-sm opacity-80 mt-1">Milestones, crew requests, in-app vs push.</div>
+                    </div>
+                    <button className="btn" onClick={() => nav('/NotificationPreferences')}>Open</button>
+                  </div>
+                </div>
+
+                <div className="card">
+                  <div className="text-xs tracking-wider uppercase opacity-70">Notifications</div>
+                  <div className="text-lg font-semibold mt-1">Push</div>
+                  <div className="text-sm opacity-80 mt-1">Phone/desktop notifications for crew requests and milestones.</div>
+
+                  <div className="mt-3">
+                    {!pushSupported ? (
+                      <div className="text-sm" style={{ color: '#999' }}>Not supported on this browser/device.</div>
+                    ) : (
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="text-sm">
+                          Status: <b>{pushEnabled ? 'Enabled' : 'Off'}</b>
+                          <div className="text-xs opacity-60 mt-1">(Installing the PWA is usually best for reliable push.)</div>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={pushBusy}
+                          onClick={async () => {
+                            try {
+                              setPushBusy(true);
+                              if (!pushEnabled) {
+                                await enablePush();
+                                setPushEnabled(true);
+                                setMsg('Push enabled');
+                              } else {
+                                await disablePush();
+                                setPushEnabled(false);
+                                setMsg('Push disabled');
+                              }
+                            } catch (e: any) {
+                              console.error(e);
+                              setMsg(e?.message || 'Failed to update push settings');
+                            } finally {
+                              setPushBusy(false);
+                            }
+                          }}
+                        >
+                          {pushEnabled ? 'Disable' : 'Enable'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
-            </div>
+            ) : null}
 
-            <div className="card">
-              <div className="font-semibold mb-2">Membership & roles</div>
-
-              <div className="text-sm">
-                {!memberships.length ? (
-                  <div className="text-xs opacity-70">No site memberships found.</div>
-                ) : (
-                  <div className="space-y-2">
-                    {memberships.map((m) => {
-                      const st = String(m.status || '').toLowerCase();
-                      const siteId = Number(m.site_id || 0);
-                      const siteName = String(m.site || '');
-                      const key = String(siteId || m.id || siteName);
-                      return (
-                        <div key={key} className="tv-list-item">
-                          <div className="min-w-0">
-                            <div className="font-medium truncate">{siteName}</div>
-                            <div className="text-xs opacity-70">
-                              Role: <b>{normaliseRole(m.role)}</b>
-                              {st === 'requested' ? <span className="opacity-70"> (requested)</span> : null}
-                            </div>
-                          </div>
-                          {siteId ? (
-                            <button type="button" className="btn btn-outline" onClick={() => setConfirmLeave({ site_id: siteId, site: siteName })}>
-                              {st === 'requested' ? 'Cancel' : 'Leave'}
-                            </button>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <div className="border-t pt-3 mt-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="font-medium">Access</div>
-                    <button type="button" className="btn" onClick={() => setShowAddSite(true)}>
-                      + Add site
+            {/* DATA PANEL */}
+            {view === 'data' ? (
+              <div className="grid gap-4">
+                <div className="card">
+                  <div className="text-xs tracking-wider uppercase opacity-70">Troubleshooting</div>
+                  <div className="text-lg font-semibold mt-1">Clear offline cache</div>
+                  <div className="text-sm opacity-80 mt-1">If something feels stuck, clear local storage and reload.</div>
+                  <div className="flex gap-2 flex-wrap mt-3">
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={async () => {
+                        try {
+                          // IndexedDB
+                          await new Promise<void>((resolve, reject) => {
+                            const req = indexedDB.deleteDatabase('spectatore');
+                            req.onsuccess = () => resolve();
+                            req.onerror = () => reject(req.error);
+                            req.onblocked = () => resolve();
+                          });
+                          // localStorage (token is managed separately)
+                          setMsg('Offline cache cleared. Refreshing…');
+                          setTimeout(() => window.location.reload(), 250);
+                        } catch (e: any) {
+                          console.error(e);
+                          setMsg('Failed to clear cache');
+                        }
+                      }}
+                    >
+                      Clear cache & reload
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      onClick={() => {
+                        setMsg('Refreshing…');
+                        setTimeout(() => window.location.reload(), 150);
+                      }}
+                    >
+                      Refresh
                     </button>
                   </div>
-                  <div className="text-xs opacity-60 mt-1">Request membership to another site (member/validator/admin).</div>
                 </div>
               </div>
-            </div>
-
-            <div className="card">
-              <div className="text-sm font-semibold mb-2">Change password</div>
-              <div className="grid gap-3">
-                <div>
-                  <label className="block text-sm mb-1">Current password</label>
-                  <input type="password" className="input" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-sm mb-1">New password</label>
-                  <input type="password" className="input" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-                </div>
-                <div>
-                  <label className="block text-sm mb-1">Confirm new password</label>
-                  <input type="password" className="input" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
-                </div>
-              </div>
-            </div>
-
-            <button className="btn" type="submit">
-              Save changes
-            </button>
-
-            {me?.email ? <div className="text-xs opacity-70">Signed in as: {me.email}</div> : null}
-          </form>
+            ) : null}
+          </>
         )}
 
         <div className="card mt-4">
-          <div className="font-semibold mb-2">Legal</div>
-          <div className="text-sm opacity-80 mb-3">Terms and privacy documents.</div>
-          <div className="flex gap-2 flex-wrap">
-            <button type="button" className="btn btn-outline" onClick={() => nav('/Terms')}>
-              Terms &amp; Conditions
-            </button>
-            <button type="button" className="btn btn-outline" onClick={() => nav('/Privacy')}>
-              Privacy &amp; Data Use
-            </button>
+          <div className="text-xs tracking-wider uppercase opacity-70">Legal</div>
+          <div className="text-lg font-semibold mt-1">Terms & privacy</div>
+          <div className="text-sm opacity-80 mt-1">Review Spectatore’s terms and privacy documents.</div>
+          <div className="flex gap-2 flex-wrap mt-3">
+            <button type="button" className="btn btn-outline" onClick={() => nav('/Terms')}>Terms &amp; Conditions</button>
+            <button type="button" className="btn btn-outline" onClick={() => nav('/Privacy')}>Privacy &amp; Data Use</button>
           </div>
         </div>
       </div>

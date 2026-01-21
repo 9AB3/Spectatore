@@ -598,7 +598,7 @@ export default function FinalizeShift() {
                 className="btn btn-primary w-full"
                 onClick={() => {
                   setMilestoneOpen(false);
-                  nav('/YouVsYou');
+                  nav('/You');
                 }}
               >
                 View Performance

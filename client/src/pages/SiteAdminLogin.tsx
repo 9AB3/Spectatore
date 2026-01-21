@@ -74,6 +74,26 @@ export default function SiteAdminLogin() {
       const db = await getDB();
       await db.put('session', { token: res.token, user_id: res.user_id }, 'auth');
 
+      // Enrich session with server-authoritative user + site context
+      // (prevents "missing site_id" issues elsewhere in the UI).
+      try {
+        const me: any = await api('/api/user/me');
+        const prev = (await db.get('session', 'auth')) || {};
+        await db.put(
+          'session',
+          {
+            ...prev,
+            work_site_id: me?.workSite?.id ?? null,
+            work_site_name: me?.workSite?.name ?? null,
+            subscribed_site_id: me?.subscribedSite?.id ?? null,
+            subscribed_site_name: me?.subscribedSite?.name ?? null,
+          },
+          'auth',
+        );
+      } catch {
+        // non-fatal
+      }
+
       // Server is the only source of truth for SiteAdmin authorization.
       const scope: any = await api('/api/site-admin/me');
       if (scope?.ok) {

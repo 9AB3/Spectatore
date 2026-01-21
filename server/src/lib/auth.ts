@@ -69,18 +69,34 @@ export function siteAdminMiddleware(req: any, res: any, next: any) {
 
           // Validators via membership
           try {
+            // NOTE: Some DBs store role/status with odd casing or whitespace (e.g. " Validator ").
+            // Be tolerant here so legitimate site admins/validators don't get blocked.
+            // NOTE: Some older DBs had a legacy `site` column on site_memberships.
+            // Our canonical schema uses site_id + site_name only.
+            // Do NOT reference m.site here or the query will fail and block validators.
             const mr = await pool.query(
-              `SELECT COALESCE(s.name, m.site, m.site_name) as site, m.role
+              `WITH m2 AS (
+                 SELECT
+                   COALESCE(s.name, m.site_name) AS site,
+                   LOWER(TRIM(COALESCE(NULLIF(m.role, ''), '')))     AS role_norm,
+                   LOWER(TRIM(COALESCE(NULLIF(m.status, ''), 'active'))) AS status_norm
                  FROM site_memberships m
-                 LEFT JOIN admin_sites s ON s.id=m.site_id
-                WHERE m.user_id=$1
-                  AND LOWER(COALESCE(NULLIF(m.status,''),'active')) IN ('active','approved')
-                  AND LOWER(COALESCE(NULLIF(m.role,''),'')) IN ('validator','admin','site_admin','site_validator')`,
+                 LEFT JOIN admin_sites s ON s.id = m.site_id
+                 WHERE m.user_id = $1
+               )
+               SELECT site, role_norm
+                 FROM m2
+                WHERE status_norm IN ('active','approved')
+                  AND (
+                    role_norm IN ('validator','admin','site_admin','site_validator')
+                    OR role_norm LIKE '%validator%'
+                    OR role_norm LIKE '%admin%'
+                  )`,
               [u.id],
             );
-                        const sites = (mr.rows || []).map((x: any) => String(x.site)).filter(Boolean);
+            const sites = (mr.rows || []).map((x: any) => String(x.site)).filter(Boolean);
             if (!sites.length) return res.status(403).json({ error: 'forbidden' });
-            const can_manage = (mr.rows || []).some((x: any) => ['admin','site_admin'].includes(String(x.role).toLowerCase()));
+            const can_manage = (mr.rows || []).some((x: any) => String(x.role_norm || '').includes('admin'));
             req.site_admin = {
               username: u.name || u.email || 'Validator',
               sites,

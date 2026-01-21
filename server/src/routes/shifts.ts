@@ -17,6 +17,8 @@ const MILESTONE_METRICS = [
   'Production drillm',
   'Primary Production buckets',
   'Primary Development buckets',
+  'Spray Volume',
+  'Agi Volume',
   'Backfill volume',
   'Backfill buckets',
   'Tonnes charged',
@@ -80,6 +82,8 @@ function computeMilestoneMetricMapForShift(
     out['Production drillm'] = n(flat['Metres Drilled'] || 0) + n(flat['Cleanouts Drilled'] || 0) + n(flat['Redrills'] || 0);
     out['Primary Production buckets'] = n(flat['Stope to Truck'] || 0) + n(flat['Stope to SP'] || 0);
     out['Primary Development buckets'] = n(flat['Heading to Truck'] || 0) + n(flat['Heading to SP'] || 0);
+    out['Spray Volume'] = n(flat['Spray Volume'] || 0);
+    out['Agi Volume'] = n(flat['Agi Volume'] || 0);
     // Backfilling (Surface/Underground)
     out['Backfill volume'] = n(shiftRow?.totals_json?.Backfilling?.Surface?.Volume ?? flat['Volume'] ?? 0);
     out['Backfill buckets'] = n(shiftRow?.totals_json?.Backfilling?.Underground?.Buckets ?? flat['Buckets'] ?? 0);
@@ -119,7 +123,13 @@ function isYmd(s: string) {
 }
 
 async function getUserSite(client: any, user_id: number): Promise<string> {
-  const r = await client.query('SELECT site FROM users WHERE id=$1', [user_id]);
+  const r = await client.query(
+    `SELECT COALESCE(ws.name_display, u.site) AS site
+       FROM users u
+       LEFT JOIN work_sites ws ON ws.id=u.work_site_id
+      WHERE u.id=$1`,
+    [user_id],
+  );
   const site = String(r.rows?.[0]?.site || '').trim();
   return site || 'default';
 }
@@ -136,6 +146,32 @@ async function getUserName(client: any, user_id: number): Promise<string> {
   return name || '';
 }
 
+async function getUserWorkSiteId(client: any, user_id: number): Promise<number | null> {
+  try {
+    const r = await client.query('SELECT work_site_id FROM users WHERE id=$1', [user_id]);
+    const v = r.rows?.[0]?.work_site_id;
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+
+async function getUserPrimaryAdminSiteId(client: any, user_id: number): Promise<number | null> {
+  try {
+    const r = await client.query(
+      'SELECT COALESCE(primary_admin_site_id, primary_site_id) AS id FROM users WHERE id=$1',
+      [user_id],
+    );
+    const v = r.rows?.[0]?.id;
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 // GET /api/shifts/dates-with-data
 router.get('/dates-with-data', authMiddleware, async (req: any, res) => {
   const user_id = req.user_id;
@@ -150,6 +186,70 @@ router.get('/dates-with-data', authMiddleware, async (req: any, res) => {
   } catch (err) {
     console.error('dates-with-data failed', err);
     res.status(500).json({ error: 'db failed' });
+  }
+});
+
+// GET /api/shifts/by-date?date=YYYY-MM-DD
+// Returns any existing shifts for the current user on that date (DS/NS).
+router.get('/by-date', authMiddleware, async (req: any, res) => {
+  const user_id = req.user_id;
+  if (!user_id) return res.status(401).json({ error: 'missing user' });
+
+  const date = String(req.query?.date || '').trim();
+  if (!isYmd(date)) return res.status(400).json({ error: 'invalid date' });
+
+  try {
+    const r = await pool.query(
+      `SELECT id, date::text AS date, dn, finalized_at
+         FROM shifts
+        WHERE user_id=$1 AND date=$2::date
+        ORDER BY dn ASC`,
+      [user_id, date],
+    );
+    return res.json({ ok: true, date, shifts: r.rows });
+  } catch (err) {
+    console.error('shifts by-date failed', err);
+    return res.status(500).json({ error: 'db failed' });
+  }
+});
+
+// GET /api/shifts/details?date=YYYY-MM-DD&dn=DS|NS
+// Returns the existing shift + raw activities (payloads) so the client can "add to existing".
+router.get('/details', authMiddleware, async (req: any, res) => {
+  const user_id = req.user_id;
+  if (!user_id) return res.status(401).json({ error: 'missing user' });
+
+  const date = String(req.query?.date || '').trim();
+  const dn = String(req.query?.dn || '').trim();
+  if (!isYmd(date)) return res.status(400).json({ ok: false, error: 'invalid date' });
+  if (!dn) return res.status(400).json({ ok: false, error: 'missing dn' });
+
+  const client = await pool.connect();
+  try {
+    const s = await client.query(
+      `SELECT id, date::text AS date, dn, totals_json, meta_json, finalized_at
+         FROM shifts
+        WHERE user_id=$1 AND date=$2::date AND dn=$3
+        LIMIT 1`,
+      [user_id, date, dn],
+    );
+    const shiftRow = s.rows?.[0];
+    if (!shiftRow) return res.status(404).json({ ok: false, error: 'shift not found' });
+
+    const a = await client.query(
+      `SELECT id, activity, sub_activity, payload_json, created_at
+         FROM shift_activities
+        WHERE shift_id=$1
+        ORDER BY id ASC`,
+      [shiftRow.id],
+    );
+
+    return res.json({ ok: true, shift: shiftRow, activities: a.rows || [] });
+  } catch (err) {
+    console.error('shifts details failed', err);
+    return res.status(500).json({ ok: false, error: 'db failed' });
+  } finally {
+    client.release();
   }
 });
 
@@ -204,26 +304,26 @@ router.post('/delete-finalized', authMiddleware, async (req: any, res: any) => {
     // Optional: also delete the corresponding validated snapshot rows for those dates
     // (only if your product logic wants delete-finalized to wipe validation copies too)
     try {
-      const site = await getUserSite(client, user_id);
+      const admin_site_id = await getUserPrimaryAdminSiteId(client, user_id);
       const user_email = await getUserEmail(client, user_id);
 
       // dn is not provided to delete-finalized, so remove both DS + NS for the date list.
       await client.query(
         `DELETE FROM validated_shift_activities
-          WHERE site=$1
+          WHERE admin_site_id=$1
             AND COALESCE(user_email,'')=COALESCE($2,'')
             AND date = ANY($3::date[])
             AND dn IN ('DS','NS')`,
-        [site, user_email, dates],
+        [admin_site_id, user_email, dates],
       );
 
       await client.query(
         `DELETE FROM validated_shifts
-          WHERE site=$1
+          WHERE admin_site_id=$1
             AND COALESCE(user_email,'')=COALESCE($2,'')
             AND date = ANY($3::date[])
             AND dn IN ('DS','NS')`,
-        [site, user_email, dates],
+        [admin_site_id, user_email, dates],
       );
     } catch (e) {
       // Don't fail the delete if validation layer isn't present / schema differs
@@ -375,23 +475,31 @@ function buildMetaJson(items: any[]) {
       await client.query('BEGIN');
 
       // Denormalised user info for filtering + display
-      const site = await getUserSite(client, user_id);
+      const work_site_id = await getUserWorkSiteId(client, user_id);
+      const admin_site_id = await getUserPrimaryAdminSiteId(client, user_id);
       const user_email = await getUserEmail(client, user_id);
       const user_name = await getUserName(client, user_id);
 
+      // Use a stable identifier for shift_key + validation uniqueness.
+      // Some older local DBs / seed users may have empty email; avoid collisions by synthesizing one.
+      const stable_email = (user_email || '').trim() || `user-${user_id}@local`;
+      const shift_key = `${admin_site_id || 0}|${date}|${dn}|${stable_email}`;
+
       // Upsert the shift row and mark finalized
       const up = await client.query(
-        `INSERT INTO shifts (user_id, site, date, dn, totals_json, meta_json, finalized_at, user_email, user_name)
-         VALUES ($1,$2,$3::date,$4,$5::jsonb,$6::jsonb,NOW(),$7,$8)
+        `INSERT INTO shifts (user_id, work_site_id, admin_site_id, date, dn, totals_json, meta_json, finalized_at, user_email, user_name, shift_key)
+         VALUES ($1,$2,$3,$4::date,$5,$6::jsonb,$7::jsonb,NOW(),$8,$9,$10)
          ON CONFLICT (user_id, date, dn)
-         DO UPDATE SET site=EXCLUDED.site,
+         DO UPDATE SET work_site_id=EXCLUDED.work_site_id,
+                       admin_site_id=EXCLUDED.admin_site_id,
                        totals_json=EXCLUDED.totals_json,
                        meta_json=EXCLUDED.meta_json,
                        finalized_at=NOW(),
                        user_email=EXCLUDED.user_email,
-                       user_name=EXCLUDED.user_name
+                       user_name=EXCLUDED.user_name,
+                       shift_key=EXCLUDED.shift_key
          RETURNING id`,
-        [user_id, site, date, dn, JSON.stringify(totals || {}), JSON.stringify(meta_json || {}), user_email, user_name],
+        [user_id, work_site_id, admin_site_id, date, dn, JSON.stringify(totals || {}), JSON.stringify(meta_json || {}), stable_email, user_name, shift_key],
       );
       const shift_id = up.rows?.[0]?.id;
       if (!shift_id) throw new Error('shift upsert failed');
@@ -404,62 +512,156 @@ function buildMetaJson(items: any[]) {
         if (!p.activity) continue;
 
         await client.query(
-          `INSERT INTO shift_activities (shift_id, user_email, user_name, site, activity, sub_activity, payload_json)
-           VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
-          [shift_id, user_email, user_name, site, p.activity, p.sub, JSON.stringify(p)],
+          `INSERT INTO shift_activities (shift_id, user_email, user_name, work_site_id, admin_site_id, activity, sub_activity, payload_json, shift_key)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)`,
+          [shift_id, stable_email, user_name, work_site_id, admin_site_id, p.activity, p.sub, JSON.stringify(p), shift_key],
         );
       }
 
       // Mirror the finalized snapshot into validation layer (unvalidated by default).
-// IMPORTANT: once a validator has created validation rows for this shift,
-// operators re-finalizing must NOT overwrite or delete validation-layer data.
-const existingV = await client.query(
-  `SELECT id, validated
-     FROM validated_shifts
-    WHERE site=$1 AND date=$2::date AND dn=$3
-      AND COALESCE(user_email,'')=COALESCE($4,'')
-    LIMIT 1`,
-  [site, date, dn, user_email],
-);
+      // Only subscribed (tenant) data is visible/validatable by Site Admins.
+      // If the user has no active Admin Site selected, we skip validation mirroring.
+      if (!admin_site_id) {
+        await client.query('COMMIT');
+        return res.json({ ok: true, shift_id });
+      }
 
-if (!existingV.rows?.length) {
-  // (validated_* tables are keyed by site/date/dn/user_email in this project.)
-  await client.query(
-    `DELETE FROM validated_shift_activities
-     WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
-    [site, date, dn, user_email],
-  );
-  await client.query(
-    `DELETE FROM validated_shifts
-     WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
-    [site, date, dn, user_email],
-  );
+      // Mirror the finalized snapshot into validation layer (unvalidated by default).
+      // Only subscribed (tenant) data is visible/validatable by Site Admins.
+      // If the user has no active Admin Site selected, we skip validation mirroring.
+      if (!admin_site_id) {
+        await client.query('COMMIT');
+        return res.json({ ok: true, shift_id });
+      }
 
-	  const shiftKey = `${site}|${date}|${dn}|${(user_id ?? user_email ?? '').toString()}`;
+      // IMPORTANT: once a validator has validated this shift, operators re-finalizing must NOT overwrite
+      // validation-layer data. The validation layer is keyed by shift_key (and by the UNIQUE(admin_site_id,date,dn,user_email)).
 
-const insShift = await client.query(
-  `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, user_id, validated, totals_json, shift_key)
-   VALUES ($1,$2::date,$3,COALESCE($4,''),$5,$6,0,$7::jsonb,$8)
-   RETURNING id, shift_key`,
-  [site, date, dn, user_email, user_name, user_id, JSON.stringify(totals || {}), shiftKey],
-);
+      // Validation layer is keyed by (admin_site_id,date,dn,user_email) and shift_key.
+      // Always use stable_email so we don't accidentally create duplicates or collide on empty emails.
+      const shiftKey = `${admin_site_id}|${date}|${dn}|${stable_email}`;
 
-const validated_shift_id = insShift.rows?.[0]?.id as number;
-for (const it of activities) {
-    const p = normaliseItem(it);
-    if (!p.activity) continue;
+      // IMPORTANT: match existing validation snapshots robustly.
+      // Older rows may have blank user_email (local dev / seed), while newer code synthesizes a stable email.
+      // We therefore match by shift_id first, then by shift_key, then by (admin_site_id,date,dn,user_email).
+      const existing = await client.query(
+        `SELECT id, validated
+           FROM validated_shifts
+          WHERE shift_id=$6
+             OR shift_key=$1
+             OR (admin_site_id=$2 AND date=$3::date AND dn=$4 AND COALESCE(user_email,'')=COALESCE($5,''))
+          ORDER BY (shift_id=$6) DESC, (shift_key=$1) DESC
+          LIMIT 1`,
+        [shiftKey, admin_site_id, date, dn, stable_email, shift_id],
+      );
 
-    await client.query(
-      `INSERT INTO validated_shift_activities
-        (validated_shift_id, shift_key, site, date, dn, user_email, user_name, user_id, activity, sub_activity, payload_json)
-       VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11::jsonb)`,
-      [validated_shift_id, shiftKey, site, date, dn, user_email, user_name, user_id, p.activity, p.sub, JSON.stringify(p)],
-    );
-}
-}
+      let validated_shift_id: number | null = null;
 
-await client.query('COMMIT');
+      if (existing.rows?.length) {
+        const row = existing.rows[0];
+        if (row.validated) {
+          // Already validated by a validator: don't touch it.
+          await client.query('COMMIT');
+          return res.json({ ok: true, shift_id, already_validated: true });
+        }
 
+        validated_shift_id = Number(row.id);
+
+        // Update the summary row (but keep validated=FALSE)
+        await client.query(
+          `UPDATE validated_shifts
+              SET shift_key=$2,
+                  shift_id=$3,
+                  admin_site_id=$4,
+                  work_site_id=$5,
+                  date=$6::date,
+                  dn=$7,
+                  user_email=COALESCE($8,''),
+                  user_name=$9,
+                  user_id=$10,
+                  totals_json=$11::jsonb
+            WHERE id=$1`,
+          [
+            validated_shift_id,
+            shiftKey,
+            shift_id,
+            admin_site_id,
+            work_site_id,
+            date,
+            dn,
+            stable_email,
+            user_name,
+            user_id,
+            JSON.stringify(totals || {}),
+          ],
+        );
+
+        // Replace activities snapshot for this validation row
+        await client.query(`DELETE FROM validated_shift_activities WHERE validated_shift_id=$1`, [validated_shift_id]);
+      } else {
+        // Insert new validation snapshot row for this shift.
+        // validated_shifts.shift_id is UNIQUE in your schema, so we must be able to re-finalize safely.
+        // If a row already exists for this shift_id:
+        //  - If it is still unvalidated, update it.
+        //  - If it has been validated by a validator, do not overwrite.
+        // Upsert by the unique shift_id constraint. Use ON CONSTRAINT so Postgres always targets the right unique index.
+        // Also: be defensive against any edge-case double-submit by catching 23505 and selecting the existing row.
+        let insShift: any;
+        try {
+          insShift = await client.query(
+            `INSERT INTO validated_shifts
+                (shift_id, shift_key, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id, validated, totals_json)
+             VALUES
+                ($1,$2,$3,$4,$5::date,$6,COALESCE($7,''),$8,$9,FALSE,$10::jsonb)
+             ON CONFLICT ON CONSTRAINT validated_shifts_shift_id_key DO UPDATE
+                SET shift_key    = EXCLUDED.shift_key,
+                    admin_site_id = EXCLUDED.admin_site_id,
+                    work_site_id  = EXCLUDED.work_site_id,
+                    date          = EXCLUDED.date,
+                    dn            = EXCLUDED.dn,
+                    user_email    = EXCLUDED.user_email,
+                    user_name     = EXCLUDED.user_name,
+                    user_id       = EXCLUDED.user_id,
+                    totals_json   = EXCLUDED.totals_json
+              WHERE validated_shifts.validated = FALSE
+             RETURNING id, validated`,
+            [Number(shift_id), shiftKey, admin_site_id, work_site_id, date, dn, stable_email, user_name, user_id, JSON.stringify(totals || {})],
+          );
+        } catch (e: any) {
+          if (e?.code === '23505') {
+            insShift = await client.query(`SELECT id, validated FROM validated_shifts WHERE shift_id=$1 LIMIT 1`, [Number(shift_id)]);
+          } else {
+            throw e;
+          }
+        }
+
+        if (insShift.rows?.length) {
+          validated_shift_id = Number(insShift.rows?.[0]?.id);
+        } else {
+          // Conflict hit but row is already validated; do not overwrite.
+          const ex = await client.query(`SELECT id, validated FROM validated_shifts WHERE shift_id=$1 LIMIT 1`, [shift_id]);
+          if (ex.rows?.[0]?.validated) {
+            await client.query('COMMIT');
+            return res.json({ ok: true, shift_id, already_validated: true });
+          }
+        }
+      }
+
+      if (validated_shift_id) {
+        for (const it of activities) {
+          const p = normaliseItem(it);
+          if (!p.activity) continue;
+
+          await client.query(
+            `INSERT INTO validated_shift_activities
+              (validated_shift_id, shift_key, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id, activity, sub_activity, payload_json)
+             VALUES ($1,$2,$3,$4,$5::date,$6,$7,$8,$9,$10,$11,$12::jsonb)`,
+            [validated_shift_id, shiftKey, admin_site_id, work_site_id, date, dn, stable_email, user_name, user_id, p.activity, p.sub, JSON.stringify(p)],
+          );
+        }
+      }
+
+      await client.query('COMMIT');
 
 
       // --- Notifications (best-effort; do not fail finalize) ---
@@ -563,13 +765,23 @@ await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => undefined);
       console.error('finalize failed', err);
-      return res.status(500).json({ error: 'db failed' });
+      const e: any = err;
+      return res.status(500).json({
+        error: 'db failed',
+        detail: String(e?.message || e || 'unknown'),
+        code: e?.code,
+      });
     } finally {
       client.release();
     }
   } catch (err) {
     console.error('finalize failed (outer)', err);
-    return res.status(500).json({ error: 'db failed' });
+    const e: any = err;
+    return res.status(500).json({
+      error: 'db failed',
+      detail: String(e?.message || e || 'unknown'),
+      code: e?.code,
+    });
   }
 });
 

@@ -68,7 +68,7 @@ export default function ClearShifts() {
         <div className="card">
           <h2 className="text-xl font-semibold mb-3">Clear Shifts</h2>
 
-          <div className="text-sm text-slate-600 mb-3">
+          <div className="text-sm tv-muted mb-3">
             Select dates, then delete finalized shift data for those dates.
           </div>
 
@@ -86,7 +86,7 @@ export default function ClearShifts() {
           />
 
           {selectedList.length > 0 && (
-            <div className="mt-3 text-xs text-slate-600">
+            <div className="mt-3 text-xs tv-muted">
               Selected: {selectedList.join(', ')}
             </div>
           )}
@@ -173,20 +173,20 @@ function MultiSelectCalendar({
   });
 
   return (
-    <div className="border border-slate-300 rounded p-2">
+    <div className="tv-surface-soft tv-border border rounded-2xl p-3">
       <div className="flex items-center justify-between mb-2">
-        <button className="btn px-2 py-1" type="button" onClick={prevMonth}>
+        <button className="btn-secondary px-3 py-2" type="button" onClick={prevMonth} aria-label="Previous month">
           ‹
         </button>
-        <div className="text-sm font-medium">{monthLabel}</div>
-        <button className="btn px-2 py-1" type="button" onClick={nextMonth}>
+        <div className="text-sm font-semibold">{monthLabel}</div>
+        <button className="btn-secondary px-3 py-2" type="button" onClick={nextMonth} aria-label="Next month">
           ›
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-1 text-xs text-slate-500 mb-1">
+      <div className="grid grid-cols-7 gap-1 text-xs tv-muted mb-2">
         {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d) => (
-          <div key={d} className="text-center">
+          <div key={d} className="text-center font-semibold">
             {d}
           </div>
         ))}
@@ -194,7 +194,7 @@ function MultiSelectCalendar({
 
       <div className="grid grid-cols-7 gap-1">
         {weeks.flat().map((d, idx) => {
-          if (!d) return <div key={idx} className="h-9" />;
+          if (!d) return <div key={idx} className="h-10" />;
           const ymd = formatYmd(d);
           const has = datesWithData.has(ymd);
           const isSel = selected.has(ymd);
@@ -202,18 +202,20 @@ function MultiSelectCalendar({
           // Style rules:
           // - green background for dates that have finalized data
           // - strong border/contrast for selected dates
-          const base = 'h-9 rounded flex items-start justify-center text-sm border';
-          const cls = isSel
-            ? `${base} border-slate-900 bg-slate-900 text-white`
+          const base = 'h-10 rounded-xl flex items-center justify-center text-sm border font-semibold tv-hoverable';
+          const cls = `${base}`;
+          const style: any = isSel
+            ? { background: 'var(--accent-2)', borderColor: 'var(--accent-2)', color: 'white' }
             : has
-              ? `${base} border-green-600 bg-green-50 text-slate-900`
-              : `${base} border-slate-200 bg-white text-slate-700`;
+              ? { background: 'rgba(48,209,88,0.18)', borderColor: 'var(--ok)', color: 'var(--text)' }
+              : { background: 'var(--input)', borderColor: 'var(--hairline)', color: 'var(--text)' };
 
           return (
             <button
               key={idx}
               type="button"
               className={cls}
+              style={style}
               onClick={() => onToggle(ymd)}
               title={ymd}
             >

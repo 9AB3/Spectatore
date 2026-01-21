@@ -14,6 +14,7 @@ import ResetPassword from './pages/ResetPassword';
 import EquipmentLocations from './pages/EquipmentLocations';
 import YouVsYou from './pages/YouVsYou';
 import YouVsNetwork from './pages/YouVsNetwork';
+import YouHub from './pages/YouHub';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
 import ClearShifts from './pages/ClearShifts';
@@ -224,8 +225,15 @@ export default function App() {
 
         <Route path="/Connections" element={<Connections />} />
         <Route path="/Equipment&Locations" element={<EquipmentLocations />} />
-        <Route path="/YouVsYou" element={<YouVsYou />} />
-        <Route path="/YouVsNetwork" element={<YouVsNetwork />} />
+        {/* You Hub (tabs) */}
+        <Route path="/You" element={<YouHub />}>
+          <Route index element={<YouVsYou />} />
+          <Route path="Crew" element={<YouVsNetwork />} />
+        </Route>
+
+        {/* Backwards-compatible routes */}
+        <Route path="/YouVsYou" element={<Navigate to="/You" replace />} />
+        <Route path="/YouVsNetwork" element={<Navigate to="/You/Crew" replace />} />
         <Route path="/Settings" element={<Settings />} />
         <Route path="/NotificationPreferences" element={<NotificationPreferences />} />
         <Route path="/Feedback" element={<Feedback />} />

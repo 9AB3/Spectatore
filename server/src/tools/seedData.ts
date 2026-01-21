@@ -78,6 +78,16 @@ export async function seedData(opts: SeedOptions) {
   try {
     await client.query('BEGIN');
 
+    // Ensure an admin site exists
+    const as = await client.query(
+      `INSERT INTO admin_sites (name) VALUES ($1)
+       ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name
+       RETURNING id`,
+      [site],
+    );
+    const admin_site_id = Number(as.rows?.[0]?.id) || null;
+    if (!admin_site_id) throw new Error('seedData: failed to resolve admin_site_id');
+
     const today = new Date();
 
     for (let i = 0; i < days; i++) {
@@ -406,18 +416,17 @@ export async function seedData(opts: SeedOptions) {
       const metaJson = buildMetaJson(acts);
 
       const shiftRes = await client.query(
-        `INSERT INTO shifts (user_id, user_email, user_name, site, date, dn, totals_json, meta_json, updated_at, finalized_at)
+        `INSERT INTO shifts (user_id, user_email, user_name, admin_site_id, date, dn, totals_json, meta_json, updated_at, finalized_at)
          VALUES ($1,$2,$3,$4,$5::date,$6,$7::jsonb,$8::jsonb, now(), now())
          ON CONFLICT (user_id, date, dn)
          DO UPDATE SET user_email=EXCLUDED.user_email,
                        user_name=EXCLUDED.user_name,
-                       site=EXCLUDED.site,
-                       totals_json=EXCLUDED.totals_json,
+                                              totals_json=EXCLUDED.totals_json,
                        meta_json=EXCLUDED.meta_json,
                        finalized_at=EXCLUDED.finalized_at,
                        updated_at=EXCLUDED.updated_at
          RETURNING id`,
-        [user_id, user_email, user_name, site, ymd(d), dn, JSON.stringify(rollup), JSON.stringify(metaJson)],
+        [user_id, user_email, user_name, admin_site_id, ymd(d), dn, JSON.stringify(rollup), JSON.stringify(metaJson)],
       );
       const shift_id = shiftRes.rows[0].id as number;
 
@@ -427,44 +436,14 @@ export async function seedData(opts: SeedOptions) {
       for (const a of acts) {
         const payload = { sub: a.sub, values: a.values };
         await client.query(
-          `INSERT INTO shift_activities (shift_id, user_email, user_name, site, activity, sub_activity, payload_json)
+          `INSERT INTO shift_activities (shift_id, user_email, user_name, admin_site_id, activity, sub_activity, payload_json)
            VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
-          [shift_id, user_email, user_name, site, a.activity, a.sub, JSON.stringify(payload)],
+          [shift_id, user_email, user_name, admin_site_id, a.activity, a.sub, JSON.stringify(payload)],
         );
       }
 
       if (includeValidated) {
-        // Replace validated shift for this date/dn/user
-        const vs = await client.query(
-          `DELETE FROM validated_shifts
-             WHERE site=$1 AND COALESCE(user_email,'')=COALESCE($2,'') AND date=$3::date AND dn=$4`,
-          [site, user_email, ymd(d), dn],
-        );
-
-	        const vShiftRes = await client.query(
-	          `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, validated, totals_json)
-	           VALUES ($1,$2::date,$3,COALESCE($4,''),$5,0,$6::jsonb)
-	           RETURNING id`,
-	          [site, ymd(d), dn, user_email, user_name, JSON.stringify(rollup)],
-	        );
-        const v_shift_id = vShiftRes.rows[0].id as number;
-
-        // validated_shift_activities is keyed by (site,date,dn,user_email) in this schema
-        await client.query(
-          `DELETE FROM validated_shift_activities
-            WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
-          [site, ymd(d), dn, user_email],
-        );
-
-        for (const a of acts) {
-          const payload = { sub: a.sub, values: a.values };
-          await client.query(
-            `INSERT INTO validated_shift_activities (site, date, dn, user_email, user_name, activity, sub_activity, payload_json)
-             VALUES ($1,$2::date,$3,$4,$5,$6,$7,$8::jsonb)`,
-            [site, ymd(d), dn, user_email, user_name, a.activity, a.sub, JSON.stringify(payload)],
-          );
-        }
-
+        // NOTE: validated seeding disabled in this build (schema moved to admin_site_id/shift_key).
       }
     }
 

@@ -13,6 +13,15 @@ export default function ViewActivities() {
     setItems(list || []);
   }
 
+  function handleEdit(id: number) {
+    nav('/Activity', {
+      state: {
+        editActivityId: id,
+        returnTo: '/ViewActivities',
+      },
+    });
+  }
+
   const [items, setItems] = useState<any[]>([]);
   useEffect(() => {
     (async () => {
@@ -106,7 +115,8 @@ export default function ViewActivities() {
                           return (
                             <li
                               key={idx}
-                              className="tv-surface-soft tv-border border rounded-2xl p-3 flex items-start gap-3"
+                              className="tv-surface-soft tv-border border rounded-2xl p-3 flex items-start gap-3 cursor-pointer hover:shadow-sm transition"
+                              onClick={() => handleEdit(it.id)}
                             >
                               <div className="text-xs tv-muted flex-1">
                                 {Object.entries(p.values || {}).map(([k, v], i) => (
@@ -134,7 +144,10 @@ export default function ViewActivities() {
                                   aria-label="Delete"
                                   title="Delete"
                                   className="ml-auto tv-muted hover:text-red-400 text-lg leading-none px-2"
-                                  onClick={() => handleDelete(it.id)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDelete(it.id);
+                                  }}
                                 >
                                   ×
                                 </button>

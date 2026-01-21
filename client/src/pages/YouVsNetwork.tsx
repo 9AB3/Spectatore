@@ -1,8 +1,7 @@
-import Header from '../components/Header';
-import BottomNav from '../components/BottomNav';
+// Wrapped by /You hub, so no standalone header/nav needed here.
 import TvTileRow from '../components/TvTileRow';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
 
 
@@ -51,6 +50,8 @@ const MILESTONE_METRICS = [
   'Production drillm',
   'Primary Production buckets',
   'Primary Development buckets',
+  'Spray Volume',
+  'Agi Volume',
   'Backfill volume',
   'Backfill buckets',
   'Tonnes charged',
@@ -599,7 +600,24 @@ function ColumnChartDaily({
 
 export default function YouVsNetwork() {
   const location = useLocation();
-  const nav = useNavigate();
+  const fromRef = useRef<HTMLInputElement | null>(null);
+  const toRef = useRef<HTMLInputElement | null>(null);
+
+  const showNativePicker = (ref: React.MutableRefObject<HTMLInputElement | null>) => {
+    const el: any = ref.current;
+    // Chrome/Edge support input.showPicker(). If unavailable, focusing still lets users type.
+    if (el && typeof el.showPicker === 'function') {
+      try {
+        el.showPicker();
+        return;
+      } catch {}
+    }
+    // Fallback for Firefox/Safari or when showPicker throws.
+    try {
+      ref.current?.focus();
+      ref.current?.click();
+    } catch {}
+  };
   const [from, setFrom] = useState(() => {
     // Default: start of current month
     const d = new Date();
@@ -609,7 +627,7 @@ export default function YouVsNetwork() {
   const [to, setTo] = useState(() => ymd(new Date()));
   const [metric, setMetric] = useState<Metric>('Tonnes Hauled');
 
-  // Allow deep-linking from push notifications, e.g. /YouVsNetwork?metric=Tonnes%20Hauled
+  // Allow deep-linking from push notifications, e.g. /You/Crew?metric=Tonnes%20Hauled
   useEffect(() => {
     try {
       const sp = new URLSearchParams(location.search);
@@ -736,9 +754,7 @@ export default function YouVsNetwork() {
   }, [data, cumSummary.a, cumSummary.b]);
 
   return (
-    <div>
-      <Header />
-      <div className="max-w-2xl mx-auto p-4 pb-24 space-y-4">
+      <div className="space-y-4">
         {/* Card 1: header + filters */}
         <div className="card">
           <div className="flex items-center justify-between gap-3 mb-3">
@@ -746,44 +762,56 @@ export default function YouVsNetwork() {
               <div className="text-lg font-semibold">You vs Crew</div>
               <div className="text-sm opacity-70">Compare your performance to your crew connections.</div>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="seg-tabs flex-1" role="tablist" aria-label="Performance pages">
-                <button role="tab" aria-selected="true" className="seg-tab seg-tab--active" onClick={() => nav('/YouVsNetwork')}>
-                  You vs Crew
-                </button>
-                <button role="tab" aria-selected="false" className="seg-tab" onClick={() => nav('/YouVsYou')} title="Personal trends">
-                  You vs You
-                </button>
-              </div>
-            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3 mb-3">
             <div className="tv-tile tv-hoverable p-4">
               <div className="text-xs tv-muted mb-2">From date</div>
-              <div className="relative">
-                <div className="tv-date-pill">{fmtShortDate(from)}</div>
-                <input
-                  className="absolute inset-0 w-full h-full opacity-0"
-                  type="date"
-                  value={from}
-                  onChange={(e) => setFrom(e.target.value)}
-                  aria-label="From date"
-                />
-              </div>
+              <input
+                className="tv-date-input"
+                type="date"
+                ref={fromRef}
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+                // NOTE: do NOT mark date inputs as readOnly; Chromium won't open the native picker.
+                // We still force-open the picker on desktop via showPicker() when available.
+                onPointerDown={(e) => {
+                  // desktop mouse click should always open the picker
+                  if ((e as any).pointerType === 'mouse') showNativePicker(fromRef);
+                }}
+                onClick={() => showNativePicker(fromRef)}
+                onFocus={() => showNativePicker(fromRef)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    showNativePicker(fromRef);
+                  }
+                }}
+                aria-label="From date"
+              />
             </div>
             <div className="tv-tile tv-hoverable p-4">
               <div className="text-xs tv-muted mb-2">To date</div>
-              <div className="relative">
-                <div className="tv-date-pill">{fmtShortDate(to)}</div>
-                <input
-                  className="absolute inset-0 w-full h-full opacity-0"
-                  type="date"
-                  value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                  aria-label="To date"
-                />
-              </div>
+              <input
+                className="tv-date-input"
+                type="date"
+                ref={toRef}
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+                // NOTE: do NOT mark date inputs as readOnly; Chromium won't open the native picker.
+                onPointerDown={(e) => {
+                  if ((e as any).pointerType === 'mouse') showNativePicker(toRef);
+                }}
+                onClick={() => showNativePicker(toRef)}
+                onFocus={() => showNativePicker(toRef)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    showNativePicker(toRef);
+                  }
+                }}
+                aria-label="To date"
+              />
             </div>
           </div>
 
@@ -1008,7 +1036,5 @@ export default function YouVsNetwork() {
           </div>
         )}
       </div>
-      <BottomNav />
-    </div>
   );
 }

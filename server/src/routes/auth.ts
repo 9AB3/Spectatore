@@ -49,7 +49,7 @@ async function tooMany(email: string): Promise<boolean> {
 
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, site, state, name } = req.body || {};
+    const { email, password, site, state, name, work_site_name } = req.body || {};
     const normEmail = normaliseEmail(email);
     if (!normEmail || !password || !name) {
       return res.status(400).json({ error: 'name, email and password required' });
@@ -58,27 +58,42 @@ router.post('/register', async (req, res) => {
     const hash = bcrypt.hashSync(String(password), 10);
     const code = Math.floor(100000 + Math.random() * 900000).toString();
 
+    // WORK SITE (not tied to subscribed Site Admin)
+    const wsName = String(work_site_name || site || '').trim();
+    if (!wsName) {
+      return res.status(400).json({ error: 'work_site_name required' });
+    }
+    const wsNorm = wsName.toLowerCase().trim().replace(/\s+/g, ' ');
+
+    const ws = await pool.query(
+      `INSERT INTO work_sites (name_display, name_normalized, state, is_official)
+       VALUES ($1,$2,$3,FALSE)
+       ON CONFLICT (name_normalized) DO UPDATE
+         SET name_display = COALESCE(NULLIF(work_sites.name_display,''), EXCLUDED.name_display)
+       RETURNING id, name_display`,
+      [wsName, wsNorm, state || null],
+    );
+    const work_site_id = ws.rows?.[0]?.id;
+
     const inserted = await pool.query(
-      `INSERT INTO users (email, password_hash, site, state, name, confirm_code)
-       VALUES ($1,$2,$3,$4,$5,$6)
-       RETURNING id, email, name, is_admin, email_confirmed`,
-      [normEmail, hash, site || null, state || null, name, code],
+      `INSERT INTO users (email, password_hash, site, state, name, confirm_code, work_site_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       RETURNING id, email, name, is_admin, email_confirmed, work_site_id`,
+      [normEmail, hash, wsName || null, state || null, name, code, work_site_id || null],
     );
 
     const user = inserted.rows[0];
 
-    // Create a membership request for the nominated site (best-effort).
-    // Membership status/role is what controls access to site-level validation tools.
+    // Do NOT create a Subscribed Site membership from registration.
+    // Subscribed Site access (roles + approval) is an explicit flow in Settings.
+    // However, we *do* track the user's Work Site history.
     try {
-      const siteName = String(site || '').trim();
-      if (siteName) {
+      if (work_site_id) {
         await pool.query(
-          `INSERT INTO admin_sites (name) VALUES ($2) ON CONFLICT (name) DO NOTHING;
-           INSERT INTO site_memberships (user_id, site_id, site_name, role, status)
-           VALUES ($1,(SELECT id FROM admin_sites WHERE name=$2),$2,'member','requested')
-           ON CONFLICT (user_id, site_id) DO NOTHING;
-           UPDATE users SET primary_site_id = COALESCE(primary_site_id, (SELECT id FROM admin_sites WHERE name=$2)) WHERE id=$1`,
-          [user.id, siteName],
+          `INSERT INTO user_work_site_history (user_id, work_site_id, start_date)
+           VALUES ($1,$2,CURRENT_DATE)
+           ON CONFLICT DO NOTHING`,
+          [user.id, work_site_id],
         );
       }
     } catch {
@@ -93,7 +108,7 @@ router.post('/register', async (req, res) => {
       `A new user signed up.\n\n` +
         `Name: ${name || ''}\n` +
         `Email: ${normEmail}\n` +
-        `Site: ${site || ''}\n` +
+        `Work Site: ${wsName || ''}\n` +
         `State: ${state || ''}\n` +
         `Time: ${new Date().toISOString()}\n`,
     ).catch(() => {});

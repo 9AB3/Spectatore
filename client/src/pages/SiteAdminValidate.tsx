@@ -526,7 +526,7 @@ export default function SiteAdminValidate() {
       (m[k] ||= []).push(a);
     }
     return m;
-  }, [acts]);
+  }, [validatedActs]);
 
   const shiftById = useMemo(() => {
     const m = new Map<number, ShiftRow>();

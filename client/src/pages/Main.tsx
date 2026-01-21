@@ -60,6 +60,8 @@ export default function Main() {
   const [dn, setDn] = useState<'DS' | 'NS'>('DS');
   const [isAdmin, setIsAdmin] = useState(false);
   const [datesWithData, setDatesWithData] = useState<Set<string>>(() => new Set());
+  const [dupeOpen, setDupeOpen] = useState<boolean>(false);
+  const [dupeInfo, setDupeInfo] = useState<any>(null);
 
   async function tagOut() {
     try {
@@ -103,6 +105,18 @@ export default function Main() {
   }, []);
 
   async function confirmShift() {
+    // If the selected date already has data, confirm intent first.
+    if (datesWithData.has(date)) {
+      try {
+        const existing: any = await api(`/api/shifts/by-date?date=${encodeURIComponent(date)}`);
+        setDupeInfo(existing);
+      } catch {
+        setDupeInfo({ ok: false });
+      }
+      setDupeOpen(true);
+      return;
+    }
+
     // Save to localStorage (for legacy) and to IndexedDB
     localStorage.setItem('spectatore-shift', JSON.stringify({ date, dn }));
     const db = await getDB();
@@ -111,6 +125,55 @@ export default function Main() {
     setOpen(false);
     // Keep toast visible for at least 2s before route change
     setTimeout(() => nav('/Shift'), 2000);
+  }
+
+  async function startFreshReplace() {
+    const db = await getDB();
+    const all = (await db.getAll('activities')) as any[];
+    // Drop any local cached activities that match this shift (date+dn)
+    const toDel = (all || []).filter((a) => a?.shiftDate === date && a?.dn === dn && typeof a?.id === 'number');
+    for (const it of toDel) await db.delete('activities', it.id);
+    localStorage.setItem('spectatore-shift', JSON.stringify({ date, dn }));
+    await db.put('shift', { date, dn }, 'current');
+    setMsg('Starting fresh');
+    setDupeOpen(false);
+    setOpen(false);
+    setTimeout(() => nav('/Shift'), 600);
+  }
+
+  async function loadExistingAndAdd() {
+    try {
+      const details: any = await api(`/api/shifts/details?date=${encodeURIComponent(date)}&dn=${encodeURIComponent(dn)}`);
+      const db = await getDB();
+
+      // Clear local cache for this shift
+      const all = (await db.getAll('activities')) as any[];
+      const toDel = (all || []).filter((a) => a?.shiftDate === date && a?.dn === dn && typeof a?.id === 'number');
+      for (const it of toDel) await db.delete('activities', it.id);
+
+      // Set current shift and seed activities
+      localStorage.setItem('spectatore-shift', JSON.stringify({ date, dn }));
+      await db.put('shift', { date, dn }, 'current');
+
+      const acts = Array.isArray(details?.activities) ? details.activities : [];
+      for (const a of acts) {
+        const payload = a?.payload_json || a?.payload || {};
+        await db.add('activities', {
+          payload,
+          shiftDate: date,
+          dn,
+          ts: Date.now(),
+        });
+      }
+      setMsg('Loaded existing shift');
+    } catch (e) {
+      console.error('Failed to load existing shift', e);
+      setMsg('Could not load existing shift');
+    }
+
+    setDupeOpen(false);
+    setOpen(false);
+    setTimeout(() => nav('/Shift'), 700);
   }
 
   return (
@@ -138,28 +201,19 @@ export default function Main() {
               className="tv-tile min-w-[260px] w-[260px] md:w-[320px] text-left transition-transform"
               onClick={() => setOpen(true)}
             >
-              
-              <div className="flex flex-col">
-                <div className="text-xs" style={{ color: 'var(--muted)' }}>Shift</div>
-                <div className="text-xl font-extrabold leading-tight mt-1">Start new shift</div>
-
-                <div className="mt-4 flex items-center justify-center">
-                  <img
-                    src="/start-shift.png"
-                    alt=""
-                    className="h-[120px] md:h-[140px] w-full object-contain select-none pointer-events-none"
-                    draggable={false}
-                  />
-                </div>
-
-                <div className="text-sm mt-3" style={{ color: 'var(--muted)' }}>Choose date &amp; DS/NS</div>
-
-                <div className="mt-4">
-                  <div className="inline-flex items-center gap-2 text-xs font-semibold" style={{ color: 'var(--muted)' }}>
-                    <span className="h-2 w-2 rounded-full" style={{ background: 'var(--accent)' }} />
-                    Enter portal
-                  </div>
-                </div>
+              <div className="relative flex items-center justify-center h-full">
+                <span
+                  className="absolute top-3 left-3 text-[11px] font-bold tracking-wide uppercase opacity-80"
+                  style={{ color: 'var(--muted)' }}
+                >
+                  Start shift
+                </span>
+                <img
+                  src={`${import.meta.env.BASE_URL}start-shift.png`}
+                  alt=""
+                  className="h-[200px] md:h-[240px] w-full object-contain select-none pointer-events-none"
+                  draggable={false}
+                />
               </div>
 
             </button>
@@ -169,49 +223,43 @@ export default function Main() {
               className="tv-tile min-w-[260px] w-[260px] md:w-[320px] text-left transition-transform"
               onClick={tagOut}
             >
-              
-              <div className="flex flex-col">
-                <div className="text-xs" style={{ color: 'var(--muted)' }}>Session</div>
-                <div className="text-xl font-extrabold leading-tight mt-1">Tag out</div>
-
-                <div className="mt-4 flex items-center justify-center">
-                  <img
-                    src="/tag-out.png"
-                    alt=""
-                    className="h-[120px] md:h-[140px] w-full object-contain select-none pointer-events-none"
-                    draggable={false}
-                  />
-                </div>
-
-                <div className="text-sm mt-3" style={{ color: 'var(--muted)' }}>Sign out of the app</div>
-
-                <div className="mt-4">
-                  <div className="inline-flex items-center gap-2 text-xs font-semibold" style={{ color: 'var(--muted)' }}>
-                    <span className="h-2 w-2 rounded-full" style={{ background: 'var(--accent-2)' }} />
-                    End session
-                  </div>
-                </div>
+              <div className="relative flex items-center justify-center h-full">
+                <span
+                  className="absolute top-3 left-3 text-[11px] font-bold tracking-wide uppercase opacity-80"
+                  style={{ color: 'var(--muted)' }}
+                >
+                  Tag out
+                </span>
+                <img
+                  src={`${import.meta.env.BASE_URL}tag-out.png`}
+                  alt=""
+                  className="h-[200px] md:h-[240px] w-full object-contain select-none pointer-events-none"
+                  draggable={false}
+                />
               </div>
 
             </button>
 
-            <div className="tv-tile min-w-[260px] w-[260px] md:w-[320px]">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="text-xs" style={{ color: 'var(--muted)' }}>Support</div>
-                  <div className="text-xl font-extrabold leading-tight">Feedback</div>
-                  <div className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Report bugs or suggest improvements</div>
-                </div>
-                <div className="h-12 w-12 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(17, 24, 39, 0.12)', border: '1px solid var(--hairline)' }} aria-hidden="true">
-                  <FeedbackIcon className="h-6 w-6" />
-                </div>
+            <button
+              type="button"
+              className="tv-tile min-w-[260px] w-[260px] md:w-[320px] text-left transition-transform"
+              onClick={() => nav('/Feedback')}
+            >
+              <div className="relative flex items-center justify-center h-full">
+                <span
+                  className="absolute top-3 left-3 text-[11px] font-bold tracking-wide uppercase opacity-80"
+                  style={{ color: 'var(--muted)' }}
+                >
+                  Feedback
+                </span>
+                <img
+                  src={`${import.meta.env.BASE_URL}feedback.png`}
+                  alt=""
+                  className="h-[200px] md:h-[240px] w-full object-contain select-none pointer-events-none"
+                  draggable={false}
+                />
               </div>
-              <div className="mt-4">
-                <button type="button" onClick={() => nav('/Feedback')} className="btn w-full">
-                  Open
-                </button>
-              </div>
-            </div>
+            </button>
           </div>
         </div>
 
@@ -268,6 +316,54 @@ export default function Main() {
               >
                 Click here to clear shifts
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {dupeOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-start justify-center z-50">
+          <div className="card w-full max-w-sm">
+            <h3 className="text-lg font-semibold mb-2">Existing shift found</h3>
+            <div className="text-sm" style={{ color: 'var(--muted)' }}>
+              You already have uploaded data for <b style={{ color: 'var(--text)' }}>{date}</b>. Choose what to do.
+            </div>
+
+            {Array.isArray(dupeInfo?.shifts) ? (
+              <div className="mt-3 space-y-2">
+                <div className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>On this date:</div>
+                <div className="space-y-2">
+                  {dupeInfo.shifts.map((s: any) => (
+                    <div key={String(s?.id)} className="tv-surface-soft tv-border border rounded-2xl p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="font-semibold">{String(s?.dn || '')}</div>
+                        <div className="text-[11px]" style={{ color: 'var(--muted)' }}>{s?.finalized_at ? 'Finalized' : 'Draft'}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mt-4 space-y-2">
+              <button type="button" className="btn w-full" onClick={startFreshReplace}>
+                Replace all data (start fresh)
+              </button>
+              <button
+                type="button"
+                className="btn-secondary w-full"
+                onClick={loadExistingAndAdd}
+                disabled={!Array.isArray(dupeInfo?.shifts) || !dupeInfo.shifts.some((s: any) => String(s?.dn || '') === String(dn))}
+                title={!Array.isArray(dupeInfo?.shifts) || !dupeInfo.shifts.some((s: any) => String(s?.dn || '') === String(dn)) ? 'No existing shift for the selected DS/NS' : ''}
+              >
+                Add to existing (load & continue)
+              </button>
+              <button type="button" className="btn-secondary w-full" onClick={() => setDupeOpen(false)}>
+                Cancel
+              </button>
+              <div className="text-[11px] mt-1" style={{ color: 'var(--muted)' }}>
+                Re-finalizing a shift overwrites what is stored for that date/shift on the server.
+              </div>
             </div>
           </div>
         </div>
@@ -353,12 +449,13 @@ function ShiftDateCalendar({
         <span className="ml-2 text-slate-400">▾</span>
       </button>
       {open && (
-        <div className="absolute z-20 mt-1 bg-white border border-slate-300 rounded shadow-lg p-2 w-64 right-0">
+        <div className="absolute z-20 mt-2 right-0 w-72 tv-surface-soft tv-border border rounded-2xl shadow-lg p-3">
           <div className="flex items-center justify-between mb-2">
             <button
               type="button"
-              className="px-2 text-sm text-slate-600"
+              className="btn-secondary px-3 py-2"
               onClick={prevMonth}
+              aria-label="Previous month"
             >
               ‹
             </button>
@@ -370,14 +467,15 @@ function ShiftDateCalendar({
             </div>
             <button
               type="button"
-              className="px-2 text-sm text-slate-600"
+              className="btn-secondary px-3 py-2"
               onClick={nextMonth}
+              aria-label="Next month"
             >
               ›
             </button>
           </div>
 
-          <div className="grid grid-cols-7 text-center text-[11px] mb-1 text-slate-500">
+          <div className="grid grid-cols-7 text-center text-[11px] mb-2 tv-muted font-semibold">
             <div>S</div>
             <div>M</div>
             <div>T</div>
@@ -387,14 +485,14 @@ function ShiftDateCalendar({
             <div>S</div>
           </div>
 
-          <div className="grid grid-cols-7 text-center gap-y-1">
+          <div className="grid grid-cols-7 text-center gap-1">
             {weeks.map((week, wi) =>
               week.map((d, di) => {
                 if (!d) {
                   return (
                     <div
                       key={`${wi}-${di}`}
-                      className="w-8 h-8 inline-flex items-start justify-center"
+                      className="w-10 h-10 inline-flex items-center justify-center"
                     />
                   );
                 }
@@ -402,23 +500,19 @@ function ShiftDateCalendar({
                 const isSelected = value === ymd;
                 const hasData = datesWithData.has(ymd);
 
-                let base =
-                  'w-8 h-8 inline-flex items-start justify-center rounded-full text-xs cursor-pointer';
-                let extra = ' text-slate-700 hover:bg-slate-100';
-
-                if (hasData) {
-                  extra =
-                    ' bg-green-200 text-green-900 hover:bg-green-300';
-                }
-                if (isSelected) {
-                  extra += ' ring-2 ring-slate-500';
-                }
+                const base = 'w-10 h-10 inline-flex items-center justify-center rounded-xl text-sm border font-semibold tv-hoverable';
+                const style: any = isSelected
+                  ? { background: 'var(--accent-2)', borderColor: 'var(--accent-2)', color: 'white' }
+                  : hasData
+                    ? { background: 'rgba(48,209,88,0.18)', borderColor: 'var(--ok)', color: 'var(--text)' }
+                    : { background: 'var(--input)', borderColor: 'var(--hairline)', color: 'var(--text)' };
 
                 return (
                   <button
                     key={`${wi}-${di}`}
                     type="button"
-                    className={base + extra}
+                    className={base}
+                    style={style}
                     onClick={() => handleSelect(d)}
                   >
                     {d.getDate()}

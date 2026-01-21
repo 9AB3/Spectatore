@@ -150,7 +150,15 @@ router.get('/me', authMiddleware, async (req: any, res) => {
   try {
     const user_id = req.user_id;
     const r = await pool.query(
-      'SELECT id, email, site, is_admin, name, terms_accepted_at, terms_version FROM users WHERE id=$1',
+      `SELECT u.id, u.email, u.site, u.is_admin, u.name, u.terms_accepted_at, u.terms_version,
+              u.work_site_id,
+              ws.name_display AS work_site_name,
+              COALESCE(u.primary_admin_site_id, u.primary_site_id) AS primary_site_id,
+              s.name AS subscribed_site_name
+         FROM users u
+         LEFT JOIN work_sites ws ON ws.id = u.work_site_id
+         LEFT JOIN admin_sites s ON s.id = COALESCE(u.primary_admin_site_id, u.primary_site_id)
+        WHERE u.id=$1`,
       [user_id],
     );
     const row = r.rows[0];
@@ -184,21 +192,17 @@ router.get('/me', authMiddleware, async (req: any, res) => {
       memberships = [];
     }
 
-    if (!memberships.length && row.site) {
-      memberships = [
-        {
-          id: 0,
-          site_id: null,
-          site: String(row.site),
-          role: 'member',
-          status: 'active',
-        },
-      ];
-    }
     return res.json({
       id: row.id,
       email: row.email,
+      // Legacy field kept for old clients; represents current Work Site display.
       site: row.site || null,
+      workSite: row.work_site_id
+        ? { id: Number(row.work_site_id), name: String(row.work_site_name || row.site || '') }
+        : null,
+      subscribedSite: row.primary_site_id
+        ? { id: Number(row.primary_site_id), name: String(row.subscribed_site_name || '') }
+        : null,
       name: row.name || null,
       is_admin: !!row.is_admin,
       memberships,
@@ -208,6 +212,100 @@ router.get('/me', authMiddleware, async (req: any, res) => {
     });
   } catch (err) {
     console.error('GET /user/me failed', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+function normWorkSiteName(s: any): string {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+// Get current Work Site + history
+router.get('/work-site', authMiddleware, async (req: any, res) => {
+  try {
+    const user_id = req.user_id;
+    const ur = await pool.query(
+      `SELECT u.work_site_id, ws.name_display AS work_site_name
+         FROM users u
+         LEFT JOIN work_sites ws ON ws.id=u.work_site_id
+        WHERE u.id=$1`,
+      [user_id],
+    );
+    const current = ur.rows?.[0]?.work_site_id
+      ? { id: Number(ur.rows[0].work_site_id), name: String(ur.rows[0].work_site_name || '') }
+      : null;
+
+    const hr = await pool.query(
+      `SELECT h.id, h.start_date::text AS start_date, h.end_date::text AS end_date, ws.name_display AS name
+         FROM user_work_site_history h
+         JOIN work_sites ws ON ws.id=h.work_site_id
+        WHERE h.user_id=$1
+        ORDER BY h.start_date DESC, h.id DESC
+        LIMIT 100`,
+      [user_id],
+    );
+    return res.json({ current, history: hr.rows || [] });
+  } catch {
+    return res.json({ current: null, history: [] });
+  }
+});
+
+// Set current Work Site (and write history). This does NOT change Subscribed Site.
+router.post('/work-site', authMiddleware, async (req: any, res) => {
+  const user_id = req.user_id;
+  try {
+    let work_site_id = Number(req.body?.work_site_id || 0) || null;
+    const name = String(req.body?.work_site_name || req.body?.name || '').trim();
+    const state = req.body?.state ? String(req.body.state).trim() : null;
+
+    if (!work_site_id && !name) return res.status(400).json({ error: 'work_site_id or work_site_name required' });
+
+    // Allow creating/selecting by name
+    if (!work_site_id && name) {
+      const normalized = normWorkSiteName(name);
+      const r = await pool.query(
+        `INSERT INTO work_sites (name_display, name_normalized, state, is_official, created_by_user_id)
+         VALUES ($1,$2,$3,FALSE,$4)
+         ON CONFLICT (name_normalized) DO UPDATE
+           SET name_display = COALESCE(NULLIF(work_sites.name_display,''), EXCLUDED.name_display)
+         RETURNING id, name_display, is_official`,
+        [name, normalized, state, user_id],
+      );
+      work_site_id = Number(r.rows?.[0]?.id || 0) || null;
+    }
+
+    // Fetch display name
+    const ws = await pool.query('SELECT id, name_display FROM work_sites WHERE id=$1', [work_site_id]);
+    const display = String(ws.rows?.[0]?.name_display || '').trim();
+    if (!display) return res.status(400).json({ error: 'work_site_not_found' });
+
+    // Close any open history segment
+    await pool.query(
+      `UPDATE user_work_site_history
+          SET end_date = CURRENT_DATE - 1
+        WHERE user_id=$1 AND end_date IS NULL AND work_site_id <> $2`,
+      [user_id, work_site_id],
+    );
+    // Ensure an open segment for this site
+    await pool.query(
+      `INSERT INTO user_work_site_history (user_id, work_site_id, start_date)
+       SELECT $1,$2,CURRENT_DATE
+        WHERE NOT EXISTS (
+          SELECT 1 FROM user_work_site_history
+           WHERE user_id=$1 AND work_site_id=$2 AND end_date IS NULL
+        )`,
+      [user_id, work_site_id],
+    );
+
+    // Update user record. We also mirror the display into legacy users.site for existing reports.
+    await pool.query('UPDATE users SET work_site_id=$1, site=$2 WHERE id=$3', [work_site_id, display, user_id]);
+
+    return res.json({ ok: true, workSite: { id: work_site_id, name: display } });
+  } catch (e: any) {
+    console.error('POST /user/work-site failed', e?.message || e);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -238,7 +336,8 @@ router.get('/sites', authMiddleware, async (_req: any, res) => {
 });
 
 
-// Set current active site (drives filtering / dashboards)
+// Set current active Subscribed Site (drives site-level assets / dashboards).
+// NOTE: This is NOT the user's Work Site.
 router.post('/active-site', authMiddleware, async (req: any, res) => {
   try {
     const user_id = req.user_id;
@@ -246,9 +345,8 @@ router.post('/active-site', authMiddleware, async (req: any, res) => {
 
     // allow clearing
     if (!site_id) {
-      // users.site is NOT NULL in our schema; treat "Personal" as the default site.
-      await pool.query("UPDATE users SET site='default' WHERE id=$1", [user_id]);
-      return res.json({ ok: true, site: null });
+      await pool.query('UPDATE users SET primary_admin_site_id = NULL, primary_site_id = NULL WHERE id=$1', [user_id]);
+      return res.json({ ok: true, subscribedSite: null });
     }
 
     // must be an active membership for this site
@@ -268,8 +366,8 @@ router.post('/active-site', authMiddleware, async (req: any, res) => {
     const name = String(mr.rows?.[0]?.name || '').trim();
     if (!name) return res.status(403).json({ error: 'not_a_member' });
 
-    await pool.query('UPDATE users SET site=$1 WHERE id=$2', [name, user_id]);
-    return res.json({ ok: true, site: name });
+    await pool.query('UPDATE users SET primary_admin_site_id=$1, primary_site_id=$1 WHERE id=$2', [site_id, user_id]);
+    return res.json({ ok: true, subscribedSite: { id: site_id, name } });
   } catch (err) {
     console.error('POST /user/active-site failed', err);
     return res.status(500).json({ error: 'Internal server error' });
@@ -281,26 +379,67 @@ router.post('/active-site', authMiddleware, async (req: any, res) => {
 router.get('/site-assets', authMiddleware, async (req: any, res) => {
   try {
     const user_id = req.user_id;
-    const site = String(req.query?.site || '').trim();
-    if (!site) return res.json({ equipment: [], locations: [] });
+    // Prefer numeric site_id when available, because some DBs do not store admin_* rows
+    // with a text "site" column.
+    const siteIdFromQuery = Number(req.query?.site_id || 0) || null;
+    let siteId: number | null = siteIdFromQuery;
+    let site = String(req.query?.site || '').trim();
+
+    if (!siteId && !site) {
+      // Default to current active Subscribed Site (users.primary_site_id)
+      const ur = await pool.query(
+        `SELECT COALESCE(u.primary_admin_site_id, u.primary_site_id) AS id, s.name AS name
+           FROM users u
+           LEFT JOIN admin_sites s ON s.id=COALESCE(u.primary_admin_site_id, u.primary_site_id)
+          WHERE u.id=$1`,
+        [user_id],
+      );
+      siteId = ur.rows?.[0]?.id ? Number(ur.rows[0].id) : null;
+      site = String(ur.rows?.[0]?.name || '').trim();
+    }
+
+    // If the user has no primary subscribed site set yet, fall back to their most recent ACTIVE membership.
+    // This protects new DBs where users.primary_site_id isn't being set consistently.
+    if (!siteId && !site) {
+      try {
+        const mr = await pool.query(
+          `SELECT m.site_id, s.name
+             FROM site_memberships m
+             JOIN admin_sites s ON s.id=m.site_id
+            WHERE m.user_id=$1
+              AND COALESCE(NULLIF(m.status,''),'requested')='active'
+            ORDER BY COALESCE(m.updated_at, m.created_at, m.requested_at) DESC NULLS LAST, m.id DESC
+            LIMIT 1`,
+          [user_id],
+        );
+        siteId = mr.rows?.[0]?.site_id ? Number(mr.rows[0].site_id) : null;
+        site = String(mr.rows?.[0]?.name || '').trim();
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!siteId && !site) return res.json({ equipment: [], locations: [] });
     if (site === 'default') return res.json({ equipment: [], locations: [] });
 
-    // verify user has an active membership for this site name (or legacy users.site)
-    const vr = await pool.query(
-      `SELECT 1
-         FROM users u
-        WHERE u.id=$1 AND COALESCE(NULLIF(u.site,''),'')=$2
-        LIMIT 1`,
-      [user_id, site],
-    );
-    if (!vr.rows?.length) {
-      const cols = await tableColumns('site_memberships');
-      const siteExpr = cols.has('site_name')
-        ? 'm.site_name'
-        : cols.has('site')
-          ? 'm.site'
-          : "''";
-      const mr = await pool.query(
+    // verify user has an active membership for this Subscribed Site.
+    // Different schemas store the site name differently (or not at all).
+    const cols = await tableColumns('site_memberships');
+    let mr;
+    if (siteId && cols.has('site_id')) {
+      // Most reliable: validate by numeric site_id.
+      mr = await pool.query(
+        `SELECT 1
+           FROM site_memberships m
+          WHERE m.user_id=$1
+            AND m.site_id=$2
+            AND COALESCE(NULLIF(m.status,''),'requested')='active'
+          LIMIT 1`,
+        [user_id, siteId],
+      );
+    } else if (cols.has('site_name') || cols.has('site')) {
+      const siteExpr = cols.has('site_name') ? 'm.site_name' : 'm.site';
+      mr = await pool.query(
         `SELECT 1
            FROM site_memberships m
           WHERE m.user_id=$1
@@ -309,53 +448,93 @@ router.get('/site-assets', authMiddleware, async (req: any, res) => {
           LIMIT 1`,
         [user_id, site],
       );
-      if (!mr.rows?.length) return res.status(403).json({ error: 'not_a_member' });
+    } else {
+      // Older schema: site_memberships has site_id but no site name column.
+      // Join to admin_sites to validate membership by site name.
+      mr = await pool.query(
+        `SELECT 1
+           FROM site_memberships m
+           JOIN admin_sites s ON s.id=m.site_id
+          WHERE m.user_id=$1
+            AND COALESCE(NULLIF(m.status,''),'requested')='active'
+            AND s.name=$2
+          LIMIT 1`,
+        [user_id, site],
+      );
+    }
+    if (!mr?.rows?.length) {
+      // Fallback: if the user is currently scoped to this site (users.primary_site_id),
+      // allow access even if the membership row is missing/mis-shaped in older DBs.
+      // This fixes local/dev DBs that were reset mid-migration where primary_site_id is
+      // correctly set but site_memberships is missing/incorrect.
+      const scoped = await pool.query(
+        `SELECT 1
+           FROM users u
+           JOIN admin_sites s ON s.id=COALESCE(u.primary_admin_site_id, u.primary_site_id)
+          WHERE u.id=$1 AND s.name=$2
+          LIMIT 1`,
+        [user_id, site],
+      );
+      if (!scoped.rows?.length) return res.json({ equipment: [], locations: [], restricted: true });
     }
 
     // admin_equipment uses equipment_id (not name). Alias it to name for client-side consistency.
-    // admin_equipment may be equipment_id (newer) or name (older). Always return {name} to client.
+    // admin_equipment may be equipment_id (newer) or name (older). Also, the site scoping column
+    // differs between DBs (site/admin_site_id/site_id). We detect it at runtime.
+    const aecols = await tableColumns('admin_equipment');
+    const eqWhere = siteId && (aecols.has('admin_site_id') || aecols.has('site_id'))
+      ? (aecols.has('admin_site_id') ? 'admin_site_id=$1' : 'site_id=$1')
+      : 'site=$1';
+    const eqArg = siteId && eqWhere !== 'site=$1' ? siteId : site;
+
     let er;
     try {
       er = await pool.query(
         `SELECT id, equipment_id AS name, type
            FROM admin_equipment
-          WHERE site=$1
+          WHERE ${eqWhere}
           ORDER BY equipment_id ASC`,
-        [site],
+        [eqArg],
       );
     } catch (e: any) {
       if (String(e?.code) !== '42703') throw e;
       er = await pool.query(
         `SELECT id, name, type
            FROM admin_equipment
-          WHERE site=$1
+          WHERE ${eqWhere}
           ORDER BY name ASC`,
-        [site],
+        [eqArg],
       );
     }
 
-    // admin_locations may be name (newer) or location_id (older). Always return {name} to client.
+    // admin_locations may be name (newer) or location_id (older). Site scoping column differs too.
+    const alcols = await tableColumns('admin_locations');
+    const locWhere = siteId && (alcols.has('admin_site_id') || alcols.has('site_id'))
+      ? (alcols.has('admin_site_id') ? 'admin_site_id=$1' : 'site_id=$1')
+      : 'site=$1';
+    const locArg = siteId && locWhere !== 'site=$1' ? siteId : site;
+
     let lr;
     try {
       lr = await pool.query(
         `SELECT id, name, type
            FROM admin_locations
-          WHERE site=$1
+          WHERE ${locWhere}
           ORDER BY name ASC`,
-        [site],
+        [locArg],
       );
     } catch (e: any) {
       if (String(e?.code) !== '42703') throw e;
       lr = await pool.query(
         `SELECT id, location_id AS name, type
            FROM admin_locations
-          WHERE site=$1
+          WHERE ${locWhere}
           ORDER BY location_id ASC`,
-        [site],
+        [locArg],
       );
     }
 
-    return res.json({ equipment: er.rows || [], locations: lr.rows || [] });
+    return res.json({ site: siteId ? { id: siteId, name: site } : site ? { id: null, name: site } : null, equipment: er.rows || [], locations: lr.rows || [] });
   } catch (err) {
     console.error('GET /user/site-assets failed', err);
     return res.status(500).json({ error: 'Internal server error' });
@@ -454,7 +633,7 @@ router.post('/site-requests', authMiddleware, async (req: any, res) => {
     // Best-effort: set primary_site_id if empty
     try {
       await pool.query(
-        'UPDATE users SET primary_site_id = COALESCE(primary_site_id, $2) WHERE id=$1',
+        'UPDATE users SET primary_admin_site_id = COALESCE(primary_admin_site_id, $2), primary_site_id = COALESCE(primary_site_id, $2) WHERE id=$1',
         [user_id, site_id],
       );
     } catch {

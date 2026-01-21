@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Transparent background (no rect) -->
+  <g fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Helmet dome -->
+    <path d="M96 256c0-88.4 71.6-160 160-160s160 71.6 160 160"/>
+    <!-- Brim -->
+    <path d="M80 256h352"/>
+    <!-- Helmet sides -->
+    <path d="M112 256v64c0 53 43 96 96 96h96c53 0 96-43 96-96v-64"/>
+    <!-- Headlamp ring -->
+    <circle cx="256" cy="200" r="46"/>
+    <!-- Headlamp inner -->
+    <circle cx="256" cy="200" r="18"/>
+    <!-- Light beams -->
+    <path d="M332 200h84"/>
+    <path d="M324 168l76-44"/>
+    <path d="M324 232l76 44"/>
+  </g>
+</svg>

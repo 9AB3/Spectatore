@@ -60,6 +60,8 @@ const MILESTONE_METRICS = [
   'Production drillm',
   'Primary Production buckets',
   'Primary Development buckets',
+  'Spray Volume',
+  'Agi Volume',
   'Backfill volume',
   'Backfill buckets',
   'Tonnes charged',
@@ -134,6 +136,8 @@ function computeMilestoneMetricMapForShift(
     out['Production drillm'] = n(flat['Metres Drilled'] || 0) + n(flat['Cleanouts Drilled'] || 0) + n(flat['Redrills'] || 0);
     out['Primary Production buckets'] = n(flat['Stope to Truck'] || 0) + n(flat['Stope to SP'] || 0);
     out['Primary Development buckets'] = n(flat['Heading to Truck'] || 0) + n(flat['Heading to SP'] || 0);
+    out['Spray Volume'] = n(flat['Spray Volume'] || 0);
+    out['Agi Volume'] = n(flat['Agi Volume'] || 0);
     // Backfilling is split by sub-activity, so prefer the nested totals_json shape when available.
     out['Backfill volume'] = n(shiftRow?.totals_json?.Backfilling?.Surface?.Volume ?? flat['Volume'] ?? 0);
     out['Backfill buckets'] = n(shiftRow?.totals_json?.Backfilling?.Underground?.Buckets ?? flat['Buckets'] ?? 0);
@@ -158,6 +162,8 @@ function computeMilestoneMetricMapForShift(
   let prodDrillm = 0;
   let primProdBuckets = 0;
   let primDevBuckets = 0;
+  let sprayVol = 0;
+  let agiVol = 0;
   let chargeKg = 0;
   let tonnesFired = 0;
   let oreHoisted = 0;
@@ -184,6 +190,12 @@ function computeMilestoneMetricMapForShift(
       const holes = n(getVal(p, 'No of Holes') || 0);
       const cut = n(getVal(p, 'Cut Length') || 0);
       if (holes && cut) faceDrillm += holes * cut;
+    }
+
+    // Development support volumes (simple sum across all Development sub-activities)
+    if (activity === 'Development') {
+      sprayVol += n(getVal(p, 'Spray Volume') || 0);
+      agiVol += n(getVal(p, 'Agi Volume') || 0);
     }
 
     if (activity === 'Hauling') {
@@ -241,6 +253,8 @@ function computeMilestoneMetricMapForShift(
   out['Production drillm'] = prodDrillm;
   out['Primary Production buckets'] = primProdBuckets;
   out['Primary Development buckets'] = primDevBuckets;
+  out['Spray Volume'] = sprayVol;
+  out['Agi Volume'] = agiVol;
   // Backfilling metrics live under totals_json by sub-activity.
   out['Backfill volume'] = n(shiftRow?.totals_json?.Backfilling?.Surface?.Volume ?? 0);
   out['Backfill buckets'] = n(shiftRow?.totals_json?.Backfilling?.Underground?.Buckets ?? 0);

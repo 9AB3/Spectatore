@@ -120,7 +120,7 @@ router.get('/shift-totals', async (req, res) => {
       SELECT
         s.date,
         s.dn,
-        s.site,
+        COALESCE(asite.name, wsite.name_display, u.site, '') AS site,
         s.user_id AS user_id,
         COALESCE(NULLIF(s.user_name, ''), u.name, '') AS user_name,
         kv.key AS metric,
@@ -137,8 +137,10 @@ router.get('/shift-totals', async (req, res) => {
         s.finalized_at
       FROM shifts s
       LEFT JOIN users u ON u.id = s.user_id
+      LEFT JOIN admin_sites asite ON asite.id = s.admin_site_id
+      LEFT JOIN work_sites wsite ON wsite.id = s.work_site_id
 	      CROSS JOIN LATERAL jsonb_each(COALESCE(s.totals_json, '{}'::jsonb)) kv
-      WHERE ($1::text IS NULL OR s.site = $1)
+      WHERE ($1::text IS NULL OR COALESCE(asite.name, wsite.name_display, u.site) = $1)
         AND ($2::date IS NULL OR s.date >= $2)
         AND ($3::date IS NULL OR s.date <= $3)
       ORDER BY s.date, s.dn, user_id, kv.key
@@ -182,14 +184,14 @@ router.get('/shift-metrics', async (req, res) => {
           s.id AS shift_id,
           s.date,
           s.dn,
-          s.site,
+          COALESCE(asite.name, wsite.name_display, u.site, '') AS site,
           s.finalized_at,
           s.user_id AS user_id,
           u.name AS user_name,
           COALESCE(s.totals_json, '{}'::jsonb) AS totals_json
         FROM shifts s
         JOIN users u ON u.id = s.user_id
-        WHERE ($1::text IS NULL OR s.site = $1)
+        WHERE ($1::text IS NULL OR COALESCE(asite.name, wsite.name_display, u.site) = $1)
           AND ($2::text IS NULL OR s.date >= $2::date)
           AND ($3::text IS NULL OR s.date <= $3::date)
           AND s.finalized_at IS NOT NULL
@@ -287,7 +289,7 @@ router.get('/activity-payloads', async (req, res) => {
       SELECT
         s.date,
         s.dn,
-        COALESCE(a.site, s.site) AS site,
+        COALESCE(a.name, asite.name, wsite.name_display, u.site, '') AS site,
         s.user_id AS user_id,
         COALESCE(NULLIF(a.user_name, ''), NULLIF(s.user_name, ''), u.name, '') AS user_name,
         a.activity,
@@ -307,7 +309,7 @@ router.get('/activity-payloads', async (req, res) => {
       JOIN shifts s ON s.id = a.shift_id
       LEFT JOIN users u ON u.id = s.user_id
 	      CROSS JOIN LATERAL jsonb_each(COALESCE(a.payload_json, '{}'::jsonb)) kv
-      WHERE ($1::text IS NULL OR COALESCE(a.site, s.site) = $1)
+      WHERE ($1::text IS NULL OR COALESCE(a.name, asite.name, wsite.name_display, u.site) = $1)
         AND ($2::date IS NULL OR s.date >= $2)
         AND ($3::date IS NULL OR s.date <= $3)
       ORDER BY s.date, s.dn, user_id, a.activity, a.sub_activity, kv.key
@@ -456,7 +458,7 @@ router.get('/validated/activity-metrics', async (req, res) => {
     COALESCE(vs.date::date, vsa.date) AS date_ymd,
     vs.date::timestamptz AS date,
     vs.dn AS dn,
-    vs.site AS site,
+    asite.name AS site,
     vs.user_id AS user_id,
     s.user_id AS user_id,
     u.name  AS user_name,
@@ -465,8 +467,9 @@ router.get('/validated/activity-metrics', async (req, res) => {
     vsa.payload_json AS payload
   FROM validated_shift_activities vsa
   LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+  LEFT JOIN admin_sites asite ON asite.id = vs.admin_site_id
   LEFT JOIN users u ON u.id = vs.user_id
-  WHERE vs.site = $1
+  WHERE asite.name = $1
     AND vs.date >= $2::date
     AND vs.date <= $3::date
 ),
@@ -696,7 +699,7 @@ router.get('/validated/fact-hauling', async (req, res) => {
           vs.id AS validated_shift_id,
           COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
-          COALESCE(vs.site, vsa.site) AS site,
+          COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
@@ -711,7 +714,7 @@ router.get('/validated/fact-hauling', async (req, res) => {
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Hauling'
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
       ), x AS (
@@ -801,7 +804,7 @@ router.get('/validated/fact-hauling-loads', async (req, res) => {
           vs.id AS validated_shift_id,
           COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
-          COALESCE(vs.site, vsa.site) AS site,
+          COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
@@ -813,7 +816,7 @@ router.get('/validated/fact-hauling-loads', async (req, res) => {
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Hauling'
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
           AND jsonb_typeof(vsa.payload_json->'loads') = 'array'
@@ -867,7 +870,7 @@ router.get('/validated/fact-loading', async (req, res) => {
           vs.id AS validated_shift_id,
           COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
-          COALESCE(vs.site, vsa.site) AS site,
+          COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
@@ -882,7 +885,7 @@ router.get('/validated/fact-loading', async (req, res) => {
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Loading'
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
       )
@@ -937,7 +940,7 @@ router.get('/validated/fact-dev-face-drilling', async (req, res) => {
           vs.id AS validated_shift_id,
           COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
-          COALESCE(vs.site, vsa.site) AS site,
+          COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
@@ -953,7 +956,7 @@ router.get('/validated/fact-dev-face-drilling', async (req, res) => {
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Development'
           AND vsa.sub_activity = 'Face Drilling'
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
       )
@@ -1007,7 +1010,7 @@ router.get('/validated/fact-ground-support', async (req, res) => {
           vs.id AS validated_shift_id,
           COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
-          COALESCE(vs.site, vsa.site) AS site,
+          COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
@@ -1023,7 +1026,7 @@ router.get('/validated/fact-ground-support', async (req, res) => {
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Development'
           AND vsa.sub_activity IN ('Ground Support', 'Rehab')
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
       )
@@ -1079,7 +1082,7 @@ router.get('/validated/fact-production-drilling', async (req, res) => {
           vs.id AS validated_shift_id,
           COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
-          COALESCE(vs.site, vsa.site) AS site,
+          COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
@@ -1095,7 +1098,7 @@ router.get('/validated/fact-production-drilling', async (req, res) => {
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Production Drilling'
           AND vsa.sub_activity IN ('Stope','Service Hole')
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
       )
@@ -1152,7 +1155,7 @@ router.get('/validated/fact-production-drilling-holes', async (req, res) => {
           vs.id AS validated_shift_id,
           COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
-          COALESCE(vs.site, vsa.site) AS site,
+          COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
@@ -1169,7 +1172,7 @@ router.get('/validated/fact-production-drilling-holes', async (req, res) => {
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Production Drilling'
           AND vsa.sub_activity IN ('Stope','Service Hole')
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
           AND jsonb_typeof(vsa.payload_json->'holes') IN ('object','array')
@@ -1241,7 +1244,7 @@ router.get('/validated/fact-charging', async (req, res) => {
           vs.id AS validated_shift_id,
           COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
-          COALESCE(vs.site, vsa.site) AS site,
+          COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
@@ -1256,7 +1259,7 @@ router.get('/validated/fact-charging', async (req, res) => {
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Charging'
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
       )
@@ -1308,7 +1311,7 @@ router.get('/validated/fact-backfilling', async (req, res) => {
           vs.id AS validated_shift_id,
           COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
-          COALESCE(vs.site, vsa.site) AS site,
+          COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
@@ -1323,7 +1326,7 @@ router.get('/validated/fact-backfilling', async (req, res) => {
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Backfilling'
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
       )
@@ -1369,7 +1372,7 @@ router.get('/validated/fact-firing', async (req, res) => {
           vs.id AS validated_shift_id,
           COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
-          COALESCE(vs.site, vsa.site) AS site,
+          COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
@@ -1384,7 +1387,7 @@ router.get('/validated/fact-firing', async (req, res) => {
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Firing'
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
       )
@@ -1462,7 +1465,7 @@ router.get('/validated/fact-hoisting', async (req, res) => {
           vs.id AS validated_shift_id,
           COALESCE(vs.date::date, vsa.date) AS date,
           COALESCE(vs.dn, vsa.dn) AS dn,
-          COALESCE(vs.site, vsa.site) AS site,
+          COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, vs.user_id, vsa.user_id, '') AS user_id,
           COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
@@ -1477,7 +1480,7 @@ router.get('/validated/fact-hoisting', async (req, res) => {
         LEFT JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
         LEFT JOIN users u ON u.id = vs.user_id
         WHERE vsa.activity = 'Hoisting'
-          AND ($1::text IS NULL OR COALESCE(vs.site, vsa.site) = $1)
+          AND ($1::text IS NULL OR COALESCE(vCOALESCE(asite.name, wsite.name_display, u.site, '') AS site, asite.name) = $1)
           AND ($2::date IS NULL OR COALESCE(vs.date, vsa.date) >= $2::date)
           AND ($3::date IS NULL OR COALESCE(vs.date, vsa.date) <= $3::date)
       )

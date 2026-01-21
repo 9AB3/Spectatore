@@ -127,7 +127,7 @@ export default function BottomNav() {
           icon={<img src={crewIcon} className="h-6 w-6 nav-icon" alt="Crew" />}
         />
         <Item
-          to="/YouVsYou"
+          to="/You"
           label="You"
           icon={<img src={youIcon} className="h-6 w-6 nav-icon" alt="You" />}
         />

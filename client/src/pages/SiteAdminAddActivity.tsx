@@ -31,6 +31,32 @@ type DrillHole = {
 
 const HOLE_DIAMETER_OPTIONS = ['64mm', '76mm', '89mm', '102mm', '152mm', '203mm', '254mm', 'other'] as const;
 
+// --- Smart manual entry helpers ---
+function normalizeAssetName(input: string) {
+  const s = String(input || '').toLowerCase().trim();
+  const withNums = s
+    .replace(/\bone\b/g, '1')
+    .replace(/\btwo\b/g, '2')
+    .replace(/\bthree\b/g, '3')
+    .replace(/\bfour\b/g, '4')
+    .replace(/\bfive\b/g, '5')
+    .replace(/\bsix\b/g, '6')
+    .replace(/\bseven\b/g, '7')
+    .replace(/\beight\b/g, '8')
+    .replace(/\bnine\b/g, '9')
+    .replace(/\bten\b/g, '10');
+  return withNums.replace(/[^a-z0-9]/g, '');
+}
+
+function smartFindMatch(input: string, candidates: string[]) {
+  const n = normalizeAssetName(input);
+  if (!n) return null;
+  for (const c of candidates) {
+    if (normalizeAssetName(c) === n) return c;
+  }
+  return null;
+}
+
 function n2(v: any) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -526,7 +552,15 @@ async function submit() {
                         className="input mt-2"
                         placeholder="Enter equipment"
                         value={values.__manual_equipment || ''}
-                        onChange={(e) => setValues((v) => ({ ...v, __manual_equipment: e.target.value }))}
+	                        onChange={(e) => setValues((v) => ({ ...v, __manual_equipment: e.target.value }))}
+	                        onBlur={() => {
+	                          const typed = String(values.__manual_equipment || '').trim();
+	                          const match = smartFindMatch(typed, [...filteredEquipment]);
+	                          if (match) setValues((v) => ({ ...v, [f.field]: match, __manual_equipment: '' }));
+	                        }}
+	                        onKeyDown={(ev) => {
+	                          if (ev.key === 'Enter') (ev.target as HTMLInputElement).blur();
+	                        }}
                       />
                     ) : null}
                   </div>
@@ -564,7 +598,16 @@ async function submit() {
                         className="input mt-2"
                         placeholder={`Enter ${f.field.toLowerCase()}`}
                         value={values[manualKey] || ''}
-                        onChange={(e) => setValues((v) => ({ ...v, [manualKey]: e.target.value }))}
+	                        onChange={(e) => setValues((v) => ({ ...v, [manualKey]: e.target.value }))}
+	                        onBlur={() => {
+	                          const typed = String(values[manualKey] || '').trim();
+	                          const candidates = opts.map((o: any) => String(o?.name || '').trim()).filter(Boolean);
+	                          const match = smartFindMatch(typed, candidates);
+	                          if (match) setValues((v) => ({ ...v, [f.field]: match, [manualKey]: '' }));
+	                        }}
+	                        onKeyDown={(ev) => {
+	                          if (ev.key === 'Enter') (ev.target as HTMLInputElement).blur();
+	                        }}
                       />
                     ) : null}
                   </div>

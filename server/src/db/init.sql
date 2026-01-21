@@ -4,7 +4,13 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT UNIQUE,
   password_hash TEXT,
   name TEXT,
+  -- Legacy: historically used as the user's "site". Going forward this is the user's
+  -- current WORK SITE display name (kept for backward compatibility with existing
+  -- reports/endpoints that filter by users.site / shifts.site).
   site TEXT NOT NULL DEFAULT 'default',
+  work_site_id INT NULL,
+  primary_admin_site_id INT NULL,
+  primary_site_id INT NULL,
   state TEXT,
   email_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
   confirm_code TEXT,
@@ -14,6 +20,38 @@ CREATE TABLE IF NOT EXISTS users (
   terms_accepted_at TIMESTAMPTZ,
   terms_version TEXT
 );
+
+-- WORK SITES (where a user works / worked) - NOT tied to subscribed Site Admin.
+-- Users can nominate a Work Site even if a Subscribed Site (admin tenant) doesn't exist.
+CREATE TABLE IF NOT EXISTS work_sites (
+  id SERIAL PRIMARY KEY,
+  name_display TEXT NOT NULL,
+  name_normalized TEXT NOT NULL UNIQUE,
+  country TEXT,
+  state TEXT,
+  company TEXT,
+  is_official BOOLEAN NOT NULL DEFAULT FALSE,
+  -- Links an official work site to a Subscribed Site (admin tenant) when/if it exists.
+  official_site_id INT NULL,
+  created_by_user_id INT NULL REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_work_sites_name_display ON work_sites(name_display);
+
+CREATE TABLE IF NOT EXISTS user_work_site_history (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  work_site_id INT NOT NULL REFERENCES work_sites(id) ON DELETE RESTRICT,
+  start_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  end_date DATE NULL,
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_id, work_site_id, start_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_work_site_history_user ON user_work_site_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_work_site_history_site ON user_work_site_history(work_site_id);
 
 
 CREATE TABLE IF NOT EXISTS connections (
@@ -56,34 +94,7 @@ CREATE TABLE IF NOT EXISTS locations (
 
 CREATE INDEX IF NOT EXISTS idx_locations_user ON locations(user_id);
 
--- SITE ADMIN MASTER LISTS (per-site)
-CREATE TABLE IF NOT EXISTS admin_equipment (
-  id SERIAL PRIMARY KEY,
-  site TEXT NOT NULL,
-  type TEXT NOT NULL,
-  equipment_id TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE(site, equipment_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_admin_equipment_site ON admin_equipment(site);
-
-CREATE TABLE IF NOT EXISTS admin_locations (
-  id SERIAL PRIMARY KEY,
-  site TEXT NOT NULL,
-  name TEXT NOT NULL,
-  type TEXT,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE(site, name)
-);
-
-CREATE INDEX IF NOT EXISTS idx_admin_locations_site ON admin_locations(site);
-
-
-
-CREATE INDEX IF NOT EXISTS idx_users_site ON users(site);
-
--- ADMIN SITES (for Site Admin creation dropdown)
+-- SUBSCRIBED SITE ADMIN TENANTS
 CREATE TABLE IF NOT EXISTS admin_sites (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
@@ -92,6 +103,35 @@ CREATE TABLE IF NOT EXISTS admin_sites (
   terms_accepted_at TIMESTAMPTZ,
   terms_version TEXT
 );
+
+-- SITE ADMIN MASTER LISTS (per-site)
+CREATE TABLE IF NOT EXISTS admin_equipment (
+  id SERIAL PRIMARY KEY,
+  admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  equipment_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(admin_site_id, equipment_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_equipment_admin_site_id ON admin_equipment(admin_site_id);
+
+CREATE TABLE IF NOT EXISTS admin_locations (
+  id SERIAL PRIMARY KEY,
+  admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  type TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(admin_site_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_locations_admin_site_id ON admin_locations(admin_site_id);
+
+
+
+CREATE INDEX IF NOT EXISTS idx_users_site ON users(site);
+
+-- ADMIN SITES (for Site Admin creation dropdown)
 
 -- Backward-compatible migration: older databases may have admin_sites.site instead of admin_sites.name.
 -- Ensure required columns exist and backfill name from site when present.
@@ -112,6 +152,22 @@ BEGIN
   END IF;
 EXCEPTION WHEN OTHERS THEN
   -- do nothing; safe on partial schemas
+END $$;
+
+-- Some older schemas incorrectly enforced validated_shifts.user_id as NOT NULL.
+-- Newer logic allows email-only rows (user_id NULL), so we defensively drop the constraint.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+      FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = 'validated_shifts'
+       AND column_name = 'user_id'
+       AND is_nullable = 'NO'
+  ) THEN
+    EXECUTE 'ALTER TABLE validated_shifts ALTER COLUMN user_id DROP NOT NULL';
+  END IF;
 END $$;
 
 -- Ensure uniqueness on name (some older schemas may miss the constraint)
@@ -147,426 +203,313 @@ CREATE TABLE IF NOT EXISTS site_memberships (
 );
 
 
--- ---- Schema migrations / backfill (safe to run repeatedly) ----
-DO $$
-BEGIN
-  -- users.primary_site_id
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-     WHERE table_name='users' AND column_name='primary_site_id'
-  ) THEN
-    ALTER TABLE users ADD COLUMN primary_site_id INT;
-    ALTER TABLE users ADD CONSTRAINT users_primary_site_fk FOREIGN KEY (primary_site_id)
-      REFERENCES admin_sites(id) ON DELETE SET NULL;
-  END IF;
-
-  -- site_memberships.site_id + site_name (if upgrading from legacy schema)
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-     WHERE table_name='site_memberships' AND column_name='site_id'
-  ) THEN
-    ALTER TABLE site_memberships ADD COLUMN site_id INT;
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-     WHERE table_name='site_memberships' AND column_name='site_name'
-  ) THEN
-    ALTER TABLE site_memberships ADD COLUMN site_name TEXT;
-  END IF;
-
-  -- site_memberships site data consent
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-     WHERE table_name='site_memberships' AND column_name='site_consent_accepted_at'
-  ) THEN
-    ALTER TABLE site_memberships ADD COLUMN site_consent_accepted_at TIMESTAMPTZ;
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-     WHERE table_name='site_memberships' AND column_name='site_consent_version'
-  ) THEN
-    ALTER TABLE site_memberships ADD COLUMN site_consent_version TEXT;
-  END IF;
-
-
-  -- If legacy column `site` exists, copy to site_name.
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-     WHERE table_name='site_memberships' AND column_name='site'
-  ) THEN
-    EXECUTE 'UPDATE site_memberships SET site_name = COALESCE(site_name, site) WHERE site_name IS NULL OR site_name=''''';
-  END IF;
-
-  -- Ensure every referenced site_name exists in admin_sites, then backfill site_id.
-  INSERT INTO admin_sites (name)
-  SELECT DISTINCT TRIM(COALESCE(site_name, '')) AS name
-  FROM site_memberships
-  WHERE TRIM(COALESCE(site_name, '')) <> ''
-  ON CONFLICT (name) DO NOTHING;
-
-  UPDATE site_memberships m
-     SET site_id = s.id
-    FROM admin_sites s
-   WHERE m.site_id IS NULL
-     AND TRIM(COALESCE(m.site_name,'')) <> ''
-     AND s.name = TRIM(m.site_name);
-
-  -- Backfill users.primary_site_id from users.site (legacy) where possible.
-  INSERT INTO admin_sites (name)
-  SELECT DISTINCT TRIM(COALESCE(site,'')) AS name
-  FROM users
-  WHERE TRIM(COALESCE(site,'')) <> ''
-  ON CONFLICT (name) DO NOTHING;
-
-  UPDATE users u
-     SET primary_site_id = s.id
-    FROM admin_sites s
-   WHERE u.primary_site_id IS NULL
-     AND TRIM(COALESCE(u.site,'')) <> ''
-     AND s.name = TRIM(u.site);
-
-  -- Ensure membership rows exist for legacy users.site
-  INSERT INTO site_memberships (user_id, site_id, site_name, role, status, approved_at)
-  SELECT u.id, s.id, s.name, 'member', 'requested', NULL
-  FROM users u
-  JOIN admin_sites s ON s.name = TRIM(u.site)
-  LEFT JOIN site_memberships m ON m.user_id=u.id AND m.site_id=s.id
-  WHERE m.id IS NULL;
-
-  -- De-dupe any historical rows before adding a unique index.
-  -- Keep the lowest id for each (user_id, site_id).
-  DELETE FROM site_memberships a
-  USING site_memberships b
-  WHERE a.id > b.id
-    AND a.user_id = b.user_id
-    AND COALESCE(a.site_id, 0) = COALESCE(b.site_id, 0);
-
-  -- Ensure ON CONFLICT(user_id, site_id) is valid even if the table existed before.
-  EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS ux_site_memberships_user_site ON site_memberships(user_id, site_id)';
-
-  -- Indexes for site_memberships (created after migrations/backfill)
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-     WHERE table_name='site_memberships' AND column_name='site_id'
-  ) THEN
-    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_site_memberships_site_id ON site_memberships(site_id)';
-    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_site_memberships_site_status ON site_memberships(site_id, status)';
-  END IF;
-
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-     WHERE table_name='site_memberships' AND column_name='user_id'
-  ) THEN
-    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_site_memberships_user ON site_memberships(user_id)';
-  END IF;
-
-EXCEPTION WHEN others THEN
-  -- no-op (allows dev DBs in weird states to still boot)
-END$$;
--- PUSH SUBSCRIPTIONS (Web Push)
-CREATE TABLE IF NOT EXISTS push_subscriptions (
-  id SERIAL PRIMARY KEY,
-  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  endpoint TEXT NOT NULL UNIQUE,
-  p256dh TEXT NOT NULL,
-  auth TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  terms_accepted_at TIMESTAMPTZ,
-  terms_version TEXT
-);
-
-
-CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id);
-
-
--- CONTACT / DEMO REQUESTS (Marketing landing page)
-CREATE TABLE IF NOT EXISTS contact_requests (
-  id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL,
-  email TEXT NOT NULL,
-  company TEXT,
-  site TEXT,
-  message TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_contact_requests_created_at ON contact_requests(created_at);
--- SHIFTS (authoritative user-finalized data)
+-- SHIFTS (raw operator-submitted)
 CREATE TABLE IF NOT EXISTS shifts (
   id SERIAL PRIMARY KEY,
   user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  site TEXT NOT NULL DEFAULT 'default',
+  work_site_id INT NULL REFERENCES work_sites(id) ON DELETE SET NULL,
+  admin_site_id INT NULL REFERENCES admin_sites(id) ON DELETE SET NULL,
   date DATE NOT NULL,
   dn TEXT NOT NULL,
-  totals_json JSONB DEFAULT '{}'::jsonb,
-  meta_json JSONB DEFAULT '{}'::jsonb,
+  totals_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  meta_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   finalized_at TIMESTAMPTZ,
   user_email TEXT,
   user_name TEXT,
-  UNIQUE (user_id, date, dn)
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_id, date, dn)
 );
 
-CREATE INDEX IF NOT EXISTS idx_shifts_site_date ON shifts(site, date);
 CREATE INDEX IF NOT EXISTS idx_shifts_user_date ON shifts(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_shifts_admin_site_id ON shifts(admin_site_id);
+CREATE INDEX IF NOT EXISTS idx_shifts_work_site_id ON shifts(work_site_id);
 
+-- SHIFT ACTIVITIES (raw rows)
 CREATE TABLE IF NOT EXISTS shift_activities (
   id SERIAL PRIMARY KEY,
   shift_id INT NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
   user_email TEXT,
   user_name TEXT,
-  site TEXT,
-  activity TEXT,
+  work_site_id INT NULL REFERENCES work_sites(id) ON DELETE SET NULL,
+  admin_site_id INT NULL REFERENCES admin_sites(id) ON DELETE SET NULL,
+  activity TEXT NOT NULL,
   sub_activity TEXT,
-  payload_json JSONB DEFAULT '{}'::jsonb,
+  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_shift_activities_shift ON shift_activities(shift_id);
-CREATE INDEX IF NOT EXISTS idx_shift_activities_site ON shift_activities(site);
+CREATE INDEX IF NOT EXISTS idx_shift_activities_shift_id ON shift_activities(shift_id);
+CREATE INDEX IF NOT EXISTS idx_shift_activities_admin_site_id ON shift_activities(admin_site_id);
+CREATE INDEX IF NOT EXISTS idx_shift_activities_work_site_id ON shift_activities(work_site_id);
 
--- VALIDATION LAYER (editable snapshot used by Site Admin validation)
+-- VALIDATION LAYER (tenant-scoped, visible in Site Admin)
 CREATE TABLE IF NOT EXISTS validated_shifts (
   id SERIAL PRIMARY KEY,
-  site TEXT NOT NULL,
+  -- A stable natural key used throughout the project for tenant-scoped validation.
+  -- Format: "<admin_site_id>|<date>|<dn>|<user_id_or_email>"
+  shift_key TEXT NOT NULL,
+
+  admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  work_site_id INT NULL REFERENCES work_sites(id) ON DELETE SET NULL,
   date DATE NOT NULL,
   dn TEXT NOT NULL,
-  -- Normalise NULLs so we can enforce a simple UNIQUE constraint.
+
+  -- Use email as the consistent identifier across older datasets.
   user_email TEXT NOT NULL DEFAULT '',
   user_name TEXT,
-  user_id INTEGER,
-  validated INT NOT NULL DEFAULT 0,
-  totals_json JSONB DEFAULT '{}'::jsonb,
+  user_id INT NULL REFERENCES users(id) ON DELETE SET NULL,
+
+  validated BOOLEAN NOT NULL DEFAULT FALSE,
+  validated_at TIMESTAMPTZ,
+  validated_by INT REFERENCES users(id) ON DELETE SET NULL,
+
+  totals_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE (site, date, dn, user_email)
+
+  UNIQUE(admin_site_id, date, dn, user_email),
+  UNIQUE(shift_key)
 );
 
--- Day-level status for Site Admin validation calendar.
--- Used for UI colouring and quick status checks.
-CREATE TABLE IF NOT EXISTS validated_days (
-  site TEXT NOT NULL,
-  date DATE NOT NULL,
-  status TEXT NOT NULL DEFAULT 'unvalidated',
-  updated_at TIMESTAMPTZ DEFAULT now(),
-  PRIMARY KEY (site, date)
-);
+-- Bootstrap safety: if this table already existed from an older run (without shift_key),
+-- add the column BEFORE creating indexes that reference it.
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS shift_key TEXT;
 
-CREATE INDEX IF NOT EXISTS idx_validated_shifts_site_date ON validated_shifts(site, date);
+CREATE INDEX IF NOT EXISTS idx_validated_shifts_admin_site_id ON validated_shifts(admin_site_id);
+CREATE INDEX IF NOT EXISTS idx_validated_shifts_date ON validated_shifts(date);
+CREATE INDEX IF NOT EXISTS idx_validated_shifts_shift_key ON validated_shifts(shift_key);
+
+-- IMPORTANT: If validated_shifts already existed (older local DB resets), the UNIQUE() clauses in the
+-- CREATE TABLE above will NOT be applied retroactively. We therefore create the equivalent UNIQUE
+-- indexes defensively so ON CONFLICT works reliably.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_validated_shifts_shift_key ON validated_shifts(shift_key);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_validated_shifts_natural_key ON validated_shifts(admin_site_id, date, dn, user_email);
 
 CREATE TABLE IF NOT EXISTS validated_shift_activities (
   id SERIAL PRIMARY KEY,
-  site TEXT NOT NULL,
+  validated_shift_id INT NOT NULL REFERENCES validated_shifts(id) ON DELETE CASCADE,
+
+  -- denormalized keys for fast filtering (mirrors validated_shifts)
+  shift_key TEXT NOT NULL,
+  admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  work_site_id INT NULL REFERENCES work_sites(id) ON DELETE SET NULL,
   date DATE NOT NULL,
   dn TEXT NOT NULL,
-  user_email TEXT,
+  user_email TEXT NOT NULL DEFAULT '',
   user_name TEXT,
-  user_id INTEGER,
-  activity TEXT,
+  user_id INT NULL REFERENCES users(id) ON DELETE SET NULL,
+
+  activity TEXT NOT NULL,
   sub_activity TEXT,
-  payload_json JSONB DEFAULT '{}'::jsonb,
+  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
-
--- --- Power BI scalability upgrades (idempotent) ---
--- Add relational linkage between validated_shift_activities and validated_shifts
-ALTER TABLE IF EXISTS validated_shifts
-  ADD COLUMN IF NOT EXISTS shift_key TEXT;
-
-ALTER TABLE IF EXISTS validated_shift_activities
-  ADD COLUMN IF NOT EXISTS validated_shift_id INTEGER;
-
-ALTER TABLE IF EXISTS validated_shift_activities
-  ADD COLUMN IF NOT EXISTS shift_key TEXT;
-
-ALTER TABLE IF EXISTS validated_shift_activities
-  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
-
--- Helpful indexes
-CREATE INDEX IF NOT EXISTS idx_validated_shifts_shift_key ON validated_shifts(shift_key);
-CREATE INDEX IF NOT EXISTS idx_validated_acts_validated_shift_id ON validated_shift_activities(validated_shift_id);
-CREATE INDEX IF NOT EXISTS idx_validated_acts_shift_key ON validated_shift_activities(shift_key);
-
--- Ensure validated user_id columns exist BEFORE any updates reference them
-ALTER TABLE IF EXISTS validated_shifts
-  ADD COLUMN IF NOT EXISTS user_id INTEGER;
-
-ALTER TABLE IF EXISTS validated_shift_activities
-  ADD COLUMN IF NOT EXISTS user_id INTEGER;
-
--- Best-effort backfill keys (safe if data exists; if not, no harm)
-UPDATE validated_shifts
-SET shift_key = site || '|' || to_char(date,'YYYY-MM-DD') || '|' || dn || '|' || COALESCE(user_id::text, user_email, '')
-WHERE shift_key IS NULL OR shift_key = '';
-
-UPDATE validated_shift_activities vsa
-SET shift_key = COALESCE(vsa.shift_key, vs.shift_key, vsa.site || '|' || to_char(vsa.date,'YYYY-MM-DD') || '|' || vsa.dn || '|' || COALESCE(vsa.user_id::text, vsa.user_email, '')),
-    validated_shift_id = COALESCE(vsa.validated_shift_id, vs.id)
-FROM validated_shifts vs
-WHERE (vsa.validated_shift_id IS NULL OR vsa.shift_key IS NULL OR vsa.shift_key = '')
-  AND vsa.site = vs.site
-  AND vsa.date = vs.date
-  AND vsa.dn = vs.dn
-  AND (
-    (vsa.user_id IS NOT NULL AND vs.user_id = vsa.user_id)
-    OR (COALESCE(vsa.user_email,'') <> '' AND COALESCE(vs.user_email,'') = COALESCE(vsa.user_email,''))
-  );
-
--- Foreign key (NOT VALID first to avoid deploy-time lock). Validate later if desired.
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'fk_validated_shift_activities_shift'
-  ) THEN
-    ALTER TABLE validated_shift_activities
-      ADD CONSTRAINT fk_validated_shift_activities_shift
-      FOREIGN KEY (validated_shift_id)
-      REFERENCES validated_shifts(id)
-      ON DELETE CASCADE
-      NOT VALID;
-  END IF;
-END $$;
-
-
-CREATE INDEX IF NOT EXISTS idx_validated_acts_site_date ON validated_shift_activities(site, date);
-CREATE INDEX IF NOT EXISTS idx_validated_acts_site_date_dn_email ON validated_shift_activities(site, date, dn, COALESCE(user_email,''));
-
-
--- Add missing validated user_id columns (backfill-safe)
-ALTER TABLE IF EXISTS validated_shifts ADD COLUMN IF NOT EXISTS user_id INTEGER;
-ALTER TABLE IF EXISTS validated_shift_activities ADD COLUMN IF NOT EXISTS user_id INTEGER;
-
--- Backfill validated user_id/user_name from users table where possible
-UPDATE validated_shifts vs
-SET user_id = u.id,
-    user_name = COALESCE(NULLIF(vs.user_name,''), u.name, vs.user_email)
-FROM users u
-WHERE vs.user_id IS NULL
-  AND vs.user_email = u.email;
-
-UPDATE validated_shift_activities vsa
-SET user_id = u.id,
-    user_name = COALESCE(NULLIF(vsa.user_name,''), u.name, vsa.user_email)
-FROM users u
-WHERE vsa.user_id IS NULL
-  AND vsa.user_email = u.email;
-
--- POWER BI / VALIDATED SCHEMA UPGRADES
--- Goal: add stable keys and FK relationships so Power BI can model a star schema.
--- This block is idempotent and safe to run on existing DBs.
-
--- 1) validated_shifts: add shift_key + timestamps
-ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS shift_key TEXT;
-ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
-ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
-
--- Backfill shift_key (site|YYYY-MM-DD|dn|user_id_or_email)
-UPDATE validated_shifts
-SET shift_key = site || '|' || to_char(date,'YYYY-MM-DD') || '|' || dn || '|' ||
-  COALESCE(user_id::text, NULLIF(user_email,''), '')
-WHERE shift_key IS NULL OR shift_key = '';
-
-CREATE UNIQUE INDEX IF NOT EXISTS ux_validated_shifts_shift_key ON validated_shifts(shift_key);
-CREATE INDEX IF NOT EXISTS idx_validated_shifts_site_date ON validated_shifts(site, date);
-CREATE INDEX IF NOT EXISTS idx_validated_shifts_user_id ON validated_shifts(user_id);
-CREATE INDEX IF NOT EXISTS idx_validated_shifts_user_email ON validated_shifts(user_email);
-
--- 2) validated_shift_activities: add validated_shift_id FK + shift_key mirror + timestamps
-ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS validated_shift_id INTEGER;
+-- Bootstrap safety: add shift_key before indexes if this table existed without it.
+-- Bootstrap safety: if this table already existed from an older run (without shift_key),
+-- add the column BEFORE creating indexes that reference it.
 ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS shift_key TEXT;
-ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
-ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
 
--- Backfill validated_shift_id using user_id first (preferred)
-UPDATE validated_shift_activities vsa
-SET validated_shift_id = vs.id
-FROM validated_shifts vs
-WHERE vsa.validated_shift_id IS NULL
-  AND vsa.site = vs.site
-  AND vsa.date = vs.date
-  AND vsa.dn = vs.dn
-  AND vsa.user_id IS NOT NULL
-  AND vs.user_id = vsa.user_id;
+CREATE INDEX IF NOT EXISTS idx_validated_shift_activities_vshift_id ON validated_shift_activities(validated_shift_id);
+CREATE INDEX IF NOT EXISTS idx_validated_shift_activities_admin_site_id ON validated_shift_activities(admin_site_id);
+CREATE INDEX IF NOT EXISTS idx_validated_shift_activities_shift_key ON validated_shift_activities(shift_key);
 
--- Fallback backfill by email (if user_id missing)
-UPDATE validated_shift_activities vsa
-SET validated_shift_id = vs.id
-FROM validated_shifts vs
-WHERE vsa.validated_shift_id IS NULL
-  AND vsa.site = vs.site
-  AND vsa.date = vs.date
-  AND vsa.dn = vs.dn
-  AND COALESCE(vsa.user_email,'') <> ''
-  AND COALESCE(vs.user_email,'') = COALESCE(vsa.user_email,'');
+-- -----------------------------------------------------------------------------
+-- SCHEMA DRIFT GUARDS (safe on existing databases)
+-- These ensure older local DBs can upgrade without needing a full drop/recreate.
+-- -----------------------------------------------------------------------------
 
--- Backfill shift_key mirror from validated_shifts once validated_shift_id set
-UPDATE validated_shift_activities vsa
-SET shift_key = vs.shift_key
-FROM validated_shifts vs
-WHERE vsa.validated_shift_id = vs.id
-  AND (vsa.shift_key IS NULL OR vsa.shift_key = '');
+-- shifts / shift_activities: used in some older local DBs and future-proofing.
+ALTER TABLE shifts ADD COLUMN IF NOT EXISTS shift_key TEXT;
+ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS shift_key TEXT;
 
--- Indexes for BI queries
-CREATE INDEX IF NOT EXISTS idx_vsa_validated_shift_id ON validated_shift_activities(validated_shift_id);
-CREATE INDEX IF NOT EXISTS idx_vsa_shift_key ON validated_shift_activities(shift_key);
-CREATE INDEX IF NOT EXISTS idx_vsa_activity ON validated_shift_activities(activity);
-CREATE INDEX IF NOT EXISTS idx_vsa_site_date ON validated_shift_activities(site, date);
-
--- Add FK constraint (NOT VALID then validate to avoid long locks)
+-- validated_shifts (older versions were keyed by shift_id and lacked date/dn/shift_key)
+-- (shift_key already handled above before index creation, keep this as an extra no-op guard)
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS shift_key TEXT;
+-- Older local DBs may still have a legacy shift_id column (FK to shifts) that was created as NOT NULL.
+-- Site-admin validation can create a validated shift even when an operator forgot to upload/finalize,
+-- so shift_id must be allowed to be NULL in those legacy schemas.
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS shift_id INT;
 DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'fk_vsa_validated_shift'
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'validated_shifts'
+      AND column_name = 'shift_id'
+      AND is_nullable = 'NO'
   ) THEN
-    ALTER TABLE validated_shift_activities
-      ADD CONSTRAINT fk_vsa_validated_shift
-      FOREIGN KEY (validated_shift_id)
-      REFERENCES validated_shifts(id)
-      ON DELETE CASCADE
-      NOT VALID;
+    EXECUTE 'ALTER TABLE validated_shifts ALTER COLUMN shift_id DROP NOT NULL';
   END IF;
-END$$;
+EXCEPTION WHEN undefined_table THEN
+  -- no-op
+END $$;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS admin_site_id INT;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS work_site_id INT;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS date DATE;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS dn TEXT;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS user_name TEXT;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS user_id INT;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS validated BOOLEAN;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS validated_at TIMESTAMPTZ;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS validated_by INT;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS totals_json JSONB;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS meta_json JSONB;
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
 
-ALTER TABLE validated_shift_activities VALIDATE CONSTRAINT fk_vsa_validated_shift;
+-- ----------------------------------------------------------------------------
+-- Power BI: per-site API tokens
+-- ----------------------------------------------------------------------------
 
--- =============================
--- RECONCILIATION LAYER (Option A)
--- =============================
--- Stores month-level reconciliation targets entered by Site Admins.
--- These DO NOT modify validated_shifts / validated_shift_activities.
--- Instead, reporting can union/apply daily allocations from validated_reconciliation_days.
-
-CREATE TABLE IF NOT EXISTS validated_reconciliations (
+CREATE TABLE IF NOT EXISTS powerbi_site_tokens (
   id SERIAL PRIMARY KEY,
   site TEXT NOT NULL,
-  -- Month key stored as 'YYYY-MM' (e.g. '2026-03')
-  month_ym TEXT NOT NULL,
-  metric_key TEXT NOT NULL,
-  reconciled_total NUMERIC NOT NULL DEFAULT 0,
-  -- 'validated_only' (default) or 'captured_all'
-  basis TEXT NOT NULL DEFAULT 'validated_only',
-  -- 'spread_daily' (default), 'month_end', 'custom'
-  method TEXT NOT NULL DEFAULT 'spread_daily',
+  label TEXT,
+  token TEXT NOT NULL,
+  created_by_user_id INT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  revoked_at TIMESTAMPTZ,
+  last_used_at TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_powerbi_site_tokens_token ON powerbi_site_tokens(token);
+CREATE INDEX IF NOT EXISTS idx_powerbi_site_tokens_site ON powerbi_site_tokens(site);
+
+-- validated_shift_activities (older versions lacked denormalized keys)
+-- (shift_key already handled above before index creation, keep this as an extra no-op guard)
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS shift_key TEXT;
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS admin_site_id INT;
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS work_site_id INT;
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS date DATE;
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS dn TEXT;
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS user_name TEXT;
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS user_id INT;
+
+-- CONTACT REQUESTS (crew)
+CREATE TABLE IF NOT EXISTS contact_requests (
+  id SERIAL PRIMARY KEY,
+  requester_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  addressee_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  responded_at TIMESTAMPTZ,
+  UNIQUE(requester_id, addressee_id)
+);
+
+-- NOTIFICATIONS
+CREATE TABLE IF NOT EXISTS notifications (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  title TEXT,
+  body TEXT,
+  data_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  is_read BOOLEAN NOT NULL DEFAULT FALSE,
+  read_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id, created_at DESC);
+
+-- notifications read_at (older versions used is_read only)
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  prefs_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_id)
+);
+
+-- USER FEEDBACK
+CREATE TABLE IF NOT EXISTS user_feedback (
+  id SERIAL PRIMARY KEY,
+  user_id INT REFERENCES users(id) ON DELETE SET NULL,
+  user_email TEXT,
+  user_name TEXT,
+  site TEXT,
+  message TEXT NOT NULL,
+  meta_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  approved BOOLEAN NOT NULL DEFAULT FALSE,
+  declined BOOLEAN NOT NULL DEFAULT FALSE,
+  reviewed_by TEXT,
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Ensure columns exist on older DBs that already have user_feedback
+ALTER TABLE user_feedback ADD COLUMN IF NOT EXISTS user_email TEXT;
+ALTER TABLE user_feedback ADD COLUMN IF NOT EXISTS user_name TEXT;
+ALTER TABLE user_feedback ADD COLUMN IF NOT EXISTS site TEXT;
+ALTER TABLE user_feedback ADD COLUMN IF NOT EXISTS approved BOOLEAN;
+ALTER TABLE user_feedback ADD COLUMN IF NOT EXISTS declined BOOLEAN;
+ALTER TABLE user_feedback ADD COLUMN IF NOT EXISTS reviewed_by TEXT;
+ALTER TABLE user_feedback ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS user_feedback_votes (
+  id SERIAL PRIMARY KEY,
+  feedback_id INT NOT NULL REFERENCES user_feedback(id) ON DELETE CASCADE,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  vote INT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(feedback_id, user_id)
+);
+
+-- VALIDATED DAYS (aggregates / calendar)
+-- This table has drifted across versions. We keep both:
+--  - status TEXT (newer UI expectation)
+--  - validated BOOLEAN (older expectation)
+--  - payload_json JSONB (calendar aggregates)
+CREATE TABLE IF NOT EXISTS validated_days (
+  admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  date DATE NOT NULL,
+  status TEXT NOT NULL DEFAULT 'unvalidated',
+  validated BOOLEAN NOT NULL DEFAULT FALSE,
+  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (admin_site_id, date)
+);
+
+-- Ensure columns exist on older DBs that already have validated_days
+ALTER TABLE validated_days ADD COLUMN IF NOT EXISTS status TEXT;
+ALTER TABLE validated_days ADD COLUMN IF NOT EXISTS validated BOOLEAN;
+ALTER TABLE validated_days ADD COLUMN IF NOT EXISTS payload_json JSONB;
+ALTER TABLE validated_days ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+ALTER TABLE validated_days ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
+
+-- RECONCILIATION (tenant)
+CREATE TABLE IF NOT EXISTS validated_reconciliations (
+  id SERIAL PRIMARY KEY,
+  admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  -- Normalized month bucket: YYYY-MM
+  month_ym TEXT,
+  -- Metric identifier (matches UI list)
+  metric_key TEXT,
+  -- Target reconciled total for the month
+  reconciled_total NUMERIC,
+  -- How to compute the "actual" month total used for delta
+  basis TEXT DEFAULT 'validated_only',
+  -- Allocation method
+  method TEXT DEFAULT 'spread_daily',
   notes TEXT,
-  is_locked BOOLEAN NOT NULL DEFAULT false,
-  created_by_user_id INTEGER,
-  -- Audit snapshots of what the system computed when saved/recalculated
+  is_locked BOOLEAN NOT NULL DEFAULT FALSE,
+  created_by_user_id INT,
   actual_total_snapshot NUMERIC,
   delta_snapshot NUMERIC,
   computed_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE(site, month_ym, metric_key)
+  UNIQUE(admin_site_id, month_ym, metric_key)
 );
-
-CREATE INDEX IF NOT EXISTS idx_vr_site_month ON validated_reconciliations(site, month_ym);
-CREATE INDEX IF NOT EXISTS idx_vr_metric ON validated_reconciliations(metric_key);
 
 CREATE TABLE IF NOT EXISTS validated_reconciliation_days (
   id SERIAL PRIMARY KEY,
-  reconciliation_id INTEGER NOT NULL REFERENCES validated_reconciliations(id) ON DELETE CASCADE,
-  site TEXT NOT NULL,
+  reconciliation_id INT NOT NULL REFERENCES validated_reconciliations(id) ON DELETE CASCADE,
+  admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
   month_ym TEXT NOT NULL,
   metric_key TEXT NOT NULL,
   date DATE NOT NULL,
@@ -575,62 +518,71 @@ CREATE TABLE IF NOT EXISTS validated_reconciliation_days (
   UNIQUE(reconciliation_id, date)
 );
 
-CREATE INDEX IF NOT EXISTS idx_vrd_site_date ON validated_reconciliation_days(site, date);
-CREATE INDEX IF NOT EXISTS idx_vrd_metric ON validated_reconciliation_days(metric_key);
-CREATE INDEX IF NOT EXISTS idx_vrd_month ON validated_reconciliation_days(month_ym);
+-- Ensure reconciliation columns exist on older DBs (idempotent upgrades)
+ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS month_ym TEXT;
+ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS metric_key TEXT;
+ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS reconciled_total NUMERIC;
+ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS basis TEXT;
+ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS method TEXT;
+ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS is_locked BOOLEAN;
+ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS created_by_user_id INT;
+ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS actual_total_snapshot NUMERIC;
+ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS delta_snapshot NUMERIC;
+ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS computed_at TIMESTAMPTZ;
+ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_validated_reconciliations_key
+  ON validated_reconciliations(admin_site_id, month_ym, metric_key);
+
+ALTER TABLE validated_reconciliation_days ADD COLUMN IF NOT EXISTS admin_site_id INT;
+ALTER TABLE validated_reconciliation_days ADD COLUMN IF NOT EXISTS month_ym TEXT;
+ALTER TABLE validated_reconciliation_days ADD COLUMN IF NOT EXISTS metric_key TEXT;
+ALTER TABLE validated_reconciliation_days ADD COLUMN IF NOT EXISTS allocated_value NUMERIC;
+
+CREATE INDEX IF NOT EXISTS ix_validated_reconciliation_days_admin_site_month_metric
+  ON validated_reconciliation_days(admin_site_id, month_ym, metric_key);
 
 
--- -------------------- Notifications --------------------
-
-CREATE TABLE IF NOT EXISTS notifications (
-  id SERIAL PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  type TEXT NOT NULL,
-  title TEXT NOT NULL,
-  body TEXT NOT NULL,
-  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  read_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id) WHERE read_at IS NULL;
-
-CREATE TABLE IF NOT EXISTS notification_preferences (
-  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-
-  in_app_milestones BOOLEAN NOT NULL DEFAULT TRUE,
-  in_app_crew_requests BOOLEAN NOT NULL DEFAULT TRUE,
-  push_milestones BOOLEAN NOT NULL DEFAULT TRUE,
-  push_crew_requests BOOLEAN NOT NULL DEFAULT TRUE,
-
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
 
 
--- -------------------- Notifications --------------------
+-- ---------------------------------------------------------------------------
+-- SAFE POST-CREATE COLUMN ENSURE (idempotent, supports upgrades)
+-- ---------------------------------------------------------------------------
+DO $$
+BEGIN
+  -- users
+  IF to_regclass('public.users') IS NOT NULL THEN
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS work_site_id INT NULL;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS primary_admin_site_id INT NULL;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS primary_site_id INT NULL;
+  END IF;
 
-CREATE TABLE IF NOT EXISTS notifications (
-  id SERIAL PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  type TEXT NOT NULL,
-  title TEXT NOT NULL,
-  body TEXT NOT NULL,
-  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-  read_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+  -- notifications
+  IF to_regclass('public.notifications') IS NOT NULL THEN
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ;
+  END IF;
 
-CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id) WHERE read_at IS NULL;
+  -- shifts + activities
+  IF to_regclass('public.shifts') IS NOT NULL THEN
+    ALTER TABLE shifts ADD COLUMN IF NOT EXISTS work_site_id INT NULL;
+    ALTER TABLE shifts ADD COLUMN IF NOT EXISTS admin_site_id INT NULL;
+  END IF;
 
-CREATE TABLE IF NOT EXISTS notification_preferences (
-  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  IF to_regclass('public.shift_activities') IS NOT NULL THEN
+    ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS work_site_id INT NULL;
+    ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS admin_site_id INT NULL;
+  END IF;
 
-  in_app_milestones BOOLEAN NOT NULL DEFAULT TRUE,
-  in_app_crew_requests BOOLEAN NOT NULL DEFAULT TRUE,
-  push_milestones BOOLEAN NOT NULL DEFAULT TRUE,
-  push_crew_requests BOOLEAN NOT NULL DEFAULT TRUE,
+  IF to_regclass('public.validated_shifts') IS NOT NULL THEN
+    ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS work_site_id INT NULL;
+    ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS admin_site_id INT NULL;
+  END IF;
 
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+  IF to_regclass('public.validated_shift_activities') IS NOT NULL THEN
+    ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS work_site_id INT NULL;
+    ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS admin_site_id INT NULL;
+  END IF;
+END $$;
+

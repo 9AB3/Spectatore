@@ -12,18 +12,19 @@ export default function Register() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [name, setName] = useState('');
-  const [siteOptions, setSiteOptions] = useState<string[]>(['CSA', 'Endeavor', 'Peak']);
-  const [siteSelect, setSiteSelect] = useState<string>('CSA');
-  const [siteManual, setSiteManual] = useState('');
+  const [workSiteOptions, setWorkSiteOptions] = useState<string[]>(['CSA', 'Endeavor', 'Peak']);
+  const [workSiteSelect, setWorkSiteSelect] = useState<string>('CSA');
+  const [workSiteManual, setWorkSiteManual] = useState('');
   const [state, setState] = useState('NSW');
 
   useEffect(() => {
     (async () => {
       try {
-        const r: any = await api('/api/meta/sites');
-        if (Array.isArray(r?.sites) && r.sites.length) {
-          setSiteOptions(r.sites);
-          if (!r.sites.includes(siteSelect)) setSiteSelect(r.sites[0]);
+        const r: any = await api('/api/work-sites');
+        const names = Array.isArray(r?.sites) ? r.sites.map((s: any) => String(s?.name || '').trim()).filter(Boolean) : [];
+        if (names.length) {
+          setWorkSiteOptions(names);
+          if (!names.includes(workSiteSelect)) setWorkSiteSelect(names[0]);
         }
       } catch {
         // ignore
@@ -41,15 +42,15 @@ export default function Register() {
       return;
     }
 
-    const site = siteSelect === 'Not in List' ? siteManual.trim() : siteSelect;
-    if (!site) {
-      setMsg('Please select a site (or type your site name)');
+    const work_site_name = workSiteSelect === 'Not in List' ? workSiteManual.trim() : workSiteSelect;
+    if (!work_site_name) {
+      setMsg('Please select a Work Site (or type your Work Site name)');
       return;
     }
     try {
       const res: any = await api('/api/auth/register', {
         method: 'POST',
-        body: JSON.stringify({ email, password, name, site, state }),
+        body: JSON.stringify({ email, password, name, work_site_name, state }),
       });
       // In dev, server may return { ok, token, user }
       if (res?.token) {
@@ -106,16 +107,17 @@ export default function Register() {
           onChange={(e) => setConfirm(e.target.value)}
         />
         <div className="space-y-2">
+          <div className="text-xs text-slate-500">Work Site</div>
           <select
             className="input"
-            value={siteSelect}
+            value={workSiteSelect}
             onChange={(e) => {
               const v = e.target.value as any;
-              setSiteSelect(v);
-              if (v !== 'Not in List') setSiteManual('');
+              setWorkSiteSelect(v);
+              if (v !== 'Not in List') setWorkSiteManual('');
             }}
           >
-            {siteOptions.map((s) => (
+            {workSiteOptions.map((s) => (
               <option key={s} value={s}>
                 {s}
               </option>
@@ -123,22 +125,22 @@ export default function Register() {
             <option>Not in List</option>
           </select>
 
-          {siteSelect === 'Not in List' && (
+          {workSiteSelect === 'Not in List' && (
             <div>
               <input
                 className="input"
                 list="site-suggestions"
-                placeholder="Type your site name"
-                value={siteManual}
-                onChange={(e) => setSiteManual(e.target.value)}
+                placeholder="Type your Work Site name"
+                value={workSiteManual}
+                onChange={(e) => setWorkSiteManual(e.target.value)}
               />
               {/* Dropdown suggestions + allows free typing (saved as the site) */}
               <datalist id="site-suggestions">
-                {siteOptions.map((s) => (
+                {workSiteOptions.map((s) => (
                   <option key={s} value={s} />
                 ))}
               </datalist>
-              <div className="text-xs text-slate-500 mt-1">This will be saved as your site.</div>
+              <div className="text-xs text-slate-500 mt-1">This will be saved as your Work Site.</div>
             </div>
           )}
         </div>

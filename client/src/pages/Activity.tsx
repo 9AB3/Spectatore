@@ -2,7 +2,7 @@ import Header from '../components/Header';
 import data from '../data/activities.json';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getDB } from '../lib/idb';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import useToast from '../hooks/useToast';
 import { loadEquipment, loadLocations } from '../lib/datalists';
 import HaulingIcon from '../assets/activity-icons/Hauling.png';
@@ -16,8 +16,8 @@ import HoistingIcon from '../assets/activity-icons/Hoisting.png';
 
 
 type Field = { field: string; required: number; unit: string; input: string };
-type EquipRow = { id?: number; type: string; equipment_id: string };
-type LocationRow = { id?: number; name: string; type: 'Heading' | 'Stope' | 'Stockpile' };
+type EquipRow = { id?: number; type: string; equipment_id: string; is_site_asset?: boolean; site?: string };
+type LocationRow = { id?: number | string; name: string; type: 'Heading' | 'Stope' | 'Stockpile'; is_site_asset?: boolean; site?: string };
 
 type ProdDrillBucket = 'Metres Drilled' | 'Cleanouts Drilled' | 'Redrills';
 type DrillHole = {
@@ -28,7 +28,69 @@ type DrillHole = {
   length_m: string; // controlled input; coerced on save
 };
 
+type BoltEntry = {
+  length: string;
+  lengthOther: string;
+  type: string;
+  count: string;
+};
+
 const HOLE_DIAMETER_OPTIONS = ['64mm', '76mm', '89mm', '102mm', '152mm', '203mm', '254mm', 'other'] as const;
+
+// --- Smart manual entry helpers ---
+// Normalizes a name/id so "Loader 1" matches "loader one", etc.
+function normalizeAssetName(input: string) {
+  const s = String(input || '').toLowerCase().trim();
+  const withNums = s
+    .replace(/\bone\b/g, '1')
+    .replace(/\btwo\b/g, '2')
+    .replace(/\bthree\b/g, '3')
+    .replace(/\bfour\b/g, '4')
+    .replace(/\bfive\b/g, '5')
+    .replace(/\bsix\b/g, '6')
+    .replace(/\bseven\b/g, '7')
+    .replace(/\beight\b/g, '8')
+    .replace(/\bnine\b/g, '9')
+    .replace(/\bten\b/g, '10');
+  return withNums.replace(/[^a-z0-9]/g, '');
+}
+
+function smartFindMatch(input: string, candidates: string[]) {
+  const n = normalizeAssetName(input);
+  if (!n) return null;
+  for (const c of candidates) {
+    if (normalizeAssetName(c) === n) return c;
+  }
+  return null;
+}
+
+function normalizePayload(raw: any) {
+  let p: any = raw;
+  try {
+    if (typeof p === 'string') p = JSON.parse(p);
+  } catch {}
+  if (p && typeof p === 'object' && p.payload && !p.activity) p = p.payload;
+
+  const activity = String(p?.activity || '').trim();
+  const sub = String(p?.sub ?? p?.sub_activity ?? p?.subActivity ?? '').trim();
+
+  let values: any = p?.values;
+  if (!values || typeof values !== 'object') values = p?.data && typeof p.data === 'object' ? p.data : null;
+  if (!values) {
+    values = {};
+    if (p && typeof p === 'object') {
+      for (const [k, v] of Object.entries(p)) {
+        if (['activity','sub','sub_activity','subActivity','values','data','holes','loads'].includes(k)) continue;
+        if (v === null || v === undefined) continue;
+        if (typeof v === 'object') continue;
+        (values as any)[k] = v as any;
+      }
+    }
+  }
+
+  return { activity, sub, values, holes: p?.holes, loads: p?.loads };
+}
+
 
 function n2(v: any) {
   const n = Number(v);
@@ -157,14 +219,28 @@ function allowedLocationTypes(
 
 export default function Activity() {
   const nav = useNavigate();
+  const location = useLocation();
   const { setMsg, Toast } = useToast();
   const activityKeys = Object.keys(data);
   const [activity, setActivity] = useState<string>(activityKeys[0] || '');
   const [sub, setSub] = useState<string>('');
   const [pickerOpen, setPickerOpen] = useState<boolean>(true);
 
+  // Edit mode (launched from ViewActivities)
+  const editActivityId: number | null = Number.isFinite(Number((location as any)?.state?.editActivityId))
+    ? Number((location as any).state.editActivityId)
+    : null;
+  const returnTo: string | null = typeof (location as any)?.state?.returnTo === 'string' ? (location as any).state.returnTo : null;
+
+  // When hydrating an existing activity, we need to suppress the usual auto-sub + reset behaviors.
+  const suppressAutoSubRef = useRef<boolean>(false);
+  const suppressResetRef = useRef<boolean>(false);
+
   const [fields, setFields] = useState<Field[]>([]);
   const [values, setValues] = useState<Record<string, any>>({});
+  // When editing an existing activity, we queue the saved values and apply them
+  // after the form schema has been regenerated for the saved activity/sub.
+  const [pendingHydrateValues, setPendingHydrateValues] = useState<Record<string, any> | null>(null);
   const [equipmentRows, setEquipmentRows] = useState<EquipRow[]>([]);
   const [locationList, setLocationList] = useState<LocationRow[]>([]);
 
@@ -173,13 +249,36 @@ export default function Activity() {
     return (locationList || []).filter((l) => allowed.has(l.type));
   }
 
-  const [boltInputs, setBoltInputs] = useState<
-    { length: string; lengthOther: string; type: string; count: string }[]
-  >([
-    { length: '', lengthOther: '', type: '', count: '' },
-    { length: '', lengthOther: '', type: '', count: '' },
+  const isDevBolts = activity === 'Development' && (sub === 'Rehab' || sub === 'Ground Support');
+
+  const devBoltLengthOptions = useMemo(() => {
+    if (!isDevBolts) return ['1.8m', '2.4m', '3.0m', '6.0m'];
+    const group: any = (data as any)[activity] || {};
+    const list: Field[] = group ? group[sub] || group[''] || [] : [];
+    const f = (list || []).find((x) => x.field === 'Bolt Length');
+    if (!f) return ['1.8m', '2.4m', '3.0m', '6.0m'];
+    const rule = parseRule(f.input);
+    const opts = (rule as any)?.options || [];
+    return (opts.length ? opts : ['1.8m', '2.4m', '3.0m', '6.0m']).filter(Boolean);
+  }, [activity, sub, isDevBolts]);
+
+  const devBoltTypeOptions = useMemo(() => {
+    if (!isDevBolts) return ['Friction', 'Mechanical', 'Resin', 'Cable'];
+    const group: any = (data as any)[activity] || {};
+    const list: Field[] = group ? group[sub] || group[''] || [] : [];
+    const f = (list || []).find((x) => x.field === 'Bolt Type');
+    const rule = f ? parseRule(f.input) : null;
+    const raw = ((rule as any)?.options || ['Friction', 'Mechanical', 'Resin']).filter(Boolean);
+    const hasCable = raw.some((x: string) => String(x).toLowerCase() === 'cable');
+    return hasCable ? raw : [...raw, 'Cable'];
+  }, [activity, sub, isDevBolts]);
+
+  const [boltInputs, setBoltInputs] = useState<BoltEntry[]>([
     { length: '', lengthOther: '', type: '', count: '' },
   ]);
+
+  const [boltModalOpen, setBoltModalOpen] = useState<boolean>(false);
+  const [shotcreteModalOpen, setShotcreteModalOpen] = useState<boolean>(false);
 
   // Production drilling hole-entry capture (metres/cleanouts/redrills)
   const [pdHoles, setPdHoles] = useState<Record<ProdDrillBucket, DrillHole[]>>({
@@ -351,6 +450,10 @@ const haulWeightHoldingRef = useRef<boolean>(false);
 const [haulLastDumpedIndex, setHaulLastDumpedIndex] = useState<number>(-1);
 const [haulLastDumpedAtMs, setHaulLastDumpedAtMs] = useState<number>(0);
 
+// Edit-hydration helpers (prevents schema regeneration from wiping loaded values)
+const editHydratingRef = useRef<boolean>(false);
+const editHydrateTargetRef = useRef<{ activity: string; sub: string } | null>(null);
+
 
 
   // Load equipment/location lists (online -> cache; offline -> cache)
@@ -364,7 +467,7 @@ const [haulLastDumpedAtMs, setHaulLastDumpedAtMs] = useState<number>(0);
       const cachedEq = (await db.getAll('equipment')) as any[];
       setEquipmentRows(
         (cachedEq || [])
-          .map((r) => ({ equipment_id: r.equipment_id, type: r.type, id: r.id }))
+          .map((r) => ({ equipment_id: r.equipment_id, type: r.type, id: r.id, is_site_asset: !!r.is_site_asset, site: r.site }))
           .filter((r) => r.equipment_id && r.type),
       );
 
@@ -376,7 +479,7 @@ const [haulLastDumpedAtMs, setHaulLastDumpedAtMs] = useState<number>(0);
       const updatedEq = (await db2.getAll('equipment')) as any[];
       setEquipmentRows(
         (updatedEq || [])
-          .map((r) => ({ equipment_id: r.equipment_id, type: r.type, id: r.id }))
+          .map((r) => ({ equipment_id: r.equipment_id, type: r.type, id: r.id, is_site_asset: !!r.is_site_asset, site: r.site }))
           .filter((r) => r.equipment_id && r.type),
       );
 
@@ -385,8 +488,83 @@ const [haulLastDumpedAtMs, setHaulLastDumpedAtMs] = useState<number>(0);
     })();
   }, []);
 
+  // Hydrate edit mode from IndexedDB
+  useEffect(() => {
+    if (!editActivityId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const db = await getDB();
+        const row: any = await db.get('activities', editActivityId);
+        if (!row || cancelled) return;
+
+        const norm = normalizePayload(row.payload || {});
+
+        const nextActivity = String(norm.activity || '').trim();
+        const nextSub = String(norm.sub || '').trim();
+
+        suppressAutoSubRef.current = true;
+        suppressResetRef.current = true;
+        editHydratingRef.current = true;
+        editHydrateTargetRef.current = { activity: nextActivity, sub: nextSub };
+
+        if (nextActivity) setActivity(nextActivity);
+        if (nextSub) setSub(nextSub);
+        setPickerOpen(false);
+
+        // Values (queued; applied after fields regenerate)
+        setPendingHydrateValues({ ...(norm.values || {}) });
+
+        // Production drilling holes
+        if (String(norm.activity) === 'Production Drilling' && norm.holes && typeof norm.holes === 'object') {
+          setPdHoles((prev) => ({
+            ...prev,
+            ...(norm.holes || {}),
+          }));
+        }
+
+        // Hauling loads
+        if (String(norm.activity) === 'Hauling') {
+          const loads = Array.isArray(norm.loads) ? norm.loads : [];
+          const mapped = loads
+            .map((l: any) => ({
+              weight: String(l?.weight ?? l?.Weight ?? ''),
+              time_s: typeof l?.time_s === 'number' ? l.time_s : l?.time_s ?? null,
+              kind: l?.kind || (typeof l?.time_s === 'number' ? 'timed' : 'manual'),
+            }))
+            .filter((l: any) => String(l.weight || '').trim() !== '');
+          if (mapped.length) {
+            setHaulLoads(mapped as any);
+            // If all weights are equal, prefer "same weight" toggle so the UI is less noisy.
+            const ws = mapped.map((x: any) => Number(String(x.weight || '').replace(/[^0-9.]/g, ''))).filter((n: any) => Number.isFinite(n));
+            const allSame = ws.length > 0 && ws.every((n: number) => Math.abs(n - ws[0]) < 1e-9);
+            if (allSame) {
+              setHaulSameWeight(true);
+              setHaulDefaultWeight(String(ws[0] || ''));
+              setHaulLoadCount(String(mapped.length));
+            } else {
+              setHaulSameWeight(false);
+              setHaulDefaultWeight('');
+              setHaulLoadCount('');
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Failed to hydrate edit activity', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editActivityId]);
+
   // When activity changes: auto-pick the first sub-activity
   useEffect(() => {
+    if (suppressAutoSubRef.current) {
+      suppressAutoSubRef.current = false;
+      return;
+    }
     const group: any = (data as any)[activity] || {};
     const subKeys = Object.keys(group);
     const first = subKeys.length ? subKeys[0] : '';
@@ -400,18 +578,68 @@ const [haulLastDumpedAtMs, setHaulLastDumpedAtMs] = useState<number>(0);
 
     const filtered =
       activity === 'Development' && (sub === 'Rehab' || sub === 'Ground Support')
-        ? list.filter((f) => !['Bolt Length', 'Bolt Type', 'No. of Bolts'].includes(f.field))
+        ? list.filter((f) => !['Bolt Length', 'Bolt Type', 'No. of Bolts', 'Agi Volume', 'Spray Volume'].includes(f.field))
         : list;
 
     setFields(filtered);
-    setValues({}); // reset form inputs for the new schema
 
-    setBoltInputs([
-      { length: '', lengthOther: '', type: '', count: '' },
-      { length: '', lengthOther: '', type: '', count: '' },
-      { length: '', lengthOther: '', type: '', count: '' },
-    ]);
-  }, [activity, sub]);
+    // During edit hydration we don't want this effect to wipe the saved values.
+    // Note: changing activity + sub can trigger this effect twice; keep values intact until we
+    // reach the intended activity/sub pair, then apply queued values once.
+    const target = editHydrateTargetRef.current;
+    const isHydrating = editHydratingRef.current && target;
+
+    if (!isHydrating) {
+      if (!suppressResetRef.current) {
+        setValues({}); // reset form inputs for the new schema
+      } else {
+        suppressResetRef.current = false;
+      }
+    }
+
+    if (pendingHydrateValues && target && activity === target.activity && sub === target.sub) {
+      // Apply saved values once we have regenerated the correct schema.
+      setValues(pendingHydrateValues);
+
+      // If we're editing a Dev Rehab / Ground Support row, hydrate the bolt modal inputs
+      // from the saved row so the user can adjust consumables in the modal.
+      if (activity === 'Development' && (sub === 'Rehab' || sub === 'Ground Support')) {
+        const v: any = pendingHydrateValues || {};
+        const bl = String(v['Bolt Length'] ?? '').trim();
+        const bt = String(v['Bolt Type'] ?? '').trim();
+        const bc = v['No. of Bolts'] ?? '';
+        if (bl || bt || bc) {
+          // If the saved length isn't one of the dropdown options, treat it as "Other".
+          const normLen = bl;
+          const inOpts = devBoltLengthOptions.some((o) => String(o).trim() === normLen);
+          const m = normLen.match(/^([0-9.]+)\s*m?$/i);
+          const other = !inOpts && m ? String(m[1]) : !inOpts ? normLen.replace(/m$/i, '') : '';
+          setBoltInputs([
+            {
+              length: inOpts ? normLen : normLen ? 'Other' : '',
+              lengthOther: other || '',
+              type: bt,
+              count: bc !== '' && bc !== null && bc !== undefined ? String(bc) : '',
+            },
+          ]);
+        }
+      }
+
+      // IMPORTANT: this effect depends on pendingHydrateValues, so clearing it will cause
+      // the effect to run again. Without guarding, the "not hydrating" branch would reset
+      // values back to {} on the next run. Set suppressResetRef to skip exactly one reset.
+      suppressResetRef.current = true;
+
+      setPendingHydrateValues(null);
+      editHydratingRef.current = false;
+      editHydrateTargetRef.current = null;
+    }
+
+    // Reset bolt modal inputs when changing activity/sub (but don't clobber edit hydration).
+    if (!(pendingHydrateValues && target && activity === target.activity && sub === target.sub)) {
+      setBoltInputs([{ length: '', lengthOther: '', type: '', count: '' }]);
+    }
+  }, [activity, sub, pendingHydrateValues]);
 
   // Bluetooth 2-key keyboard support for Hauling "Log Times":
 //
@@ -751,6 +979,23 @@ haulClickerWeightStep,
       return anyPos;
     }
 
+    // Development (Rehab / Ground Support): bolt consumables and shotcrete are captured via modals
+    // and therefore must be present even though their fields are hidden from the main schema.
+    if (activity === 'Development' && (sub === 'Rehab' || sub === 'Ground Support')) {
+      const hasBolt = (boltInputs || []).some((b) => {
+        const cnt = Number(String(b.count || '').replace(/[^0-9]/g, ''));
+        const lenOk = !!String(b.length || '').trim() && (String(b.length) !== 'Other' || !!String(b.lengthOther || '').trim());
+        const typeOk = !!String(b.type || '').trim();
+        return Number.isFinite(cnt) && cnt > 0 && lenOk && typeOk;
+      });
+      if (!hasBolt) return false;
+
+      const agi = (values as any)['Agi Volume'];
+      const spray = (values as any)['Spray Volume'];
+      if (agi === undefined || agi === null || String(agi) === '') return false;
+      if (spray === undefined || spray === null || String(spray) === '') return false;
+    }
+
     return true;
   })();
 
@@ -815,6 +1060,23 @@ haulClickerWeightStep,
 
     const isDevRehabOrGS =
       activity === 'Development' && (sub === 'Rehab' || sub === 'Ground Support');
+
+    // Helper: add or update a single activity row
+    const saveOne = async (payload: any) => {
+      const base: any = {
+        payload,
+        shiftDate: shift?.date,
+        dn: shift?.dn,
+        user_id: session?.user_id,
+        ts: Date.now(),
+      };
+
+      if (editActivityId) {
+        await db.put('activities', { ...base, id: editActivityId });
+      } else {
+        await db.add('activities', base);
+      }
+    };
 
     if (!isDevRehabOrGS) {
       // ✅ keep the stored payload clean (don’t persist helper/manual fields)
@@ -883,15 +1145,27 @@ if (activity === 'Production Drilling') {
   payloadToSave = { activity, sub, values: baseValues };
 }
 
-await db.add('activities', {
-  payload: payloadToSave,
-  shiftDate: shift?.date,
-  dn: shift?.dn,
-  user_id: session?.user_id,
-  ts: Date.now(),
-});
+      await saveOne(payloadToSave);
 
     } else {
+      // Rehab / Ground Support can create multiple rows when NEW.
+      // When editing a single existing activity, keep it simple and just update that one row.
+      if (editActivityId) {
+        const valuesToSave = (() => {
+          const v: any = { ...values };
+          delete v.__manual_equipment;
+          delete v.__manual_location;
+          for (const k of Object.keys(v)) {
+            if (k.startsWith('__manual_location_')) delete v[k];
+          }
+          return v;
+        })();
+        await saveOne({ activity, sub, values: valuesToSave });
+        setMsg('task saved successfully');
+        setTimeout(() => nav(returnTo || '/ViewActivities'), 400);
+        return;
+      }
+
       const records: any[] = [];
 
       const cleanBase = () => {
@@ -947,7 +1221,7 @@ await db.add('activities', {
     }
 
     setMsg('task saved successfully');
-    setTimeout(() => nav('/Shift'), 500);
+    setTimeout(() => nav(editActivityId ? (returnTo || '/ViewActivities') : '/Shift'), 500);
   }
 
   const subKeys = Object.keys((data as any)[activity] || {});
@@ -955,11 +1229,28 @@ await db.add('activities', {
 
   // ✅ Correct: filter equipment IDs by CURRENT selected Activity, using type->activities map
   const filteredEquipment = useMemo(() => {
-    return (equipmentRows || [])
-      .filter((r) => (EQUIPMENT_ACTIVITY_MAP[r.type] || []).includes(activity))
-      .map((r) => r.equipment_id)
+    const rows = (equipmentRows || []).filter((r) => (EQUIPMENT_ACTIVITY_MAP[r.type] || []).includes(activity));
+
+    const personal = rows
+      .filter((r) => !r.is_site_asset)
+      .map((r) => String(r.equipment_id || '').trim())
+      .filter((x) => x)
       .sort((a, b) => a.localeCompare(b));
-  }, [equipmentRows, activity]);
+
+    const site = rows
+      .filter((r) => !!r.is_site_asset)
+      .map((r) => String(r.equipment_id || '').trim())
+      .filter((x) => x)
+      .sort((a, b) => a.localeCompare(b));
+
+    const currentEquip = String((values as any)?.['Equipment'] || '').trim();
+    const hasCurrent = !!currentEquip && [...personal, ...site].includes(currentEquip);
+
+    return {
+      personal: hasCurrent || !currentEquip ? personal : [currentEquip, ...personal],
+      site,
+    };
+  }, [equipmentRows, activity, (values as any)?.['Equipment']]);
 
   const applyActivity = useCallback(
     (next: string) => {
@@ -1287,11 +1578,20 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                         }
                       >
                         <option value="">-</option>
-                        {filteredEquipment.map((o) => (
-                          <option key={o} value={o}>
+                        {filteredEquipment.personal.map((o) => (
+                          <option key={`p-${o}`} value={o}>
                             {o}
                           </option>
                         ))}
+                        {filteredEquipment.site.length > 0 && (
+                          <optgroup label="────────── Site">
+                            {filteredEquipment.site.map((o) => (
+                              <option key={`s-${o}`} value={o}>
+                                {o}  [Site]
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
                         <option value="__manual__">Other (manual)</option>
                       </select>
 
@@ -1301,6 +1601,18 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                           placeholder="Enter equipment"
                           value={values.__manual_equipment || ''}
                           onChange={(e) => setValues((v) => ({ ...v, __manual_equipment: e.target.value }))}
+                          onBlur={() => {
+                            const typed = String(values.__manual_equipment || '').trim();
+                            const match = smartFindMatch(typed, [...filteredEquipment.personal, ...filteredEquipment.site]);
+                            if (match) {
+                              setValues((v) => ({ ...v, [f.field]: match, __manual_equipment: '' }));
+                            }
+                          }}
+                          onKeyDown={(ev) => {
+                            if (ev.key === 'Enter') {
+                              (ev.target as HTMLInputElement).blur();
+                            }
+                          }}
                         />
                       )}
                     </>
@@ -1321,11 +1633,37 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                         }
                       >
                         <option value="">-</option>
-                        {locationOptionsForField(f.field).map((o) => (
-                          <option key={o.id || o.name} value={o.name}>
-                            {o.name}
-                          </option>
-                        ))}
+                        {(() => {
+                          const opts = (locationOptionsForField(f.field) as any[]) || [];
+                          const cur = String(values[f.field] || '').trim();
+                          const has = cur && opts.some((x: any) => String(x?.name || '').trim() === cur);
+                          const base = has || !cur ? opts : ([{ id: '__current__', name: cur, type: '' }, ...opts] as any);
+
+                          const personal = [...base]
+                            .filter((x: any) => !x?.is_site_asset && !x?.__divider)
+                            .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')));
+
+                          const site = [...base]
+                            .filter((x: any) => !!x?.is_site_asset && !x?.__divider)
+                            .sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')));
+
+                          const merged = site.length
+                            ? [...personal, { id: '__divider__', __divider: true, name: '────────── Site', type: '' }, ...site]
+                            : personal;
+
+                          return merged;
+                        })().map((o: any) =>
+                          o?.__divider ? (
+                            <option key="__divider__" value="" disabled>
+                              {o.name}
+                            </option>
+                          ) : (
+                            <option key={o.id || o.name} value={o.name}>
+                              {o.name}
+                              {o.is_site_asset ? '  [Site]' : ''}
+                            </option>
+                          ),
+                        )}
                         <option value="__manual__">Other (manual)</option>
                       </select>
 
@@ -1335,7 +1673,64 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                           placeholder="Enter location"
                           value={(values as any)[`__manual_location_${f.field}`] || ''}
                           onChange={(e) => setValues((v) => ({ ...v, [`__manual_location_${f.field}`]: e.target.value }))}
+                          onBlur={() => {
+                            const typed = String((values as any)[`__manual_location_${f.field}`] || '').trim();
+                            const opts = ((locationOptionsForField(f.field) as any[]) || []).map((x: any) => String(x?.name || '').trim()).filter(Boolean);
+                            const match = smartFindMatch(typed, opts);
+                            if (match) {
+                              setValues((v) => ({ ...v, [f.field]: match, [`__manual_location_${f.field}`]: '' }));
+                            }
+                          }}
+                          onKeyDown={(ev) => {
+                            if (ev.key === 'Enter') {
+                              (ev.target as HTMLInputElement).blur();
+                            }
+                          }}
                         />
+                      )}
+
+                      {isDevBolts && f.field === 'Location' && (
+                        <div className="mt-3 flex flex-col gap-2">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={() => setBoltModalOpen(true)}
+                            >
+                              Bolt Consumables
+                            </button>
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={() => setShotcreteModalOpen(true)}
+                            >
+                              Shotcrete
+                            </button>
+                          </div>
+
+                          <div className="text-xs opacity-70">
+                            {(() => {
+                              const cnt = (boltInputs || []).reduce((acc, b) => acc + (Number(String(b.count || '').replace(/[^0-9]/g, '')) || 0), 0);
+                              const groups = (boltInputs || []).filter((b) => {
+                                const c = Number(String(b.count || '').replace(/[^0-9]/g, '')) || 0;
+                                return c > 0;
+                              }).length;
+                              const agi = (values as any)['Agi Volume'];
+                              const spray = (values as any)['Spray Volume'];
+                              const hasShot = (agi !== undefined && agi !== null && String(agi) !== '') || (spray !== undefined && spray !== null && String(spray) !== '');
+                              return (
+                                <div className="flex flex-col gap-1">
+                                  <div>
+                                    Bolts: <b>{cnt}</b>{groups ? ` across ${groups} entries` : ''}
+                                  </div>
+                                  <div>
+                                    Shotcrete: <b>{hasShot ? `${String(agi || 0)} m3 AGI, ${String(spray || 0)} m3 Spray` : 'not set'}</b>
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </div>
                       )}
                     </>
                   )}
@@ -1423,90 +1818,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
             })}
           </div>
 
-          {/* ✅ Bolts inside the card (white background) */}
-          {activity === 'Development' && (sub === 'Rehab' || sub === 'Ground Support') && (
-            <div className="pt-4 border-t">
-              <h3 className="text-sm font-semibold mb-3">Bolts</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="space-y-2">
-                    <div className="text-xs font-semibold">Bolt {i + 1}</div>
-
-                    <div>
-                      <label className="block text-xs font-medium mb-1">Bolt Length (m)</label>
-                      <select
-                        className="input"
-                        value={boltInputs[i].length}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setBoltInputs((prev) =>
-                            prev.map((b, j) =>
-                              j === i ? { ...b, length: val, lengthOther: val === 'Other' ? b.lengthOther : '' } : b,
-                            ),
-                          );
-                        }}
-                      >
-                        <option value="">-</option>
-                        <option value="1.8m">1.8</option>
-                        <option value="2.4m">2.4</option>
-                        <option value="3.0m">3.0</option>
-                        <option value="6.0m">6.0</option>
-                        <option value="Other">Other</option>
-                      </select>
-
-                      {boltInputs[i].length === 'Other' && (
-                        <input
-                          className="input mt-1"
-                          type="number"
-                          step="0.1"
-                          min="0"
-                          placeholder="Enter length (m)"
-                          value={boltInputs[i].lengthOther}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setBoltInputs((prev) => prev.map((b, j) => (j === i ? { ...b, lengthOther: val } : b)));
-                          }}
-                        />
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium mb-1">Bolt Type</label>
-                      <select
-                        className="input"
-                        value={boltInputs[i].type}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setBoltInputs((prev) => prev.map((b, j) => (j === i ? { ...b, type: val } : b)));
-                        }}
-                      >
-                        <option value="">-</option>
-                        <option value="Friction">Friction</option>
-                        <option value="Mechanical">Mechanical</option>
-                        <option value="Resin">Resin</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium mb-1">No. of Bolts</label>
-                      <input
-                        className="input"
-                        type="number"
-                        min="0"
-                        step="1"
-                        inputMode="numeric"
-                        value={boltInputs[i].count}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setBoltInputs((prev) => prev.map((b, j) => (j === i ? { ...b, count: val } : b)));
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Development Rehab / Ground Support capture bolt consumables + shotcrete via modals (buttons under Location) */}
         </div>
         )}
       </div>
@@ -2262,9 +2574,242 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
         </div>
       ) : null}
 
+      {/* Development: Bolt consumables modal */}
+      {boltModalOpen && isDevBolts ? (
+        <div className="fixed inset-0 bg-black sm:bg-black/30 flex items-start justify-center z-[1000] p-3 overflow-auto pt-6 pb-24">
+          <div className="tv-surface-soft modal-solid-mobile w-full max-w-md sm:max-w-2xl rounded-3xl shadow-xl border tv-border p-3 sm:p-5">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <div className="font-bold">Bolt consumables</div>
+                <div className="text-xs opacity-70">{sub}</div>
+              </div>
+              <button type="button" className="btn" onClick={() => setBoltModalOpen(false)}>
+                Close
+              </button>
+            </div>
+
+            <div className="text-xs opacity-70 mb-2">
+              Add each bolt type/length and quantity. These entries will save as separate rows (shotcrete volumes are only stored once).
+            </div>
+
+            <div className="overflow-auto border rounded-xl">
+              <table className="w-full table-fixed text-sm">
+                <thead className="tv-surface-soft border-b tv-divider">
+                  <tr>
+                    <th className="p-1 text-left w-[140px]">Length</th>
+                    <th className="p-1 text-left w-[160px]">Bolt type</th>
+                    <th className="p-1 text-left w-[96px]">Qty</th>
+                    <th className="p-1 text-left w-[36px]"> </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(boltInputs || []).map((b, i) => (
+                    <tr key={i} className="border-b last:border-b-0">
+                      <td className="p-1">
+                        <div className="flex flex-col gap-1">
+                          <select
+                            className="input w-full"
+                            value={b.length}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setBoltInputs((prev) => {
+                                const arr = [...(prev || [])];
+                                arr[i] = { ...arr[i], length: v, lengthOther: v === 'Other' ? (arr[i].lengthOther || '') : '' };
+                                return arr;
+                              });
+                            }}
+                          >
+                            <option value="">-</option>
+                            {devBoltLengthOptions.map((o) => (
+                              <option key={o} value={o}>
+                                {o}
+                              </option>
+                            ))}
+                            <option value="Other">Other</option>
+                          </select>
+                          {b.length === 'Other' ? (
+                            <input
+                              className="input w-full"
+                              inputMode="decimal"
+                              placeholder="Length (m)"
+                              value={b.lengthOther || ''}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setBoltInputs((prev) => {
+                                  const arr = [...(prev || [])];
+                                  arr[i] = { ...arr[i], lengthOther: v };
+                                  return arr;
+                                });
+                              }}
+                            />
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="p-1">
+                        <select
+                          className="input w-full"
+                          value={b.type}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setBoltInputs((prev) => {
+                              const arr = [...(prev || [])];
+                              arr[i] = { ...arr[i], type: v };
+                              return arr;
+                            });
+                          }}
+                        >
+                          <option value="">-</option>
+                          {devBoltTypeOptions.map((o) => (
+                            <option key={o} value={o}>
+                              {o}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="p-1">
+                        <input
+                          className="input w-full"
+                          inputMode="numeric"
+                          value={b.count}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setBoltInputs((prev) => {
+                              const arr = [...(prev || [])];
+                              arr[i] = { ...arr[i], count: v };
+                              return arr;
+                            });
+                          }}
+                        />
+                      </td>
+                      <td className="p-1">
+                        <button
+                          type="button"
+                          aria-label="Delete bolt"
+                          title="Delete bolt"
+                          className="w-8 h-8 flex items-start justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
+                          onClick={() => {
+                            setBoltInputs((prev) => {
+                              const arr = [...(prev || [])];
+                              arr.splice(i, 1);
+                              return arr.length ? arr : [{ length: '', lengthOther: '', type: '', count: '' }];
+                            });
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+
+                  {(boltInputs || []).length === 0 ? (
+                    <tr>
+                      <td className="p-3 text-sm opacity-70" colSpan={4}>
+                        No bolts added yet.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 mt-3">
+              <button
+                type="button"
+                className="btn"
+                onClick={() =>
+                  setBoltInputs((prev) => [...(prev || []), { length: '', lengthOther: '', type: '', count: '' }])
+                }
+              >
+                + Add bolt
+              </button>
+
+              <div className="text-sm">
+                Total: <b>{(boltInputs || []).reduce((acc, b) => acc + (Number(String(b.count || '').replace(/[^0-9]/g, '')) || 0), 0)}</b>
+              </div>
+
+              <button type="button" className="btn btn-primary" onClick={() => setBoltModalOpen(false)}>
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Development: Shotcrete modal */}
+      {shotcreteModalOpen && isDevBolts ? (
+        <div className="fixed inset-0 bg-black sm:bg-black/30 flex items-start justify-center z-[1000] p-3 overflow-auto pt-6 pb-24">
+          <div className="tv-surface-soft modal-solid-mobile w-full max-w-md rounded-3xl shadow-xl border tv-border p-3 sm:p-5">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <div className="font-bold">Shotcrete</div>
+                <div className="text-xs opacity-70">Enter volumes for this location</div>
+              </div>
+              <button type="button" className="btn" onClick={() => setShotcreteModalOpen(false)}>
+                Close
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3">
+              <div>
+                <label className="block text-sm font-medium mb-1">AGI volume (m3)</label>
+                <input
+                  className="input w-full"
+                  inputMode="decimal"
+                  value={String((values as any)['Agi Volume'] ?? '')}
+                  onChange={(e) => setValues((v) => ({ ...v, 'Agi Volume': e.target.value }))}
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Spray volume (m3)</label>
+                <input
+                  className="input w-full"
+                  inputMode="decimal"
+                  value={String((values as any)['Spray Volume'] ?? '')}
+                  onChange={(e) => setValues((v) => ({ ...v, 'Spray Volume': e.target.value }))}
+                  placeholder="0"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 mt-4">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  // Treat blank as 0 so submit validation is consistent.
+                  setValues((v) => ({
+                    ...v,
+                    'Agi Volume': String((v as any)['Agi Volume'] ?? '').trim() === '' ? '0' : (v as any)['Agi Volume'],
+                    'Spray Volume': String((v as any)['Spray Volume'] ?? '').trim() === '' ? '0' : (v as any)['Spray Volume'],
+                  }));
+                  setShotcreteModalOpen(false);
+                }}
+              >
+                Done
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setValues((v) => ({
+                    ...v,
+                    'Agi Volume': String((v as any)['Agi Volume'] ?? '').trim() === '' ? '0' : (v as any)['Agi Volume'],
+                    'Spray Volume': String((v as any)['Spray Volume'] ?? '').trim() === '' ? '0' : (v as any)['Spray Volume'],
+                  }));
+                  setShotcreteModalOpen(false);
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
 {pdModal ? (
-        <div className="fixed inset-0 bg-black/30 flex items-start justify-center z-[1000] p-3 overflow-auto pt-6 pb-24">
-          <div className="tv-surface-soft w-full max-w-md sm:max-w-2xl rounded-3xl shadow-xl border tv-border p-3 sm:p-5">
+        <div className="fixed inset-0 bg-black sm:bg-black/30 flex items-start justify-center z-[1000] p-3 overflow-auto pt-6 pb-24">
+          <div className="tv-surface-soft modal-solid-mobile w-full max-w-md sm:max-w-2xl rounded-3xl shadow-xl border tv-border p-3 sm:p-5">
             <div className="flex items-center justify-between gap-3 mb-3">
               <div>
                 <div className="font-bold">Production drilling holes</div>

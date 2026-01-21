@@ -1,4 +1,3 @@
-import Header from '../components/Header';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -1116,6 +1115,18 @@ export default function YouVsYou() {
           get: (r: ShiftRow) => devBolts(payloads(r)),
         },
         {
+          id: 'dev_spray_volume',
+          title: 'Spray Volume',
+          unit: 'm³',
+          get: (r: ShiftRow) => sumMetric(r.totals_json, 'development', 'Spray Volume'),
+        },
+        {
+          id: 'dev_agi_volume',
+          title: 'Agi Volume',
+          unit: 'm³',
+          get: (r: ShiftRow) => sumMetric(r.totals_json, 'development', 'Agi Volume'),
+        },
+        {
           id: 'headings_supported',
           title: 'Headings supported',
           unit: 'hdgs',
@@ -1393,48 +1404,23 @@ export default function YouVsYou() {
 
   if (!online) {
     return (
-      <div>
-        <Header />
-        <div className="p-6 max-w-xl mx-auto">
-          <div className="card">
-            <h2 className="text-xl font-semibold mb-2">You vs You</h2>
-            <div className="text-sm tv-muted">
-              Connection required. Please connect to the network and try again.
-            </div>
-            <div className="mt-4 flex gap-2">
-              <button className="btn" onClick={() => nav('/Main')}>
-                Back
-              </button>
-</div>
-          </div>
+      <div className="card">
+        <h2 className="text-xl font-semibold mb-2">You vs You</h2>
+        <div className="text-sm tv-muted">
+          Connection required. Please connect to the network and try again.
+        </div>
+        <div className="mt-4 flex gap-2">
+          <button className="btn" onClick={() => nav('/Main')}>
+            Back
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <div>
-      <Header />
-      <div className="p-4 max-w-2xl mx-auto space-y-4">
-        <div className="card">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-xs tv-muted">Performance</div>
-              <div className="text-2xl font-bold">You vs You</div>
-              <div className="text-sm tv-muted">Trends and benchmarks based on your own logged shifts.</div>
-            </div>
-            <div className="seg-tabs" role="tablist" aria-label="Performance pages">
-              <button role="tab" aria-selected="false" className="seg-tab" onClick={() => nav('/YouVsNetwork')} title="Compare to crew">
-                You vs Crew
-              </button>
-              <button role="tab" aria-selected="true" className="seg-tab seg-tab--active" onClick={() => nav('/YouVsYou')}>
-                You vs You
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="card">
+    <div className="space-y-4">
+      <div className="card">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-semibold">Trend cards</div>
@@ -1477,7 +1463,7 @@ export default function YouVsYou() {
               );
             })}
           </div>
-        </div>
+      </div>
 
         <div className="card">
           <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1638,7 +1624,6 @@ export default function YouVsYou() {
             </div>
           </div>
         )}
-      </div>
     </div>
   );
 }

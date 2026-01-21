@@ -39,6 +39,13 @@ async function tableColumns(table: string): Promise<Set<string>> {
   return set;
 }
 
+function normWorkSiteName(s: any): string {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
 async function hasColumn(table: string, col: string): Promise<boolean> {
   const cols = await tableColumns(table);
   return cols.has(col);
@@ -216,6 +223,27 @@ router.post('/admin-sites', siteAdminMiddleware, async (req, res) => {
        RETURNING id, name, state`,
       [name, state || null],
     );
+    try {
+      const siteRow = r.rows?.[0];
+      const siteId = Number(siteRow?.id || 0);
+      const siteName = String(siteRow?.name || name).trim();
+      if (siteId && siteName) {
+        const normalized = normWorkSiteName(siteName);
+        // Ensure the Work Sites directory contains this Subscribed Site as an official Work Site.
+        await pool.query(
+          `INSERT INTO work_sites (name_display, name_normalized, is_official, official_site_id)
+           VALUES ($1, $2, true, $3)
+           ON CONFLICT (name_normalized)
+           DO UPDATE SET name_display = EXCLUDED.name_display,
+                         is_official = true,
+                         official_site_id = EXCLUDED.official_site_id`,
+          [siteName, normalized, siteId],
+        );
+      }
+    } catch {
+      // non-fatal (older DBs may not have work_sites yet)
+    }
+
     res.json({ ok: true, site: r.rows[0] });
   } catch (e) {
     res.status(500).json({ ok: false, error: e?.message || 'Failed to create site' });
@@ -235,8 +263,11 @@ router.delete('/admin-sites', siteAdminMiddleware, async (req: any, res) => {
     const sites = allowedSites(req);
     if (!sites.includes('*')) return res.status(403).json({ ok: false, error: 'forbidden' });
 
-    const usersR = await pool.query('SELECT COUNT(*)::int AS n FROM users WHERE site=$1', [name]);
-    const shiftsR = await pool.query('SELECT COUNT(*)::int AS n FROM shifts WHERE site=$1', [name]);
+    const sr = await pool.query('SELECT id, name FROM admin_sites WHERE name=$1 LIMIT 1', [name]);
+    const site_id = Number(sr.rows?.[0]?.id || 0);
+    if (!site_id) return res.status(404).json({ ok: false, error: 'site_not_found' });
+    const usersR = await pool.query('SELECT COUNT(*)::int AS n FROM users WHERE COALESCE(primary_admin_site_id, primary_site_id)=$1', [site_id]);
+    const shiftsR = await pool.query('SELECT COUNT(*)::int AS n FROM shifts WHERE admin_site_id=$1', [site_id]);
     const usersN = usersR.rows?.[0]?.n || 0;
     const shiftsN = shiftsR.rows?.[0]?.n || 0;
 
@@ -251,14 +282,14 @@ router.delete('/admin-sites', siteAdminMiddleware, async (req: any, res) => {
 
     await pool.query('BEGIN');
     // Remove per-site master lists
-    await pool.query('DELETE FROM admin_equipment WHERE site=$1', [name]);
-    await pool.query('DELETE FROM admin_locations WHERE site=$1', [name]);
+    await pool.query('DELETE FROM admin_equipment WHERE admin_site_id=$1', [site_id]);
+    await pool.query('DELETE FROM admin_locations WHERE admin_site_id=$1', [site_id]);
 
     // Remove shift data for the site (shift_activities cascades via FK)
-    await pool.query('DELETE FROM shifts WHERE site=$1', [name]);
+    await pool.query('DELETE FROM shifts WHERE admin_site_id=$1', [site_id]);
 
     // Move any users from the deleted site back to default
-    await pool.query("UPDATE users SET site='default' WHERE site=$1", [name]);
+    await pool.query('UPDATE users SET primary_admin_site_id=NULL, primary_site_id=NULL WHERE COALESCE(primary_admin_site_id, primary_site_id)=$1', [site_id]);
 
     // Finally remove from admin_sites
     await pool.query('DELETE FROM admin_sites WHERE name=$1', [name]);
@@ -297,6 +328,105 @@ router.get('/me', siteAdminMiddleware, async (req: any, res) => {
   }
 });
 
+
+// --- DASHBOARD SUMMARY ---
+// Provides site-scoped, admin-relevant counts for the Site Admin home dashboard.
+router.get('/dashboard-summary', siteAdminMiddleware, async (req: any, res) => {
+  const site = String(req.query?.site || '').trim() || normalizeSiteParam(req);
+  if (!site || site === '*') return res.status(400).json({ ok: false, error: 'site required' });
+
+  try {
+    assertSiteAccess(req, site);
+
+    const monthYmRaw = String(req.query?.month_ym || '').trim();
+    const now = new Date();
+    const monthYm = /^\d{4}-\d{2}$/.test(monthYmRaw)
+      ? monthYmRaw
+      : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    const [yyS, mmS] = monthYm.split('-');
+    const yy = Number(yyS);
+    const mm = Number(mmS);
+    const startDate = new Date(Date.UTC(yy, mm - 1, 1));
+    const nextMonth = new Date(Date.UTC(yy, mm, 1));
+    const start = startDate.toISOString().slice(0, 10);
+    const end = nextMonth.toISOString().slice(0, 10);
+
+    const client = await pool.connect();
+    try {
+      const adminSiteId = await resolveAdminSiteId(client, site);
+      if (!adminSiteId) return res.status(404).json({ ok: false, error: 'site not found' });
+
+      const shiftsAgg = await client.query(
+        `SELECT COUNT(*)::int AS total,
+                SUM(CASE WHEN validated THEN 1 ELSE 0 END)::int AS validated
+           FROM validated_shifts
+          WHERE admin_site_id=$1
+            AND date >= $2::date AND date < $3::date`,
+        [adminSiteId, start, end],
+      );
+      const total = Number(shiftsAgg.rows?.[0]?.total || 0);
+      const validated = Number(shiftsAgg.rows?.[0]?.validated || 0);
+      const unvalidated = Math.max(0, total - validated);
+
+      const pendingDaysQ = await client.query(
+        `SELECT COUNT(*)::int AS pending_days
+           FROM (
+             SELECT date, BOOL_AND(validated) AS all_valid
+               FROM validated_shifts
+              WHERE admin_site_id=$1
+                AND date >= $2::date AND date < $3::date
+              GROUP BY date
+           ) t
+          WHERE t.all_valid=FALSE`,
+        [adminSiteId, start, end],
+      );
+      const pending_days = Number(pendingDaysQ.rows?.[0]?.pending_days || 0);
+
+      // Days with data vs days fully validated (used for dashboard fractions)
+      const daysAgg = await client.query(
+        `SELECT COUNT(*)::int AS with_data,
+                SUM(CASE WHEN all_valid THEN 1 ELSE 0 END)::int AS validated_days
+           FROM (
+             SELECT date, BOOL_AND(validated) AS all_valid
+               FROM validated_shifts
+              WHERE admin_site_id=$1
+                AND date >= $2::date AND date < $3::date
+              GROUP BY date
+           ) t`,
+        [adminSiteId, start, end],
+      );
+      const days_with_data = Number(daysAgg.rows?.[0]?.with_data || 0);
+      const days_validated = Number(daysAgg.rows?.[0]?.validated_days || 0);
+
+      const crewQ = await client.query(
+        `SELECT COUNT(DISTINCT user_email)::int AS active_users,
+                MAX(date)::text AS last_shift_date
+           FROM validated_shifts
+          WHERE admin_site_id=$1
+            AND date >= $2::date AND date < $3::date`,
+        [adminSiteId, start, end],
+      );
+      const active_users = Number(crewQ.rows?.[0]?.active_users || 0);
+      const last_shift_date = crewQ.rows?.[0]?.last_shift_date || null;
+
+      return res.json({
+        ok: true,
+        site,
+        month_ym: monthYm,
+        pending_days,
+        days: { with_data: days_with_data, validated: days_validated },
+        shifts: { total, validated, unvalidated },
+        crew: { active_users, last_shift_date },
+      });
+    } finally {
+      client.release();
+    }
+  } catch (e: any) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
 // List operators for a given site (used by validation "Add Activity" so operator is selectable, not free-typed)
 router.get('/site-users', siteAdminMiddleware, async (req: any, res) => {
   try {
@@ -304,12 +434,19 @@ router.get('/site-users', siteAdminMiddleware, async (req: any, res) => {
     if (!site || site === '*') return res.status(400).json({ ok: false, error: 'missing site' });
     assertSiteAccess(req, site);
 
+    const siteId = await resolveAdminSiteId(pool as any, site);
+    if (!siteId) return res.json({ ok: true, users: [] });
+
+    // NOTE: users table stores membership to a subscribed Site Admin tenant via
+    // primary_admin_site_id / primary_site_id (legacy compatibility).
+    // Some older seeded DBs may still only have users.site populated.
     const r = await pool.query(
       `SELECT id, name, email, site
          FROM users
-        WHERE site=$1
+        WHERE COALESCE(primary_admin_site_id, primary_site_id)=$1
+           OR site=$2
         ORDER BY name ASC, email ASC`,
-      [site],
+      [siteId, site],
     );
     return res.json({ ok: true, users: r.rows || [] });
   } catch (e) {
@@ -360,6 +497,11 @@ router.post('/create-site-admin', siteAdminMiddleware, async (req: any, res) => 
 
     // Scope check: non-super admins can only create admins for their scoped site
     assertSiteAccess(req, site);
+
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+  const adminSiteId = await resolveAdminSiteId(pool as any, site);
+  if (!adminSiteId) return res.json({ shifts: [], activities: [], source_hash: '0', validated_shifts: [], validated_activities: [] });
 
     const hash = bcrypt.hashSync(password, 10);
 
@@ -479,6 +621,13 @@ router.get('/members', siteAdminMiddleware, async (req: any, res) => {
     if (!site || site === '*') return res.status(400).json({ ok: false, error: 'missing site' });
     assertSiteAccess(req, site);
 
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+  const adminSiteId = await resolveAdminSiteId(pool as any, site);
+  if (!adminSiteId) return res.json({ shifts: [], activities: [], source_hash: '0', validated_shifts: [], validated_activities: [] });
+    const admin_site_id = await resolveAdminSiteId(pool, site);
+    if (!admin_site_id) return res.status(400).json({ error: 'unknown site' });
+
     // NOTE: Avoid UNION + ORDER BY inside compound selects.
     // SQLite is strict about ORDER BY with UNION, and some local/dev setups still use SQLite.
     // We do 2 simple queries and merge/sort in JS (portable across SQLite/Postgres).
@@ -514,7 +663,7 @@ router.get('/members', siteAdminMiddleware, async (req: any, res) => {
          NULL as requested_at,
          NULL as approved_at
        FROM users u
-       LEFT JOIN site_memberships m ON m.user_id=u.id AND m.site_id=(SELECT id FROM admin_sites WHERE name=$1)
+       LEFT JOIN site_memberships m ON m.user_id=u.id AND m.site_id=(SELECT id FROM admin_sites WHERE lower(name)=lower($1))
        WHERE u.site=$1 AND m.id IS NULL`,
       [site],
     );
@@ -548,6 +697,11 @@ router.post('/members/approve', siteAdminMiddleware, async (req: any, res) => {
     if (!site || site === '*') return res.status(400).json({ ok: false, error: 'missing site' });
     assertSiteAccess(req, site);
 
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+  const adminSiteId = await resolveAdminSiteId(pool as any, site);
+  if (!adminSiteId) return res.json({ shifts: [], activities: [], source_hash: '0', validated_shifts: [], validated_activities: [] });
+
     const user_id = Number(req.body?.user_id || 0);
     const role = String(req.body?.role || 'member').trim();
     if (!user_id) return res.status(400).json({ ok: false, error: 'missing user_id' });
@@ -557,7 +711,7 @@ router.post('/members/approve', siteAdminMiddleware, async (req: any, res) => {
 
     // Ensure site exists, then resolve site_id
     await pool.query(`INSERT INTO admin_sites (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`, [site]);
-    const sid = await pool.query(`SELECT id FROM admin_sites WHERE name=$1`, [site]);
+    const sid = await pool.query(`SELECT id FROM admin_sites WHERE lower(name)=lower($1)`, [site]);
     const site_id = Number(sid.rows?.[0]?.id || 0);
     if (!site_id) return res.status(500).json({ ok: false, error: 'failed to resolve site_id' });
 
@@ -632,13 +786,20 @@ router.get('/members/search', siteAdminMiddleware, async (req: any, res) => {
     if (!site || site === '*') return res.status(400).json({ ok: false, error: 'missing site' });
     assertSiteAccess(req, site);
 
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+  const adminSiteId = await resolveAdminSiteId(pool as any, site);
+  if (!adminSiteId) return res.json({ shifts: [], activities: [], source_hash: '0', validated_shifts: [], validated_activities: [] });
+    const admin_site_id = await resolveAdminSiteId(pool, site);
+    if (!admin_site_id) return res.status(400).json({ error: 'unknown site' });
+
     const q = String(req.query.q || '').trim();
     if (q.length < 2) return res.json({ ok: true, rows: [] });
     const like = `%${q.toLowerCase()}%`;
 
     // Resolve site_id (create if missing)
     await pool.query(`INSERT INTO admin_sites (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`, [site]);
-    const sid = await pool.query(`SELECT id FROM admin_sites WHERE name=$1`, [site]);
+    const sid = await pool.query(`SELECT id FROM admin_sites WHERE lower(name)=lower($1)`, [site]);
     const site_id = Number(sid.rows?.[0]?.id || 0);
     if (!site_id) return res.status(500).json({ ok: false, error: 'failed to resolve site_id' });
 
@@ -668,6 +829,11 @@ router.post('/members/add', siteAdminMiddleware, async (req: any, res) => {
     assertManager(req);
     const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
     assertSiteAccess(req, site);
+
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+  const adminSiteId = await resolveAdminSiteId(pool as any, site);
+  if (!adminSiteId) return res.json({ shifts: [], activities: [], source_hash: '0', validated_shifts: [], validated_activities: [] });
     await pool.query(`INSERT INTO admin_sites (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`, [site]);
 
     const user_id_raw = Number(req.body?.user_id || 0);
@@ -689,7 +855,7 @@ router.post('/members/add', siteAdminMiddleware, async (req: any, res) => {
 
     // Manual add is now an INVITE that requires the user to accept.
     // We avoid ON CONFLICT here so it also works on older DBs that don't yet have a unique constraint.
-    const sid = await pool.query(`SELECT id FROM admin_sites WHERE name=$1`, [site]);
+    const sid = await pool.query(`SELECT id FROM admin_sites WHERE lower(name)=lower($1)`, [site]);
     const site_id = Number(sid.rows?.[0]?.id || 0);
     if (!site_id) return res.status(500).json({ ok: false, error: 'failed to resolve site_id' });
 
@@ -742,6 +908,11 @@ router.post('/members/revoke', siteAdminMiddleware, async (req: any, res) => {
     assertManager(req);
     const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
     assertSiteAccess(req, site);
+
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+  const adminSiteId = await resolveAdminSiteId(pool as any, site);
+  if (!adminSiteId) return res.json({ shifts: [], activities: [], source_hash: '0', validated_shifts: [], validated_activities: [] });
     const user_id = Number(req.body?.user_id);
     if (!user_id) return res.status(400).json({ ok: false, error: 'missing user_id' });
     await pool.query(
@@ -862,6 +1033,33 @@ function normalizeSiteParam(req: any): string {
   return '*';
 }
 
+
+async function resolveAdminSiteId(client: any, raw: any): Promise<number | null> {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  const n = Number(s);
+  if (Number.isFinite(n) && n > 0) return n;
+  try {
+    // Prefer the canonical column (admin_sites.name). Some older DBs used admin_sites.site.
+    // We try name first, then fall back to site if needed.
+    const r1 = await client.query('SELECT id FROM admin_sites WHERE lower(name)=lower($1)', [s]);
+    const id1 = Number(r1.rows?.[0]?.id);
+    if (Number.isFinite(id1) && id1 > 0) return id1;
+
+    // Fallback for older schemas
+    try {
+      const r2 = await client.query('SELECT id FROM admin_sites WHERE lower(site)=lower($1)', [s]);
+      const id2 = Number(r2.rows?.[0]?.id);
+      return Number.isFinite(id2) && id2 > 0 ? id2 : null;
+    } catch {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+
 function assertSiteAccess(req: any, site: string) {
   const tokenSites = allowedSites(req);
   if (tokenSites.includes('*')) return;
@@ -876,8 +1074,11 @@ async function loadDaySnapshot(site: string, date: string) {
   const params: any[] = [date];
   let siteJoin = '';
   if (site !== '*') {
-    siteJoin = ' AND s.site = $2 ';
-    params.push(site);
+    const siteId = await resolveAdminSiteId(pool as any, site);
+    // If the caller passed an unknown site name, return an empty snapshot (prevents 500s)
+    if (!siteId) return { shifts: [], activities: [], source_hash: '0' };
+    siteJoin = ' AND s.admin_site_id = $2 ';
+    params.push(siteId);
   }
 
   const shiftsR = await pool.query(
@@ -887,15 +1088,16 @@ async function loadDaySnapshot(site: string, date: string) {
       s.user_id,
       u.name as user_name,
       u.email as user_email,
-      s.site as site,
+      COALESCE(asite.name, '') as site,
       s.date::text as date,
       s.dn,
       s.totals_json,
       s.finalized_at
     FROM shifts s
     JOIN users u ON u.id = s.user_id
+    LEFT JOIN admin_sites asite ON asite.id = s.admin_site_id
     WHERE s.date = $1::date ${siteJoin}
-    ORDER BY s.site, s.dn, u.name, s.user_id
+    ORDER BY COALESCE(asite.name,''), s.dn, u.name, s.user_id
   `,
     params,
   );
@@ -907,7 +1109,7 @@ async function loadDaySnapshot(site: string, date: string) {
       a.shift_id,
       s.user_id,
       u.email as user_email,
-      s.site as site,
+      COALESCE(asite.name, '') as site,
       s.dn,
       a.activity,
       a.sub_activity,
@@ -915,6 +1117,7 @@ async function loadDaySnapshot(site: string, date: string) {
     FROM shift_activities a
     JOIN shifts s ON s.id = a.shift_id
     JOIN users u ON u.id = s.user_id
+    LEFT JOIN admin_sites asite ON asite.id = s.admin_site_id
     WHERE s.date = $1::date ${siteJoin}
     ORDER BY a.activity, a.sub_activity, a.id
   `,
@@ -1011,15 +1214,55 @@ router.get('/admin-equipment', siteAdminMiddleware, async (req: any, res) => {
   try {
     const site = normalizeSiteParam(req);
     assertSiteAccess(req, site);
+
+    if (site === '*') return res.status(400).json({ error: 'site required' });
+    const siteId = await resolveAdminSiteId(pool as any, site);
+    if (!siteId) return res.status(404).json({ rows: [] });
+    // NOTE: admin_equipment does not have a "site" column. Join admin_sites to return a stable site label.
     const r = await pool.query(
-      `SELECT id, site, type, equipment_id
-         FROM admin_equipment
-        WHERE site=$1
-        ORDER BY type, equipment_id`,
-      [site],
+      `SELECT e.id,
+              COALESCE(s.name, '') AS site,
+              e.type,
+              e.equipment_id
+         FROM admin_equipment e
+         JOIN admin_sites s ON s.id = e.admin_site_id
+        WHERE e.admin_site_id = $1
+        ORDER BY e.type, e.equipment_id`,
+      [siteId],
     );
     return res.json({ rows: r.rows || [] });
   } catch (e) {
+    return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
+  }
+});
+
+// True edit endpoint (supports renaming equipment_id)
+router.patch('/admin-equipment/:id', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+
+    if (site === '*') return res.status(400).json({ error: 'site required' });
+    const siteId = await resolveAdminSiteId(pool as any, site);
+    if (!siteId) return res.status(404).json({ error: 'site not found' });
+
+    const id = Number(req.params?.id);
+    const type = String(req.body?.type || '').trim();
+    const equipment_id = String(req.body?.equipment_id || '').trim().toUpperCase();
+    if (!id || !type || !equipment_id) return res.status(400).json({ error: 'missing id, type or equipment_id' });
+
+    const r = await pool.query(
+      `UPDATE admin_equipment
+          SET type=$1,
+              equipment_id=$2
+        WHERE id=$3 AND admin_site_id=$4
+        RETURNING id`,
+      [type, equipment_id, id, siteId],
+    );
+    if (!r.rowCount) return res.status(404).json({ error: 'not found' });
+    return res.json({ ok: true, id: r.rows[0]?.id || id });
+  } catch (e: any) {
+    if (String(e?.code) === '23505') return res.status(409).json({ error: 'equipment_id already exists' });
     return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
   }
 });
@@ -1028,14 +1271,18 @@ router.post('/admin-equipment', siteAdminMiddleware, async (req: any, res) => {
   try {
     const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
     assertSiteAccess(req, site);
+
+    if (site === '*') return res.status(400).json({ error: 'site required' });
+    const siteId = await resolveAdminSiteId(pool as any, site);
+    if (!siteId) return res.status(404).json({ error: 'site not found' });
     const type = String(req.body?.type || '').trim();
     const equipment_id = String(req.body?.equipment_id || '').trim().toUpperCase();
     if (!site || !type || !equipment_id) return res.status(400).json({ error: 'missing site, type or equipment_id' });
     await pool.query(
-      `INSERT INTO admin_equipment (site, type, equipment_id)
+      `INSERT INTO admin_equipment (admin_site_id, type, equipment_id)
        VALUES ($1,$2,$3)
-       ON CONFLICT (site, equipment_id) DO NOTHING`,
-      [site, type, equipment_id],
+       ON CONFLICT (admin_site_id, equipment_id) DO NOTHING`,
+      [siteId, type, equipment_id],
     );
     return res.json({ ok: true });
   } catch (e) {
@@ -1047,9 +1294,13 @@ router.delete('/admin-equipment', siteAdminMiddleware, async (req: any, res) => 
   try {
     const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
     assertSiteAccess(req, site);
+
+    if (site === '*') return res.status(400).json({ error: 'site required' });
+    const siteId = await resolveAdminSiteId(pool as any, site);
+    if (!siteId) return res.status(404).json({ error: 'site not found' });
     const equipment_id = String(req.body?.equipment_id || '').trim().toUpperCase();
     if (!site || !equipment_id) return res.status(400).json({ error: 'missing site or equipment_id' });
-    await pool.query(`DELETE FROM admin_equipment WHERE site=$1 AND equipment_id=$2`, [site, equipment_id]);
+    await pool.query(`DELETE FROM admin_equipment WHERE admin_site_id=$1 AND equipment_id=$2`, [siteId, equipment_id]);
     return res.json({ ok: true });
   } catch (e) {
     return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
@@ -1060,15 +1311,55 @@ router.get('/admin-locations', siteAdminMiddleware, async (req: any, res) => {
   try {
     const site = normalizeSiteParam(req);
     assertSiteAccess(req, site);
+
+    if (site === '*') return res.status(400).json({ error: 'site required' });
+    const siteId = await resolveAdminSiteId(pool as any, site);
+    if (!siteId) return res.status(404).json({ rows: [] });
+    // NOTE: admin_locations does not have a "site" column. Join admin_sites to return a stable site label.
     const r = await pool.query(
-      `SELECT id, site, name, type
-         FROM admin_locations
-        WHERE site=$1
-        ORDER BY type, name`,
-      [site],
+      `SELECT l.id,
+              COALESCE(s.name, '') AS site,
+              l.name,
+              l.type
+         FROM admin_locations l
+         JOIN admin_sites s ON s.id = l.admin_site_id
+        WHERE l.admin_site_id = $1
+        ORDER BY l.type, l.name`,
+      [siteId],
     );
     return res.json({ rows: r.rows || [] });
   } catch (e) {
+    return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
+  }
+});
+
+// True edit endpoint (supports renaming location name)
+router.patch('/admin-locations/:id', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+
+    if (site === '*') return res.status(400).json({ error: 'site required' });
+    const siteId = await resolveAdminSiteId(pool as any, site);
+    if (!siteId) return res.status(404).json({ error: 'site not found' });
+
+    const id = Number(req.params?.id);
+    const name = String(req.body?.name || '').trim();
+    const type = String(req.body?.type || '').trim();
+    if (!id || !name) return res.status(400).json({ error: 'missing id or name' });
+
+    const r = await pool.query(
+      `UPDATE admin_locations
+          SET name=$1,
+              type=$2
+        WHERE id=$3 AND admin_site_id=$4
+        RETURNING id`,
+      [name, type || null, id, siteId],
+    );
+    if (!r.rowCount) return res.status(404).json({ error: 'not found' });
+    return res.json({ ok: true, id: r.rows[0]?.id || id });
+  } catch (e: any) {
+    if (String(e?.code) === '23505') return res.status(409).json({ error: 'location already exists' });
     return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
   }
 });
@@ -1077,14 +1368,19 @@ router.post('/admin-locations', siteAdminMiddleware, async (req: any, res) => {
   try {
     const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
     assertSiteAccess(req, site);
+
+    if (site === '*') return res.status(400).json({ error: 'site required' });
+    const siteId = await resolveAdminSiteId(pool as any, site);
+    if (!siteId) return res.status(404).json({ error: 'site not found' });
     const name = String(req.body?.name || '').trim();
     const type = String(req.body?.type || '').trim();
     if (!site || !name) return res.status(400).json({ error: 'missing site or name' });
     await pool.query(
-      `INSERT INTO admin_locations (site, name, type)
+      `INSERT INTO admin_locations (admin_site_id, name, type)
        VALUES ($1,$2,$3)
-       ON CONFLICT (site, name) DO NOTHING`,
-      [site, name, type || null],
+       ON CONFLICT (admin_site_id, name)
+       DO UPDATE SET type=EXCLUDED.type`,
+      [siteId, name, type || null],
     );
     return res.json({ ok: true });
   } catch (e) {
@@ -1096,9 +1392,13 @@ router.delete('/admin-locations', siteAdminMiddleware, async (req: any, res) => 
   try {
     const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
     assertSiteAccess(req, site);
+
+    if (site === '*') return res.status(400).json({ error: 'site required' });
+    const siteId = await resolveAdminSiteId(pool as any, site);
+    if (!siteId) return res.status(404).json({ error: 'site not found' });
     const name = String(req.body?.name || '').trim();
     if (!site || !name) return res.status(400).json({ error: 'missing site or name' });
-    await pool.query(`DELETE FROM admin_locations WHERE site=$1 AND name=$2`, [site, name]);
+    await pool.query(`DELETE FROM admin_locations WHERE admin_site_id=$1 AND name=$2`, [siteId, name]);
     return res.json({ ok: true });
   } catch (e) {
     return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
@@ -1107,9 +1407,17 @@ router.delete('/admin-locations', siteAdminMiddleware, async (req: any, res) => 
 
 // --- CALENDAR STATUS ---
 router.get('/calendar', siteAdminMiddleware, async (req: any, res) => {
+  try {
   const year = parseInt(String(req.query.year || ''), 10) || new Date().getFullYear();
   const site = normalizeSiteParam(req);
   assertSiteAccess(req, site);
+
+  // Calendar status is site-specific. Force a concrete site to avoid accidental "all-sites" queries.
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+  const adminSiteId = await resolveAdminSiteId(pool as any, site);
+  if (!adminSiteId) return res.json({ year, site, days: [] });
+  const siteId = adminSiteId; // keep naming consistent with other handlers
 
   const from = `${year}-01-01`;
   const to = `${year}-12-31`;
@@ -1120,70 +1428,30 @@ router.get('/calendar', siteAdminMiddleware, async (req: any, res) => {
   // - none if no validated_shifts rows exist (even if shifts exist)
   const out: any[] = [];
 
-  if (site === '*') {
-    // For '*', return status per date across all sites:
-    // green if all sites with rows that date are fully validated, red otherwise.
-    const datesR = await pool.query(
-      `SELECT DISTINCT date::text AS date
-         FROM validated_shifts
-        WHERE date >= $1::date AND date <= $2::date
-        ORDER BY date ASC`,
-      [from, to],
-    );
-
-    for (const row of datesR.rows) {
-      const d = String(row.date);
-
-      const agg = await pool.query(
-        `SELECT site,
-                MIN(validated) AS minv,
-                MAX(validated) AS maxv
-           FROM validated_shifts
-          WHERE date=$1::date
-          GROUP BY site`,
-        [d],
-      );
-
-      if (!agg.rows.length) {
-        out.push({ date: d, status: 'none' });
-        continue;
-      }
-
-      let allGreen = true;
-      for (const r of agg.rows) {
-        const minv = Number(r.minv ?? 0);
-        const maxv = Number(r.maxv ?? 0);
-        if (!(minv === 1 && maxv === 1)) {
-          allGreen = false;
-          break;
-        }
-      }
-      out.push({ date: d, status: allGreen ? 'green' : 'red' });
-    }
-
-    return res.json({ year, site, days: out });
-  }
-
   const agg = await pool.query(
     `SELECT date::text AS date,
-            MIN(validated) AS minv,
-            MAX(validated) AS maxv
+            BOOL_AND(validated) AS all_valid,
+            BOOL_OR(validated)  AS any_valid
        FROM validated_shifts
-      WHERE site=$1 AND date >= $2::date AND date <= $3::date
+      WHERE admin_site_id=$1 AND date >= $2::date AND date <= $3::date
       GROUP BY date
       ORDER BY date ASC`,
-    [site, from, to],
+    [siteId, from, to],
   );
 
   for (const r of agg.rows) {
     const d = String(r.date);
-    const minv = Number(r.minv ?? 0);
-    const maxv = Number(r.maxv ?? 0);
-    const status = minv === 1 && maxv === 1 ? 'green' : 'red';
+    const allValid = Boolean(r.all_valid);
+    const anyValid = Boolean(r.any_valid);
+    const status = anyValid && allValid ? 'green' : 'red';
     out.push({ date: d, status });
   }
 
   return res.json({ year, site, days: out });
+  } catch (err) {
+    console.error('[site-admin] calendar failed', err);
+    return res.status(500).json({ error: 'calendar_failed' });
+  }
 });
 
 router.get('/day', siteAdminMiddleware, async (req: any, res) => {
@@ -1195,12 +1463,17 @@ router.get('/day', siteAdminMiddleware, async (req: any, res) => {
   const site = normalizeSiteParam(req);
   assertSiteAccess(req, site);
 
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+  const adminSiteId = await resolveAdminSiteId(pool as any, site);
+  if (!adminSiteId) return res.json({ shifts: [], activities: [], source_hash: '0', validated_shifts: [], validated_activities: [] });
+
   // Live snapshot (from shifts/shift_activities) — your helper already supports site='*'
   const { shifts, activities, source_hash } = await loadDaySnapshot(site, date);
 
   // Validation-layer rows (created automatically on finalize)
   // IMPORTANT:
-  //  - qualify columns using aliases (vs.site, vs.date, etc.)
+  //  - qualify columns using aliases (vs.admin_site_id, vs.date, etc.)
   //  - if site === '*', do NOT filter by site
   let validated_shifts: any[] = [];
   let validated_activities: any[] = [];
@@ -1209,7 +1482,7 @@ router.get('/day', siteAdminMiddleware, async (req: any, res) => {
     const vShifts = await pool.query(
       `SELECT
           vs.id,
-          vs.site,
+          COALESCE(asite.name, '') as site,
           vs.date::text as date,
           vs.dn,
           vs.user_email,
@@ -1217,9 +1490,10 @@ router.get('/day', siteAdminMiddleware, async (req: any, res) => {
           vs.validated,
           vs.totals_json
         FROM validated_shifts vs
+        LEFT JOIN admin_sites asite ON asite.id = vs.admin_site_id
         LEFT JOIN users u ON u.email = vs.user_email
         WHERE vs.date = $1::date
-        ORDER BY vs.site, vs.dn, vs.user_email, vs.id`,
+        ORDER BY COALESCE(asite.name,''), vs.dn, vs.user_email, vs.id`,
       [date],
     );
     validated_shifts = vShifts.rows || [];
@@ -1227,7 +1501,7 @@ router.get('/day', siteAdminMiddleware, async (req: any, res) => {
     const vActs = await pool.query(
       `SELECT
           vsa.id,
-          vsa.site,
+          COALESCE(asite.name, '') as site,
           vsa.date::text as date,
           vsa.dn,
           vsa.user_email,
@@ -1235,8 +1509,9 @@ router.get('/day', siteAdminMiddleware, async (req: any, res) => {
           vsa.sub_activity,
           vsa.payload_json
         FROM validated_shift_activities vsa
+        LEFT JOIN admin_sites asite ON asite.id = vsa.admin_site_id
         WHERE vsa.date = $1::date
-        ORDER BY vsa.site, vsa.activity, vsa.sub_activity, vsa.id`,
+        ORDER BY COALESCE(asite.name,''), vsa.activity, vsa.sub_activity, vsa.id`,
       [date],
     );
     validated_activities = vActs.rows || [];
@@ -1244,7 +1519,7 @@ router.get('/day', siteAdminMiddleware, async (req: any, res) => {
     const vShifts = await pool.query(
       `SELECT
           vs.id,
-          vs.site,
+          COALESCE(asite.name, '') as site,
           vs.date::text as date,
           vs.dn,
           vs.user_email,
@@ -1252,18 +1527,19 @@ router.get('/day', siteAdminMiddleware, async (req: any, res) => {
           vs.validated,
           vs.totals_json
         FROM validated_shifts vs
+        LEFT JOIN admin_sites asite ON asite.id = vs.admin_site_id
         LEFT JOIN users u ON u.email = vs.user_email
-        WHERE vs.site = $1
+        WHERE vs.admin_site_id = $1
           AND vs.date = $2::date
         ORDER BY vs.dn, vs.user_email, vs.id`,
-      [site, date],
+      [adminSiteId, date],
     );
     validated_shifts = vShifts.rows || [];
 
     const vActs = await pool.query(
       `SELECT
           vsa.id,
-          vsa.site,
+          COALESCE(asite.name, '') as site,
           vsa.date::text as date,
           vsa.dn,
           vsa.user_email,
@@ -1271,10 +1547,11 @@ router.get('/day', siteAdminMiddleware, async (req: any, res) => {
           vsa.sub_activity,
           vsa.payload_json
         FROM validated_shift_activities vsa
-        WHERE vsa.site = $1
+        LEFT JOIN admin_sites asite ON asite.id = vsa.admin_site_id
+        WHERE vsa.admin_site_id = $1
           AND vsa.date = $2::date
         ORDER BY vsa.activity, vsa.sub_activity, vsa.id`,
-      [site, date],
+      [adminSiteId, date],
     );
     validated_activities = vActs.rows || [];
   }
@@ -1313,6 +1590,11 @@ router.post('/update-validated', siteAdminMiddleware, async (req: any, res) => {
   const site = String(req.body.site || '').trim() || '*';
   assertSiteAccess(req, site);
 
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+  const adminSiteId = await resolveAdminSiteId(pool as any, site);
+  if (!adminSiteId) return res.json({ shifts: [], activities: [], source_hash: '0', validated_shifts: [], validated_activities: [] });
+
   const edits = Array.isArray(req.body.edits) ? req.body.edits : []; // [{ id, payload_json }]
   if (!edits.length) return res.json({ ok: true });
 
@@ -1327,18 +1609,18 @@ router.post('/update-validated', siteAdminMiddleware, async (req: any, res) => {
       const payload_json = e?.payload_json ?? {};
       await client.query(
         `UPDATE validated_shift_activities
-            SET payload_json=$3::jsonb
-          WHERE id=$1 AND site=$2 AND date=$4::date`,
-        [id, site, JSON.stringify(payload_json), date],
+            SET payload_json=$2::jsonb
+          WHERE id=$1 AND admin_site_id=$3 AND date=$4::date`,
+        [id, JSON.stringify(payload_json), adminSiteId, date],
       );
     }
 
     // Any edit makes the day require re-validation again
     await client.query(
       `UPDATE validated_shifts
-          SET validated=0
-        WHERE site=$1 AND date=$2::date`,
-      [site, date],
+          SET validated=FALSE
+        WHERE admin_site_id=$1 AND date=$2::date`,
+      [adminSiteId, date],
     );
 
 
@@ -1346,9 +1628,9 @@ router.post('/update-validated', siteAdminMiddleware, async (req: any, res) => {
     const vs = await client.query(
       `SELECT dn, user_email
          FROM validated_shifts
-        WHERE site=$1 AND date=$2::date
+        WHERE admin_site_id=$1 AND date=$2::date
         ORDER BY dn, user_email`,
-      [site, date],
+      [adminSiteId, date],
     );
     for (const row of vs.rows || []) {
       const dn = String(row.dn || '');
@@ -1356,17 +1638,17 @@ router.post('/update-validated', siteAdminMiddleware, async (req: any, res) => {
       const actsR = await client.query(
         `SELECT payload_json
            FROM validated_shift_activities
-          WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
+          WHERE admin_site_id=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
           ORDER BY id ASC`,
-        [site, date, dn, user_email],
+        [adminSiteId, date, dn, user_email],
       );
       const payloads = (actsR.rows || []).map((x: any) => x.payload_json);
       const totals = computeTotalsBySubFromPayloads(payloads);
       await client.query(
         `UPDATE validated_shifts
             SET totals_json=$5::jsonb
-          WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
-        [site, date, dn, user_email, JSON.stringify(totals)],
+          WHERE admin_site_id=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
+        [adminSiteId, date, dn, user_email, JSON.stringify(totals)],
       );
     }
 
@@ -1387,31 +1669,68 @@ router.post('/update-validated', siteAdminMiddleware, async (req: any, res) => {
 // These endpoints are the ONLY way validated data changes once a shift/day is validated.
 // We intentionally avoid relying on UNIQUE/ON CONFLICT so this works against older local DBs too.
 
-async function markValidatedDayUnvalidated(client: any, site: string, date: string, ctx: string) {
+async function markValidatedDayUnvalidated(client: any, admin_site_id: number, date: string, ctx: string) {
   try {
-    // If table doesn't exist yet, skip (keeps app usable for old DBs)
-    await client.query(
-      `CREATE TABLE IF NOT EXISTS validated_days (
-        site TEXT NOT NULL,
-        date DATE NOT NULL,
-        status TEXT NOT NULL DEFAULT 'unvalidated',
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY (site, date)
-      )`,
-    );
+    // validated_days schema differs across older local DBs.
+    // Some have a TEXT status column, others only a boolean validated flag.
+    // We handle both, and fall back to deleting any row if neither column exists.
 
-    const u = await client.query(
-      `UPDATE validated_days
-          SET status='unvalidated', updated_at=NOW()
-        WHERE site=$1 AND date=$2::date`,
-      [site, date],
+    const colsR = await client.query(
+      `SELECT column_name
+         FROM information_schema.columns
+        WHERE table_schema='public' AND table_name='validated_days'`,
     );
-    if ((u.rowCount || 0) === 0) {
+    const cols = new Set<string>((colsR.rows || []).map((r: any) => String(r.column_name || '').toLowerCase()));
+
+    if (cols.size === 0) {
+      // Create a minimal compatible table using status (newer behavior)
       await client.query(
-        `INSERT INTO validated_days (site, date, status) VALUES ($1,$2::date,'unvalidated')`,
-        [site, date],
+        `CREATE TABLE IF NOT EXISTS validated_days (
+          admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+          date DATE NOT NULL,
+          status TEXT NOT NULL DEFAULT 'unvalidated',
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (admin_site_id, date)
+        )`,
       );
+      cols.add('status');
     }
+
+    if (cols.has('status')) {
+      const u = await client.query(
+        `UPDATE validated_days
+            SET status='unvalidated', updated_at=NOW()
+          WHERE admin_site_id=$1 AND date=$2::date`,
+        [admin_site_id, date],
+      );
+      if ((u.rowCount || 0) === 0) {
+        await client.query(
+          `INSERT INTO validated_days (admin_site_id, date, status) VALUES ($1,$2::date,'unvalidated')`,
+          [admin_site_id, date],
+        );
+      }
+      return;
+    }
+
+    if (cols.has('validated')) {
+      // Older schema: boolean validated
+      const u = await client.query(
+        `UPDATE validated_days
+            SET validated=FALSE
+          WHERE admin_site_id=$1 AND date=$2::date`,
+        [admin_site_id, date],
+      );
+      if ((u.rowCount || 0) === 0) {
+        await client.query(
+          `INSERT INTO validated_days (admin_site_id, date, validated) VALUES ($1,$2::date,FALSE)`,
+          [admin_site_id, date],
+        );
+      }
+      return;
+    }
+
+    // Fallback: just remove any row so calendar can recompute from validated_shifts.
+    await client.query(`DELETE FROM validated_days WHERE admin_site_id=$1 AND date=$2::date`, [admin_site_id, date]);
   } catch (e: any) {
     console.error(`validated_days mark unvalidated failed (${ctx})`, e?.message || e);
   }
@@ -1429,6 +1748,9 @@ router.post('/validated/create-shift', siteAdminMiddleware, async (req: any, res
     if (!site || !date || !dn || !user_email) return res.status(400).json({ ok: false, error: 'missing fields' });
     assertSiteAccess(req, site);
 
+    const admin_site_id = await resolveAdminSiteId(client, site);
+    if (!admin_site_id) return res.status(400).json({ ok: false, error: 'unknown site' });
+
     // Friendly name (optional)
     let user_name = '';
     let user_id: number | null = null;
@@ -1436,44 +1758,72 @@ router.post('/validated/create-shift', siteAdminMiddleware, async (req: any, res
       const ur = await client.query(`SELECT id, name FROM users WHERE email=$1 LIMIT 1`, [user_email]);
       user_id = (ur.rows?.[0]?.id as number | undefined) ?? null;
       user_name = String(ur.rows?.[0]?.name || '').trim();
-    } catch {
-      // ignore
-    }
+    } catch {}
     if (!user_name) user_name = user_email;
+
+    // Optional work_site_id (best effort)
+    let work_site_id: number | null = null;
+    if (user_id) {
+      try {
+        const wr = await client.query('SELECT work_site_id FROM users WHERE id=$1', [user_id]);
+        const ws = Number(wr.rows?.[0]?.work_site_id);
+        work_site_id = Number.isFinite(ws) && ws > 0 ? ws : null;
+      } catch {
+        work_site_id = null;
+      }
+    }
+    if (!work_site_id) {
+      try {
+        const sr = await client.query(
+          `SELECT work_site_id
+             FROM shifts
+            WHERE admin_site_id=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
+            ORDER BY id DESC
+            LIMIT 1`,
+          [admin_site_id, date, dn, user_email],
+        );
+        const ws = Number(sr.rows?.[0]?.work_site_id);
+        work_site_id = Number.isFinite(ws) && ws > 0 ? ws : null;
+      } catch {
+        // ignore
+      }
+    }
+
+    const shiftKey = `${admin_site_id}|${date}|${dn}|${(user_email || '').trim()}`;
 
     await client.query('BEGIN');
 
-    // Ensure shift row exists without ON CONFLICT
-    const ex = await client.query(
-      `SELECT 1 FROM validated_shifts
-        WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
-        LIMIT 1`,
-      [site, date, dn, user_email],
-    );
+    // Create a validated_shifts row even if the operator never uploaded a shift.
+    // This enables SiteAdmin to add activities as the source of truth for that day.
+	    try {
+	      await client.query(
+	        `INSERT INTO validated_shifts (shift_key, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id, validated, totals_json)
+	         VALUES ($1,$2,$3,$4::date,$5,COALESCE($6,''),$7,$8,FALSE,'{}'::jsonb)
+	         ON CONFLICT (shift_key) DO NOTHING`,
+	        [shiftKey, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id],
+	      );
+	    } catch (e: any) {
+	      // Older local DBs may not have the UNIQUE index needed for ON CONFLICT.
+	      const msg = String(e?.message || '');
+	      if (msg.includes('no unique') && msg.includes('ON CONFLICT')) {
+	        const exists = await client.query(`SELECT id FROM validated_shifts WHERE shift_key=$1 LIMIT 1`, [shiftKey]);
+	        if ((exists.rowCount || 0) === 0) {
+	          await client.query(
+	            `INSERT INTO validated_shifts (shift_key, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id, validated, totals_json)
+	             VALUES ($1,$2,$3,$4::date,$5,COALESCE($6,''),$7,$8,FALSE,'{}'::jsonb)`,
+	            [shiftKey, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id],
+	          );
+	        }
+	      } else {
+	        throw e;
+	      }
+	    }
 
-    if ((ex.rowCount || 0) === 0) {
-      await client.query(
-        `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, user_id, validated, totals_json)
-         VALUES ($1,$2::date,$3,COALESCE($4,''),$5,$6,0,'{}'::jsonb)`,
-        [site, date, dn, user_email, user_name, user_id],
-      );
-    }
-
-    await markValidatedDayUnvalidated(client, site, date, 'create-shift');
-
+    await markValidatedDayUnvalidated(client, admin_site_id, date, 'create-shift');
     await client.query('COMMIT');
     return res.json({ ok: true });
   } catch (e: any) {
-    console.error('validated/create-shift failed', {
-      message: e?.message,
-      detail: e?.detail,
-      where: e?.where,
-      code: e?.code,
-      stack: e?.stack,
-    });
-    try {
-      await client.query('ROLLBACK');
-    } catch {}
+    try { await client.query('ROLLBACK'); } catch {}
     return res.status(500).json({ ok: false, error: e?.message || 'failed' });
   } finally {
     client.release();
@@ -1495,6 +1845,9 @@ router.post('/validated/add-activity', siteAdminMiddleware, async (req: any, res
     if (!site || !date || !dn || !user_email || !activity) return res.status(400).json({ ok: false, error: 'missing fields' });
     assertSiteAccess(req, site);
 
+    const admin_site_id = await resolveAdminSiteId(client, site);
+    if (!admin_site_id) return res.status(400).json({ ok: false, error: 'unknown site' });
+
     let user_name = '';
     let user_id: number | null = null;
     try {
@@ -1504,70 +1857,109 @@ router.post('/validated/add-activity', siteAdminMiddleware, async (req: any, res
     } catch {}
     if (!user_name) user_name = user_email;
 
-    await client.query('BEGIN');
-
-    // Ensure validated_shifts exists (same as create-shift)
-    const ex = await client.query(
-      `SELECT 1 FROM validated_shifts
-        WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
-        LIMIT 1`,
-      [site, date, dn, user_email],
-    );
-    if ((ex.rowCount || 0) === 0) {
-      await client.query(
-        `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, user_id, validated, totals_json)
-         VALUES ($1,$2::date,$3,COALESCE($4,''),$5,$6,0,'{}'::jsonb)`,
-        [site, date, dn, user_email, user_name, user_id],
-      );
+    let work_site_id: number | null = null;
+    if (user_id) {
+      try {
+        const wr = await client.query('SELECT work_site_id FROM users WHERE id=$1', [user_id]);
+        const ws = Number(wr.rows?.[0]?.work_site_id);
+        work_site_id = Number.isFinite(ws) && ws > 0 ? ws : null;
+      } catch {
+        work_site_id = null;
+      }
+    }
+    if (!work_site_id) {
+      try {
+        const sr = await client.query(
+          `SELECT work_site_id
+             FROM shifts
+            WHERE admin_site_id=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
+            ORDER BY id DESC
+            LIMIT 1`,
+          [admin_site_id, date, dn, user_email],
+        );
+        const ws = Number(sr.rows?.[0]?.work_site_id);
+        work_site_id = Number.isFinite(ws) && ws > 0 ? ws : null;
+      } catch {
+        // ignore
+      }
     }
 
+    const shiftKey = `${admin_site_id}|${date}|${dn}|${(user_email || '').trim()}`;
+
+    await client.query('BEGIN');
+
+    // Ensure validated_shifts exists and get id (works even if there is no operator-uploaded shift)
+	    let validated_shift_id: number | null = null;
+	    try {
+	      const vs = await client.query(
+	        `INSERT INTO validated_shifts (shift_key, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id, validated, totals_json)
+	         VALUES ($1,$2,$3,$4::date,$5,COALESCE($6,''),$7,$8,FALSE,'{}'::jsonb)
+	         ON CONFLICT (shift_key) DO UPDATE
+	           SET work_site_id=COALESCE(EXCLUDED.work_site_id, validated_shifts.work_site_id),
+	               user_name=COALESCE(EXCLUDED.user_name, validated_shifts.user_name),
+	               user_id=COALESCE(EXCLUDED.user_id, validated_shifts.user_id)
+	         RETURNING id`,
+	        [shiftKey, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id],
+	      );
+	      validated_shift_id = Number(vs.rows?.[0]?.id);
+	    } catch (e: any) {
+	      const msg = String(e?.message || '');
+	      if (msg.includes('no unique') && msg.includes('ON CONFLICT')) {
+	        // Deterministic fallback for older DBs without UNIQUE indexes.
+	        const existing = await client.query(`SELECT id FROM validated_shifts WHERE shift_key=$1 LIMIT 1`, [shiftKey]);
+	        if ((existing.rowCount || 0) > 0) {
+	          validated_shift_id = Number(existing.rows?.[0]?.id);
+	          await client.query(
+	            `UPDATE validated_shifts
+	                SET work_site_id=COALESCE($2, work_site_id),
+	                    user_name=COALESCE(NULLIF($3,''), user_name),
+	                    user_id=COALESCE($4, user_id)
+	              WHERE id=$1`,
+	            [validated_shift_id, work_site_id, user_name, user_id],
+	          );
+	        } else {
+	          const ins = await client.query(
+	            `INSERT INTO validated_shifts (shift_key, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id, validated, totals_json)
+	             VALUES ($1,$2,$3,$4::date,$5,COALESCE($6,''),$7,$8,FALSE,'{}'::jsonb)
+	             RETURNING id`,
+	            [shiftKey, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id],
+	          );
+	          validated_shift_id = Number(ins.rows?.[0]?.id);
+	        }
+	      } else {
+	        throw e;
+	      }
+	    }
+	    if (!validated_shift_id || !Number.isFinite(validated_shift_id)) throw new Error('failed to resolve validated_shift_id');
+
     await client.query(
-      `INSERT INTO validated_shift_activities (site, date, dn, user_email, user_name, user_id, activity, sub_activity, payload_json)
-       VALUES ($1,$2::date,$3,COALESCE($4,''),$5,$6,$7,$8,$9::jsonb)`,
-      [site, date, dn, user_email, user_name, user_id, activity, sub_activity, JSON.stringify(payload_json || {})],
+      `INSERT INTO validated_shift_activities (validated_shift_id, shift_key, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id, activity, sub_activity, payload_json)
+       VALUES ($1,$2,$3,$4,$5::date,$6,COALESCE($7,''),$8,$9,$10,$11,$12::jsonb)`,
+      [validated_shift_id, shiftKey, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id, activity, sub_activity, JSON.stringify(payload_json || {})],
     );
 
-    // Recompute totals for this validated shift only
     const rr = await client.query(
-  `SELECT payload_json
-     FROM validated_shift_activities
-    WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
-    ORDER BY id ASC`,
-  [site, date, dn, user_email],
-);
-const payloads = (rr.rows || []).map((x: any) => x.payload_json);
-const totals = computeTotalsBySubFromPayloads(payloads);
+      `SELECT payload_json
+         FROM validated_shift_activities
+        WHERE admin_site_id=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
+        ORDER BY id ASC`,
+      [admin_site_id, date, dn, user_email],
+    );
+    const payloads = (rr.rows || []).map((x: any) => x.payload_json);
+    const totals = computeTotalsBySubFromPayloads(payloads);
 
-const up = await client.query(
-  `UPDATE validated_shifts
-      SET totals_json=$5::jsonb, validated=0
-    WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
-  [site, date, dn, user_email, JSON.stringify(totals)],
-);
-if ((up.rowCount || 0) === 0) {
-  await client.query(
-    `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, user_id, validated, totals_json)
-     VALUES ($1,$2::date,$3,COALESCE($4,''),$5,0,$6::jsonb)`,
-    [site, date, dn, user_email, user_name, JSON.stringify(totals)],
-  );
-}
+    await client.query(
+      `UPDATE validated_shifts
+          SET totals_json=$2::jsonb, validated=FALSE
+        WHERE shift_key=$1`,
+      [shiftKey, JSON.stringify(totals)],
+    );
 
-await markValidatedDayUnvalidated(client, site, date, 'add-activity');
-
-await client.query('COMMIT');
-return res.json({ ok: true, totals });
-
+    await markValidatedDayUnvalidated(client, admin_site_id, date, 'add-activity');
+    await client.query('COMMIT');
+    return res.json({ ok: true, totals });
   } catch (e: any) {
-    console.error('validated/add-activity failed', {
-      message: e?.message,
-      detail: e?.detail,
-      where: e?.where,
-      code: e?.code,
-      stack: e?.stack,
-    });
-    try {
-      await client.query('ROLLBACK');
-    } catch {}
+    try { await client.query('ROLLBACK'); } catch {}
     return res.status(500).json({ ok: false, error: e?.message || 'failed' });
   } finally {
     client.release();
@@ -1585,14 +1977,17 @@ router.post('/validated/delete-activity', siteAdminMiddleware, async (req: any, 
     if (!site || !date || !id) return res.status(400).json({ ok: false, error: 'missing fields' });
     assertSiteAccess(req, site);
 
+    const admin_site_id = await resolveAdminSiteId(client, site);
+    if (!admin_site_id) return res.status(400).json({ ok: false, error: 'unknown site' });
+
     await client.query('BEGIN');
 
     const r = await client.query(
       `SELECT dn, COALESCE(user_email,'') AS user_email
          FROM validated_shift_activities
-        WHERE id=$1 AND site=$2 AND date=$3::date
+        WHERE id=$1 AND admin_site_id=$2 AND date=$3::date
         LIMIT 1`,
-      [id, site, date],
+      [id, admin_site_id, date],
     );
     if (!r.rows?.length) {
       await client.query('ROLLBACK');
@@ -1603,8 +1998,8 @@ router.post('/validated/delete-activity', siteAdminMiddleware, async (req: any, 
 
     const del = await client.query(
       `DELETE FROM validated_shift_activities
-        WHERE id=$1 AND site=$2 AND date=$3::date`,
-      [id, site, date],
+        WHERE id=$1 AND admin_site_id=$2 AND date=$3::date`,
+      [id, admin_site_id, date],
     );
     if (!del.rowCount) {
       await client.query('ROLLBACK');
@@ -1615,43 +2010,29 @@ router.post('/validated/delete-activity', siteAdminMiddleware, async (req: any, 
     const rr = await client.query(
       `SELECT payload_json
          FROM validated_shift_activities
-        WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
+        WHERE admin_site_id=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
         ORDER BY id ASC`,
-      [site, date, dn, user_email],
+      [admin_site_id, date, dn, user_email],
     );
     const payloads = (rr.rows || []).map((x: any) => x.payload_json);
     const totals = computeTotalsBySubFromPayloads(payloads);
 
-    // Update shift totals (no ON CONFLICT)
-    const up = await client.query(
-      `UPDATE validated_shifts
-          SET totals_json=$5::jsonb, validated=0
-        WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
-      [site, date, dn, user_email, JSON.stringify(totals)],
+    const shiftKey = `${admin_site_id}|${date}|${dn}|${(user_email || '').trim()}`;
+    await client.query(
+      `INSERT INTO validated_shifts (shift_key, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id, validated, totals_json)
+       VALUES ($1,$2,NULL,$3::date,$4,COALESCE($5,''),$6,NULL,FALSE,$7::jsonb)
+       ON CONFLICT (shift_key) DO UPDATE
+         SET totals_json=EXCLUDED.totals_json,
+             validated=FALSE`,
+      [shiftKey, admin_site_id, date, dn, user_email, user_email, JSON.stringify(totals)],
     );
-    if ((up.rowCount || 0) === 0) {
-      await client.query(
-        `INSERT INTO validated_shifts (site, date, dn, user_email, user_name, user_id, validated, totals_json)
-         VALUES ($1,$2::date,$3,COALESCE($4,''),$5,0,$6::jsonb)`,
-        [site, date, dn, user_email, user_email, JSON.stringify(totals)],
-      );
-    }
 
-    await markValidatedDayUnvalidated(client, site, date, 'delete-activity');
+    await markValidatedDayUnvalidated(client, admin_site_id, date, 'delete-activity');
 
     await client.query('COMMIT');
     return res.json({ ok: true, totals });
   } catch (e: any) {
-    console.error('validated/delete-activity failed', {
-      message: e?.message,
-      detail: e?.detail,
-      where: e?.where,
-      code: e?.code,
-      stack: e?.stack,
-    });
-    try {
-      await client.query('ROLLBACK');
-    } catch {}
+    try { await client.query('ROLLBACK'); } catch {}
     return res.status(500).json({ ok: false, error: e?.message || 'failed' });
   } finally {
     client.release();
@@ -1670,19 +2051,26 @@ router.post('/validated/delete-shift', siteAdminMiddleware, async (req: any, res
     if (!site || !date || !dn) return res.status(400).json({ ok: false, error: 'missing fields' });
     assertSiteAccess(req, site);
 
+    // Delete-shift must be site-specific
+    if (site === "*") return res.status(400).json({ ok: false, error: "site required" });
+
+    const adminSiteId = await resolveAdminSiteId(pool as any, site);
+    if (!adminSiteId) return res.status(404).json({ ok: false, error: "site not found" });
+
+
     await client.query('BEGIN');
     await client.query(
       `DELETE FROM validated_shift_activities
-        WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
-      [site, date, dn, user_email],
+        WHERE admin_site_id=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
+      [adminSiteId, date, dn, user_email],
     );
     await client.query(
       `DELETE FROM validated_shifts
-        WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
-      [site, date, dn, user_email],
+        WHERE admin_site_id=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
+      [adminSiteId, date, dn, user_email],
     );
 
-    await markValidatedDayUnvalidated(client, site, date, 'delete-shift');
+    await markValidatedDayUnvalidated(client, adminSiteId, date, 'delete-shift');
 
     await client.query('COMMIT');
     return res.json({ ok: true });
@@ -1711,14 +2099,19 @@ router.post('/validate', siteAdminMiddleware, async (req: any, res) => {
   const site = String(req.body.site || '').trim() || '*';
   assertSiteAccess(req, site);
 
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+  const adminSiteId = await resolveAdminSiteId(pool as any, site);
+  if (!adminSiteId) return res.json({ shifts: [], activities: [], source_hash: '0', validated_shifts: [], validated_activities: [] });
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     if (site === '*') {
-      await client.query(`UPDATE validated_shifts SET validated=1 WHERE date=$1::date`, [date]);
+      await client.query(`UPDATE validated_shifts SET validated=TRUE WHERE date=$1::date`, [date]);
     } else {
-      await client.query(`UPDATE validated_shifts SET validated=1 WHERE site=$1 AND date=$2::date`, [site, date]);
+      await client.query(`UPDATE validated_shifts SET validated=TRUE WHERE admin_site_id=$1 AND date=$2::date`, [adminSiteId, date]);
     }
 
 
@@ -1726,9 +2119,9 @@ router.post('/validate', siteAdminMiddleware, async (req: any, res) => {
     const vs = await client.query(
       `SELECT dn, user_email
          FROM validated_shifts
-        WHERE site=$1 AND date=$2::date
+        WHERE admin_site_id=$1 AND date=$2::date
         ORDER BY dn, user_email`,
-      [site, date],
+      [adminSiteId, date],
     );
     for (const row of vs.rows || []) {
       const dn = String(row.dn || '');
@@ -1736,17 +2129,17 @@ router.post('/validate', siteAdminMiddleware, async (req: any, res) => {
       const actsR = await client.query(
         `SELECT payload_json
            FROM validated_shift_activities
-          WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
+          WHERE admin_site_id=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
           ORDER BY id ASC`,
-        [site, date, dn, user_email],
+        [adminSiteId, date, dn, user_email],
       );
       const payloads = (actsR.rows || []).map((x: any) => x.payload_json);
       const totals = computeTotalsBySubFromPayloads(payloads);
       await client.query(
         `UPDATE validated_shifts
             SET totals_json=$5::jsonb
-          WHERE site=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
-        [site, date, dn, user_email, JSON.stringify(totals)],
+          WHERE admin_site_id=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')`,
+        [adminSiteId, date, dn, user_email, JSON.stringify(totals)],
       );
     }
 
@@ -1819,25 +2212,21 @@ async function computeActualForMetric(opts: {
 
   // Actual = sum(Cut Length) for validated_shift_activities where activity='Firing' and sub_activity='Development'.
   // If basis=validated_only, include only rows tied to validated_shifts.validated=1.
+  const siteId = await resolveAdminSiteId(pool as any, site);
+  if (!siteId) return 0;
+
   const r = await pool.query(
     `WITH base AS (
         SELECT
-          vsa.site,
           vsa.date,
           vsa.dn,
           COALESCE(vsa.user_email,'') AS user_email,
           vsa.payload_json,
-          vs.validated AS v_validated,
-          vs2.validated AS v2_validated
+          vs.validated AS v_validated
         FROM validated_shift_activities vsa
         LEFT JOIN validated_shifts vs
           ON vs.id = vsa.validated_shift_id
-        LEFT JOIN validated_shifts vs2
-          ON vs2.site = vsa.site
-         AND vs2.date = vsa.date
-         AND vs2.dn = vsa.dn
-         AND COALESCE(vs2.user_email,'') = COALESCE(vsa.user_email,'')
-        WHERE vsa.site = $1
+        WHERE vsa.admin_site_id = $1
           AND vsa.date >= $2::date
           AND vsa.date <  $3::date
           AND vsa.activity = 'Firing'
@@ -1850,9 +2239,9 @@ async function computeActualForMetric(opts: {
       FROM base
       WHERE (
         $4::text = 'captured_all'
-        OR COALESCE(v_validated, v2_validated, 0) = 1
+        OR COALESCE(v_validated, false) = true
       )`,
-    [site, fromYmd, toYmd, basis],
+    [siteId, fromYmd, toYmd, basis],
   );
 
   const total = Number(r.rows?.[0]?.total ?? 0);
@@ -1869,11 +2258,53 @@ router.get('/reconciliation/metrics', siteAdminMiddleware, async (req: any, res)
   }
 });
 
+// Quick month status (used by dashboard)
+// GET /api/site-admin/reconciliation/status?site=...&month_ym=YYYY-MM
+router.get('/reconciliation/status', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    const site = String(req.query?.site || '').trim() || normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+    if (!site || site === '*') return res.status(400).json({ ok: false, error: 'site required' });
+
+    const month_ym = String(req.query?.month_ym || '').trim();
+    if (!isYm(month_ym)) return res.status(400).json({ ok: false, error: 'invalid month_ym' });
+
+    const client = await pool.connect();
+    try {
+      const adminSiteId = await resolveAdminSiteId(client as any, site);
+      if (!adminSiteId) return res.status(404).json({ ok: false, error: 'unknown site' });
+
+      const r = await client.query(
+        `SELECT COUNT(*)::int AS metrics,
+                SUM(CASE WHEN is_locked=TRUE THEN 1 ELSE 0 END)::int AS locked
+           FROM validated_reconciliations
+          WHERE admin_site_id=$1 AND month_ym=$2`,
+        [adminSiteId, month_ym],
+      );
+
+      const metrics = Number(r.rows?.[0]?.metrics || 0);
+      const locked = Number(r.rows?.[0]?.locked || 0);
+
+      const state = locked > 0 ? 'closed' : metrics > 0 ? 'in_progress' : 'open';
+      return res.json({ ok: true, site, month_ym, state, metrics });
+    } finally {
+      client.release();
+    }
+  } catch (e) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
 // Get month summary (actual + existing reconciliation)
 router.get('/reconciliation/month-summary', siteAdminMiddleware, async (req: any, res) => {
   try {
     const site = String(req.query?.site || '').trim() || normalizeSiteParam(req);
     assertSiteAccess(req, site);
+
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+    const adminSiteId = await resolveAdminSiteId(pool as any, site);
+    if (!adminSiteId) return res.status(404).json({ ok: false, error: 'unknown site' });
     const month_ym = String(req.query?.month_ym || '').trim();
     const metric_key = String(req.query?.metric_key || '').trim();
     const basis = (String(req.query?.basis || 'validated_only').trim() as any) as 'validated_only' | 'captured_all';
@@ -1888,8 +2319,8 @@ router.get('/reconciliation/month-summary', siteAdminMiddleware, async (req: any
     const hdr = await pool.query(
       `SELECT id, reconciled_total, basis, method, notes, is_locked, actual_total_snapshot, delta_snapshot, computed_at
          FROM validated_reconciliations
-        WHERE site=$1 AND month_ym=$2 AND metric_key=$3`,
-      [site, month_ym, metric_key],
+        WHERE admin_site_id=$1 AND month_ym=$2 AND metric_key=$3`,
+      [adminSiteId, month_ym, metric_key],
     );
     const row = hdr.rows?.[0] || null;
     const reconciled_total = row ? Number(row.reconciled_total ?? 0) : null;
@@ -1946,6 +2377,8 @@ async function upsertReconciliationAndCompute(opts: {
   created_by_user_id?: number | null;
 }) {
   const { site, month_ym, metric_key, basis, method, reconciled_total, notes, created_by_user_id } = opts;
+  const adminSiteId = await resolveAdminSiteId(pool as any, site);
+  if (!adminSiteId) throw Object.assign(new Error('unknown site'), { status: 404 });
   const { fromYmd, daysInMonth, y, m } = monthBounds(month_ym);
 
   const actual_total = await computeActualForMetric({ site, month_ym, metric_key, basis });
@@ -1979,11 +2412,11 @@ async function upsertReconciliationAndCompute(opts: {
 
     const up = await client.query(
       `INSERT INTO validated_reconciliations (
-          site, month_ym, metric_key, reconciled_total, basis, method, notes,
+          admin_site_id, month_ym, metric_key, reconciled_total, basis, method, notes,
           created_by_user_id, actual_total_snapshot, delta_snapshot, computed_at, updated_at
        )
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),now())
-       ON CONFLICT (site, month_ym, metric_key)
+       ON CONFLICT (admin_site_id, month_ym, metric_key)
        DO UPDATE SET
          reconciled_total=EXCLUDED.reconciled_total,
          basis=EXCLUDED.basis,
@@ -1995,7 +2428,7 @@ async function upsertReconciliationAndCompute(opts: {
          computed_at=now(),
          updated_at=now()
        RETURNING id, is_locked`,
-      [site, month_ym, metric_key, reconciled_total, basis, method, notes || null, created_by_user_id || null, actual_total, delta],
+      [adminSiteId, month_ym, metric_key, reconciled_total, basis, method, notes || null, created_by_user_id || null, actual_total, delta],
     );
 
     const reconId = Number(up.rows?.[0]?.id);
@@ -2007,9 +2440,9 @@ async function upsertReconciliationAndCompute(opts: {
     await client.query(`DELETE FROM validated_reconciliation_days WHERE reconciliation_id=$1`, [reconId]);
     for (const a of allocations) {
       await client.query(
-        `INSERT INTO validated_reconciliation_days (reconciliation_id, site, month_ym, metric_key, date, allocated_value)
+        `INSERT INTO validated_reconciliation_days (reconciliation_id, admin_site_id, month_ym, metric_key, date, allocated_value)
          VALUES ($1,$2,$3,$4,$5::date,$6)`,
-        [reconId, site, month_ym, metric_key, a.date, a.allocated_value],
+        [reconId, adminSiteId, month_ym, metric_key, a.date, a.allocated_value],
       );
     }
 
@@ -2028,6 +2461,11 @@ router.post('/reconciliation/upsert', siteAdminMiddleware, async (req: any, res)
   try {
     const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
     assertSiteAccess(req, site);
+
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+    const adminSiteId = await resolveAdminSiteId(pool as any, site);
+    if (!adminSiteId) return res.status(404).json({ ok: false, error: 'unknown site' });
     const month_ym = String(req.body?.month_ym || '').trim();
     const metric_key = String(req.body?.metric_key || '').trim();
     const basis = (String(req.body?.basis || 'validated_only').trim() as any) as 'validated_only' | 'captured_all';
@@ -2064,6 +2502,11 @@ router.post('/reconciliation/recalculate', siteAdminMiddleware, async (req: any,
   try {
     const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
     assertSiteAccess(req, site);
+
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+    const adminSiteId = await resolveAdminSiteId(pool as any, site);
+    if (!adminSiteId) return res.status(404).json({ ok: false, error: 'unknown site' });
     const month_ym = String(req.body?.month_ym || '').trim();
     const metric_key = String(req.body?.metric_key || '').trim();
 
@@ -2074,8 +2517,8 @@ router.post('/reconciliation/recalculate', siteAdminMiddleware, async (req: any,
     const hdr = await pool.query(
       `SELECT reconciled_total, basis, method, is_locked
          FROM validated_reconciliations
-        WHERE site=$1 AND month_ym=$2 AND metric_key=$3`,
-      [site, month_ym, metric_key],
+        WHERE admin_site_id=$1 AND month_ym=$2 AND metric_key=$3`,
+      [adminSiteId, month_ym, metric_key],
     );
     const row = hdr.rows?.[0];
     if (!row) return res.status(404).json({ ok: false, error: 'reconciliation not found' });
@@ -2102,6 +2545,11 @@ router.post('/reconciliation/lock', siteAdminMiddleware, async (req: any, res) =
   try {
     const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
     assertSiteAccess(req, site);
+
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+    const adminSiteId = await resolveAdminSiteId(pool as any, site);
+    if (!adminSiteId) return res.status(404).json({ ok: false, error: 'unknown site' });
     const month_ym = String(req.body?.month_ym || '').trim();
     const metric_key = String(req.body?.metric_key || '').trim();
     if (!isYm(month_ym)) return res.status(400).json({ ok: false, error: 'invalid month_ym' });
@@ -2110,8 +2558,8 @@ router.post('/reconciliation/lock', siteAdminMiddleware, async (req: any, res) =
     await pool.query(
       `UPDATE validated_reconciliations
           SET is_locked=true, updated_at=now()
-        WHERE site=$1 AND month_ym=$2 AND metric_key=$3`,
-      [site, month_ym, metric_key],
+        WHERE admin_site_id=$1 AND month_ym=$2 AND metric_key=$3`,
+      [adminSiteId, month_ym, metric_key],
     );
     return res.json({ ok: true });
   } catch (e) {
@@ -2123,6 +2571,11 @@ router.post('/reconciliation/unlock', siteAdminMiddleware, async (req: any, res)
   try {
     const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
     assertSiteAccess(req, site);
+
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+    const adminSiteId = await resolveAdminSiteId(pool as any, site);
+    if (!adminSiteId) return res.status(404).json({ ok: false, error: 'unknown site' });
     const month_ym = String(req.body?.month_ym || '').trim();
     const metric_key = String(req.body?.metric_key || '').trim();
     if (!isYm(month_ym)) return res.status(400).json({ ok: false, error: 'invalid month_ym' });
@@ -2131,8 +2584,8 @@ router.post('/reconciliation/unlock', siteAdminMiddleware, async (req: any, res)
     await pool.query(
       `UPDATE validated_reconciliations
           SET is_locked=false, updated_at=now()
-        WHERE site=$1 AND month_ym=$2 AND metric_key=$3`,
-      [site, month_ym, metric_key],
+        WHERE admin_site_id=$1 AND month_ym=$2 AND metric_key=$3`,
+      [adminSiteId, month_ym, metric_key],
     );
     return res.json({ ok: true });
   } catch (e) {
@@ -2155,6 +2608,11 @@ router.get('/powerbi-tokens', siteAdminMiddleware, async (req: any, res) => {
     const site = normalizeSiteParam(req);
     assertSiteAccess(req, site);
 
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+  const adminSiteId = await resolveAdminSiteId(pool as any, site);
+  if (!adminSiteId) return res.json({ shifts: [], activities: [], source_hash: '0', validated_shifts: [], validated_activities: [] });
+
     const r = await pool.query(
       `SELECT id, site, label, token, created_at, revoked_at
          FROM powerbi_site_tokens
@@ -2175,6 +2633,11 @@ router.post('/powerbi-tokens', siteAdminMiddleware, async (req: any, res) => {
     const label = String(req.body?.label || '').trim() || null;
     if (!site || site === '*') return res.status(400).json({ ok: false, error: 'Site is required' });
     assertSiteAccess(req, site);
+
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+  const adminSiteId = await resolveAdminSiteId(pool as any, site);
+  if (!adminSiteId) return res.json({ shifts: [], activities: [], source_hash: '0', validated_shifts: [], validated_activities: [] });
 
     // Create token (retry on rare collisions)
     let token = makePowerBiToken();

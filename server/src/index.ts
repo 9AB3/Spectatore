@@ -21,6 +21,7 @@ import notificationsRoutes from './routes/notifications.js';
 import notificationPreferencesRoutes from './routes/notificationPreferences.js';
 import pushRoutes from './routes/push.js';
 import publicRoutes from './routes/public.js';
+import workSitesRoutes from './routes/workSites.js';
 
 const isDev = process.env.NODE_ENV !== 'production';
 const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173')
@@ -41,13 +42,13 @@ async function ensureDbColumns() {
     await pool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS meta_json JSONB DEFAULT '{}'::jsonb`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_version TEXT`);
+    // Work Site fields (best-effort; init.sql is authoritative)
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS work_site_id INT`);
+    await pool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS work_site_id INT`);
   } catch (e:any) {
     console.warn('[db] ensure columns failed:', e?.message || e);
   }
 }
-ensureDbColumns();
-
-
 app.use(express.json({ limit: '5mb' }));
 
 const corsOptions: CorsOptions = isDev
@@ -101,6 +102,9 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/notification-preferences', notificationPreferencesRoutes);
 app.use('/api/push', pushRoutes);
 
+// Work Site directory (public search + authenticated create)
+app.use('/api/work-sites', workSitesRoutes);
+
 // Public, unauthenticated endpoints (marketing site)
 app.use('/api/public', publicRoutes);
 
@@ -113,7 +117,8 @@ app.use('/api', dataRoutes);
 const PORT = Number(process.env.PORT || 5000);
 
 initDb()
-  .then(() => {
+  .then(async () => {
+    await ensureDbColumns();
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`API listening on 0.0.0.0:${PORT}`);
     });

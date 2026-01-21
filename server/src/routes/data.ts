@@ -6,20 +6,24 @@ import { authMiddleware } from '../lib/auth.js';
 const router = Router();
 
 // -------------------- Equipment --------------------
-router.post('/equipment', async (req, res) => {
+// Prefer authenticated user_id (JWT) but keep legacy support for clients that still send user_id.
+router.post('/equipment', authMiddleware, async (req: any, res) => {
   try {
     const { user_id, type, equipment_id } = req.body || {};
-    const uid = Number(user_id);
+    const uid = Number((req as any).user_id || user_id);
     const eid = String(equipment_id || '').trim().toUpperCase();
     const t = String(type || '').trim();
     if (!uid || !eid || !t) {
       return res.status(400).json({ error: 'missing user_id, type or equipment_id' });
     }
 
+    // Upsert behavior: legacy clients used POST for both create + update.
+    // If (user_id, equipment_id) exists, update the type.
     const r = await pool.query(
       `INSERT INTO equipment (user_id, type, equipment_id)
        VALUES ($1,$2,$3)
-       ON CONFLICT (user_id, equipment_id) DO NOTHING
+       ON CONFLICT (user_id, equipment_id)
+       DO UPDATE SET type=EXCLUDED.type
        RETURNING id`,
       [uid, t, eid],
     );
@@ -30,9 +34,41 @@ router.post('/equipment', async (req, res) => {
   }
 });
 
-router.get('/equipment', async (req, res) => {
+// True edit endpoint (supports renaming equipment_id)
+router.patch('/equipment/:id', authMiddleware, async (req: any, res) => {
   try {
-    const uid = Number(req.query.user_id);
+    const uid = Number((req as any).user_id || req.body?.user_id);
+    const id = Number(req.params?.id);
+    const eid = String(req.body?.equipment_id || '').trim().toUpperCase();
+    const t = String(req.body?.type || '').trim();
+    if (!uid || !id || !eid || !t) {
+      return res.status(400).json({ error: 'missing id, equipment_id or type' });
+    }
+
+    const r = await pool.query(
+      `UPDATE equipment
+          SET equipment_id=$1,
+              type=$2
+        WHERE id=$3 AND user_id=$4
+        RETURNING id`,
+      [eid, t, id, uid],
+    );
+
+    if (!r.rowCount) return res.status(404).json({ error: 'not found' });
+    return res.json({ ok: true, id: r.rows[0]?.id || id });
+  } catch (err: any) {
+    // Handle unique constraint collisions if renaming to an existing equipment_id.
+    if (String(err?.code) === '23505') {
+      return res.status(409).json({ error: 'equipment_id already exists' });
+    }
+    console.error('equipment update failed', err);
+    return res.status(500).json({ error: 'update failed' });
+  }
+});
+
+router.get('/equipment', authMiddleware, async (req: any, res) => {
+  try {
+    const uid = Number((req as any).user_id || req.query.user_id);
     if (!uid) return res.status(400).json({ error: 'missing user_id' });
     const r = await pool.query(
       'SELECT id, type, equipment_id FROM equipment WHERE user_id=$1 ORDER BY created_at DESC',
@@ -45,9 +81,9 @@ router.get('/equipment', async (req, res) => {
   }
 });
 
-router.delete('/equipment', async (req, res) => {
+router.delete('/equipment', authMiddleware, async (req: any, res) => {
   try {
-    const uid = Number(req.body?.user_id);
+    const uid = Number((req as any).user_id || req.body?.user_id);
     const eid = String(req.body?.equipment_id || '').trim().toUpperCase();
     if (!uid || !eid) return res.status(400).json({ error: 'missing user_id or equipment_id' });
     const r = await pool.query('DELETE FROM equipment WHERE user_id=$1 AND equipment_id=$2', [uid, eid]);
@@ -59,10 +95,10 @@ router.delete('/equipment', async (req, res) => {
 });
 
 // -------------------- Locations --------------------
-router.post('/locations', async (req, res) => {
+router.post('/locations', authMiddleware, async (req: any, res) => {
   try {
     const { user_id, name, type } = req.body || {};
-    const uid = Number(user_id);
+    const uid = Number((req as any).user_id || user_id);
     const trimmed = String(name || '').trim();
     const t = String(type || '').trim();
     if (!uid || !trimmed || !t) {
@@ -71,10 +107,13 @@ router.post('/locations', async (req, res) => {
     const allowed = new Set(['Heading', 'Stope', 'Stockpile']);
     if (!allowed.has(t)) return res.status(400).json({ error: 'invalid location type' });
 
+    // Upsert behavior: legacy clients used POST for both create + update.
+    // If (user_id, name) exists, update the type.
     const r = await pool.query(
       `INSERT INTO locations (user_id, name, type)
        VALUES ($1,$2,$3)
-       ON CONFLICT (user_id, name) DO NOTHING
+       ON CONFLICT (user_id, name)
+       DO UPDATE SET type=EXCLUDED.type
        RETURNING id`,
       [uid, trimmed, t],
     );
@@ -85,9 +124,40 @@ router.post('/locations', async (req, res) => {
   }
 });
 
-router.get('/locations', async (req, res) => {
+// True edit endpoint (supports renaming location name)
+router.patch('/locations/:id', authMiddleware, async (req: any, res) => {
   try {
-    const uid = Number(req.query.user_id);
+    const uid = Number((req as any).user_id || req.body?.user_id);
+    const id = Number(req.params?.id);
+    const name = String(req.body?.name || '').trim();
+    const t = String(req.body?.type || '').trim();
+    if (!uid || !id || !name || !t) return res.status(400).json({ error: 'missing id, name or type' });
+
+    const allowed = new Set(['Heading', 'Stope', 'Stockpile']);
+    if (!allowed.has(t)) return res.status(400).json({ error: 'invalid location type' });
+
+    const r = await pool.query(
+      `UPDATE locations
+          SET name=$1,
+              type=$2
+        WHERE id=$3 AND user_id=$4
+        RETURNING id`,
+      [name, t, id, uid],
+    );
+    if (!r.rowCount) return res.status(404).json({ error: 'not found' });
+    return res.json({ ok: true, id: r.rows[0]?.id || id });
+  } catch (err: any) {
+    if (String(err?.code) === '23505') {
+      return res.status(409).json({ error: 'location name already exists' });
+    }
+    console.error('locations update failed', err);
+    return res.status(500).json({ error: 'update failed' });
+  }
+});
+
+router.get('/locations', authMiddleware, async (req: any, res) => {
+  try {
+    const uid = Number((req as any).user_id || req.query.user_id);
     if (!uid) return res.status(400).json({ error: 'missing user_id' });
     const r = await pool.query(
       'SELECT id, name, type FROM locations WHERE user_id=$1 ORDER BY created_at DESC',
@@ -100,9 +170,9 @@ router.get('/locations', async (req, res) => {
   }
 });
 
-router.delete('/locations', async (req, res) => {
+router.delete('/locations', authMiddleware, async (req: any, res) => {
   try {
-    const uid = Number(req.body?.user_id);
+    const uid = Number((req as any).user_id || req.body?.user_id);
     const name = String(req.body?.name || '').trim();
     if (!uid || !name) return res.status(400).json({ error: 'missing user_id or name' });
     const r = await pool.query('DELETE FROM locations WHERE user_id=$1 AND name=$2', [uid, name]);
