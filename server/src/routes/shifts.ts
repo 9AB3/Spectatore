@@ -515,9 +515,9 @@ function buildMetaJson(items: any[]) {
         if (!p.activity) continue;
 
         await client.query(
-          `INSERT INTO shift_activities (shift_id, user_email, user_name, work_site_id, admin_site_id, site, activity, sub_activity, payload_json, shift_key)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)`,
-          [shift_id, stable_email, user_name, work_site_id, admin_site_id, site, p.activity, p.sub, JSON.stringify(p), shift_key],
+          `INSERT INTO shift_activities (shift_id, user_email, user_name, work_site_id, admin_site_id, activity, sub_activity, payload_json, shift_key)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)`,
+          [shift_id, stable_email, user_name, work_site_id, admin_site_id, p.activity, p.sub, JSON.stringify(p), shift_key],
         );
       }
 
@@ -613,10 +613,10 @@ function buildMetaJson(items: any[]) {
         try {
           insShift = await client.query(
             `INSERT INTO validated_shifts
-                (shift_id, shift_key, admin_site_id, work_site_id, site, date, dn, user_email, user_name, user_id, validated, totals_json)
+                (shift_id, shift_key, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id, validated, totals_json)
              VALUES
-                ($1,$2,$3,$4,$5,$6::date,$7,COALESCE($8,''),$9,$10,FALSE,$11::jsonb)
-             ON CONFLICT ON CONSTRAINT validated_shifts_shift_id_key DO UPDATE
+                ($1,$2,$3,$4,$5::date,$6,COALESCE($7,''),$8,$9,FALSE,$10::jsonb)
+             ON CONFLICT (shift_id) DO UPDATE
                 SET shift_key    = EXCLUDED.shift_key,
                     admin_site_id = EXCLUDED.admin_site_id,
                     work_site_id  = EXCLUDED.work_site_id,
@@ -657,8 +657,8 @@ function buildMetaJson(items: any[]) {
 
           await client.query(
             `INSERT INTO validated_shift_activities
-              (validated_shift_id, shift_key, admin_site_id, work_site_id, site, date, dn, user_email, user_name, user_id, activity, sub_activity, payload_json)
-             VALUES ($1,$2,$3,$4,$5,$6::date,$7,$8,$9,$10,$11,$12,$13::jsonb)`,
+              (validated_shift_id, shift_key, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id, activity, sub_activity, payload_json)
+             VALUES ($1,$2,$3,$4,$5::date,$6,$7,$8,$9,$10,$11,$12::jsonb)`,
             [validated_shift_id, shiftKey, admin_site_id, work_site_id, date, dn, stable_email, user_name, user_id, p.activity, p.sub, JSON.stringify(p)],
           );
         }
