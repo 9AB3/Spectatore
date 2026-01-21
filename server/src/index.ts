@@ -4,6 +4,7 @@ import express from 'express';
 import cors, { type CorsOptions } from 'cors';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 import { pool } from './lib/pg.js';
 
@@ -22,6 +23,11 @@ import notificationPreferencesRoutes from './routes/notificationPreferences.js';
 import pushRoutes from './routes/push.js';
 import publicRoutes from './routes/public.js';
 import workSitesRoutes from './routes/workSites.js';
+
+// Node ESM does not provide __dirname/__filename by default.
+// Define them so we can resolve paths (e.g., db/init.sql) reliably in production.
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const isDev = process.env.NODE_ENV !== 'production';
 const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173')
