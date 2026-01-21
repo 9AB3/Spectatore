@@ -1932,9 +1932,9 @@ router.post('/validated/add-activity', siteAdminMiddleware, async (req: any, res
 	    }
 	    if (!validated_shift_id || !Number.isFinite(validated_shift_id)) throw new Error('failed to resolve validated_shift_id');
 
-    await client.query(
+    const insAct = await client.query(
       `INSERT INTO validated_shift_activities (validated_shift_id, shift_key, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id, activity, sub_activity, payload_json)
-       VALUES ($1,$2,$3,$4,$5::date,$6,COALESCE($7,''),$8,$9,$10,$11,$12::jsonb)`,
+       VALUES ($1,$2,$3,$4,$5::date,$6,COALESCE($7,''),$8,$9,$10,$11,$12::jsonb) RETURNING id`,
       [validated_shift_id, shiftKey, admin_site_id, work_site_id, date, dn, user_email, user_name, user_id, activity, sub_activity, JSON.stringify(payload_json || {})],
     );
 
@@ -1957,7 +1957,7 @@ router.post('/validated/add-activity', siteAdminMiddleware, async (req: any, res
 
     await markValidatedDayUnvalidated(client, admin_site_id, date, 'add-activity');
     await client.query('COMMIT');
-    return res.json({ ok: true, totals });
+    return res.json({ ok: true, inserted_activity_id, totals });
   } catch (e: any) {
     try { await client.query('ROLLBACK'); } catch {}
     return res.status(500).json({ ok: false, error: e?.message || 'failed' });
@@ -1983,23 +1983,40 @@ router.post('/validated/delete-activity', siteAdminMiddleware, async (req: any, 
     await client.query('BEGIN');
 
     const r = await client.query(
-      `SELECT dn, COALESCE(user_email,'') AS user_email
+      `SELECT dn,
+              COALESCE(user_email,'') AS user_email,
+              COALESCE(shift_key,'') AS shift_key,
+              admin_site_id
          FROM validated_shift_activities
-        WHERE id=$1 AND admin_site_id=$2 AND date=$3::date
+        WHERE id=$1 AND date=$2::date
         LIMIT 1`,
-      [id, admin_site_id, date],
+      [id, date],
     );
     if (!r.rows?.length) {
       await client.query('ROLLBACK');
       return res.status(404).json({ ok: false, error: 'not found' });
     }
+
+    // Ownership check: prefer admin_site_id when present; fallback to shift_key prefix.
+    const rowAdminSiteId = Number(r.rows[0].admin_site_id || 0) || null;
+    const rowShiftKey = String(r.rows[0].shift_key || '');
+    if (rowAdminSiteId && rowAdminSiteId !== admin_site_id) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ ok: false, error: 'forbidden' });
+    }
+    if (!rowAdminSiteId && rowShiftKey && !rowShiftKey.startsWith(`${admin_site_id}|`)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ ok: false, error: 'forbidden' });
+    }
+
     const dn = String(r.rows[0].dn || '');
     const user_email = String(r.rows[0].user_email || '');
 
     const del = await client.query(
       `DELETE FROM validated_shift_activities
-        WHERE id=$1 AND admin_site_id=$2 AND date=$3::date`,
-      [id, admin_site_id, date],
+        WHERE id=$1 AND date=$2::date
+        RETURNING id`,
+      [id, date],
     );
     if (!del.rowCount) {
       await client.query('ROLLBACK');
@@ -2030,7 +2047,7 @@ router.post('/validated/delete-activity', siteAdminMiddleware, async (req: any, 
     await markValidatedDayUnvalidated(client, admin_site_id, date, 'delete-activity');
 
     await client.query('COMMIT');
-    return res.json({ ok: true, totals });
+    return res.json({ ok: true, deleted: del.rowCount || 0, totals });
   } catch (e: any) {
     try { await client.query('ROLLBACK'); } catch {}
     return res.status(500).json({ ok: false, error: e?.message || 'failed' });
@@ -2109,8 +2126,11 @@ router.post('/validate', siteAdminMiddleware, async (req: any, res) => {
     await client.query('BEGIN');
 
     if (site === '*') {
-      await client.query(`UPDATE validated_shifts SET validated=TRUE WHERE date=$1::date`, [date]);
-    } else {
+      await client.query(`UPDATE validated_shifts SET validated=TRUE WHERE date=$1::date`, [date],
+    );
+    const inserted_activity_id = Number(insAct.rows?.[0]?.id || 0) || null;
+
+} else {
       await client.query(`UPDATE validated_shifts SET validated=TRUE WHERE admin_site_id=$1 AND date=$2::date`, [adminSiteId, date]);
     }
 

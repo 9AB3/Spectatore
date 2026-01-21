@@ -702,7 +702,7 @@ router.get('/validated/fact-hauling', async (req, res) => {
           COALESCE(NULLIF(vsa.site, ''), NULLIF(u.site, ''), '') AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
+          COALESCE(u.name,vs.user_name, vsa.user_name, vs.user_id::text, vsa.user_id::text, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -807,7 +807,7 @@ router.get('/validated/fact-hauling-loads', async (req, res) => {
           COALESCE(NULLIF(vsa.site, ''), NULLIF(u.site, ''), '') AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
+          COALESCE(u.name,vs.user_name, vsa.user_name, vs.user_id::text, vsa.user_id::text, '') AS user_name,
           COALESCE(vsa.sub_activity,'(No Sub Activity)') AS sub_activity,
           vsa.payload_json AS payload,
           COALESCE(vsa.payload_json->'values','{}'::jsonb) AS vals,
@@ -873,7 +873,7 @@ router.get('/validated/fact-loading', async (req, res) => {
           COALESCE(NULLIF(vsa.site, ''), NULLIF(u.site, ''), '') AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
+          COALESCE(u.name,vs.user_name, vsa.user_name, vs.user_id::text, vsa.user_id::text, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -943,7 +943,7 @@ router.get('/validated/fact-dev-face-drilling', async (req, res) => {
           COALESCE(NULLIF(vsa.site, ''), NULLIF(u.site, ''), '') AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
+          COALESCE(u.name,vs.user_name, vsa.user_name, vs.user_id::text, vsa.user_id::text, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -1013,7 +1013,7 @@ router.get('/validated/fact-ground-support', async (req, res) => {
           COALESCE(NULLIF(vsa.site, ''), NULLIF(u.site, ''), '') AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
+          COALESCE(u.name,vs.user_name, vsa.user_name, vs.user_id::text, vsa.user_id::text, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -1085,7 +1085,7 @@ router.get('/validated/fact-production-drilling', async (req, res) => {
           COALESCE(NULLIF(vsa.site, ''), NULLIF(u.site, ''), '') AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
+          COALESCE(u.name,vs.user_name, vsa.user_name, vs.user_id::text, vsa.user_id::text, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -1158,7 +1158,7 @@ router.get('/validated/fact-production-drilling-holes', async (req, res) => {
           COALESCE(NULLIF(vsa.site, ''), NULLIF(u.site, ''), '') AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
+          COALESCE(u.name,vs.user_name, vsa.user_name, vs.user_id::text, vsa.user_id::text, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -1247,7 +1247,7 @@ router.get('/validated/fact-charging', async (req, res) => {
           COALESCE(NULLIF(vsa.site, ''), NULLIF(u.site, ''), '') AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
+          COALESCE(u.name,vs.user_name, vsa.user_name, vs.user_id::text, vsa.user_id::text, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -1314,7 +1314,7 @@ router.get('/validated/fact-backfilling', async (req, res) => {
           COALESCE(NULLIF(vsa.site, ''), NULLIF(u.site, ''), '') AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
+          COALESCE(u.name,vs.user_name, vsa.user_name, vs.user_id::text, vsa.user_id::text, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -1375,7 +1375,7 @@ router.get('/validated/fact-firing', async (req, res) => {
           COALESCE(NULLIF(vsa.site, ''), NULLIF(u.site, ''), '') AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
+          COALESCE(u.name,vs.user_name, vsa.user_name, vs.user_id::text, vsa.user_id::text, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
@@ -1468,7 +1468,7 @@ router.get('/validated/fact-hoisting', async (req, res) => {
           COALESCE(NULLIF(vsa.site, ''), NULLIF(u.site, ''), '') AS site,
           COALESCE(vs.user_id, vsa.user_id) AS user_id,
           COALESCE(u.email, '') AS user_email,
-          COALESCE(u.name, vs.user_name, vsa.user_name, vs.user_id, vsa.user_id, '') AS user_name,
+          COALESCE(u.name,vs.user_name, vsa.user_name, vs.user_id::text, vsa.user_id::text, '') AS user_name,
           vsa.activity,
           CASE
             WHEN vsa.sub_activity = '' OR vsa.sub_activity IS NULL THEN '(No Sub Activity)'
