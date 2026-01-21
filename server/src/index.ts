@@ -31,6 +31,9 @@ const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173')
 
 const app = express();
 
+// Render/containers provide PORT at runtime; keep a sane default for local dev.
+const PORT = Number.parseInt(process.env.PORT || "5000", 10);
+
 // In dev, disable etag + caching for API responses to ensure the UI updates live
 // without needing hard refreshes.
 if (isDev) {
