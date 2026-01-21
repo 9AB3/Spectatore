@@ -76,45 +76,33 @@ app.use((req, res, next) => {
 });
 
 async function initDb() {
-  const sqlPath = path.join(process.cwd(), 'src', 'db', 'init.sql');
-  const sql = fs.readFileSync(sqlPath, 'utf8');
-  await pool.query(sql);
-  console.log('Postgres schema ready.');
-}
-
-app.get('/api/health', (_req, res) => res.json({ ok: true }));
-
-app.get('/api/health/db', async (_req, res) => {
+  // First, ensure required columns exist on *existing* databases before we run init.sql,
+  // because init.sql may create indexes that reference these columns.
   try {
-    const r = await pool.query('select now() as now');
-    res.json({ ok: true, now: r.rows[0].now });
-  } catch (e: any) {
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+    await ensureDbColumns();
+  } catch (e) {
+    console.warn('[db] ensureDbColumns preflight failed (continuing):', e);
   }
-});
 
-app.use('/api/shifts', shiftsRoutes);
-app.use('/api/reports', reportsRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/site-admin', siteAdminRoutes);
-app.use('/api/feedback', feedbackRoutes);
-app.use('/api/notifications', notificationsRoutes);
-app.use('/api/notification-preferences', notificationPreferencesRoutes);
-app.use('/api/push', pushRoutes);
+  const sqlPath = path.join(__dirname, 'db', 'init.sql');
+  const sql = fs.readFileSync(sqlPath, 'utf-8');
 
-// Work Site directory (public search + authenticated create)
-app.use('/api/work-sites', workSitesRoutes);
-
-// Public, unauthenticated endpoints (marketing site)
-app.use('/api/public', publicRoutes);
-
-app.use('/api/auth', authRoutes);
-app.use('/api/user', userRoutes);
-app.use('/api/meta', metaRoutes);
-app.use('/api/powerbi', powerBiRoutes);
-app.use('/api', dataRoutes);
-
-const PORT = Number(process.env.PORT || 5000);
+  try {
+    await pool.query(sql);
+    console.log('Postgres schema ready.');
+  } catch (err: any) {
+    // If we're deploying against an older DB that predates new columns (e.g. admin_site_id/work_site_id),
+    // Postgres will throw 42703 (undefined_column) when init.sql tries to create indexes. Repair + retry once.
+    if (err?.code === '42703') {
+      console.warn('[db] init.sql hit undefined column; attempting column repair then retry...', err?.message);
+      await ensureDbColumns();
+      await pool.query(sql);
+      console.log('Postgres schema ready (after column repair).');
+    } else {
+      throw err;
+    }
+  }
+}
 
 initDb()
   .then(async () => {

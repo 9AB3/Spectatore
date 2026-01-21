@@ -1,3 +1,86 @@
+
+
+-- === SAFETY: add missing columns to existing tables BEFORE indexes ===
+DO $$
+BEGIN
+  -- users
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='users') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='primary_admin_site_id') THEN
+      ALTER TABLE users ADD COLUMN primary_admin_site_id INT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='work_site_id') THEN
+      ALTER TABLE users ADD COLUMN work_site_id INT NULL;
+    END IF;
+  END IF;
+
+  -- shifts
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='shifts') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='shifts' AND column_name='admin_site_id') THEN
+      ALTER TABLE shifts ADD COLUMN admin_site_id INT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='shifts' AND column_name='work_site_id') THEN
+      ALTER TABLE shifts ADD COLUMN work_site_id INT NULL;
+    END IF;
+  END IF;
+
+  -- shift_activities
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='shift_activities') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='shift_activities' AND column_name='admin_site_id') THEN
+      ALTER TABLE shift_activities ADD COLUMN admin_site_id INT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='shift_activities' AND column_name='work_site_id') THEN
+      ALTER TABLE shift_activities ADD COLUMN work_site_id INT NULL;
+    END IF;
+  END IF;
+
+  -- validated_shifts
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='validated_shifts') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='validated_shifts' AND column_name='admin_site_id') THEN
+      ALTER TABLE validated_shifts ADD COLUMN admin_site_id INT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='validated_shifts' AND column_name='work_site_id') THEN
+      ALTER TABLE validated_shifts ADD COLUMN work_site_id INT NULL;
+    END IF;
+  END IF;
+
+  -- validated_shift_activities
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='validated_shift_activities') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='validated_shift_activities' AND column_name='admin_site_id') THEN
+      ALTER TABLE validated_shift_activities ADD COLUMN admin_site_id INT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='validated_shift_activities' AND column_name='work_site_id') THEN
+      ALTER TABLE validated_shift_activities ADD COLUMN work_site_id INT NULL;
+    END IF;
+  END IF;
+
+  -- admin_equipment/admin_locations
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='admin_equipment') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='admin_equipment' AND column_name='admin_site_id') THEN
+      ALTER TABLE admin_equipment ADD COLUMN admin_site_id INT NULL;
+    END IF;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='admin_locations') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='admin_locations' AND column_name='admin_site_id') THEN
+      ALTER TABLE admin_locations ADD COLUMN admin_site_id INT NULL;
+    END IF;
+  END IF;
+
+  -- reconciliation tables
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='validated_reconciliations') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='validated_reconciliations' AND column_name='admin_site_id') THEN
+      ALTER TABLE validated_reconciliations ADD COLUMN admin_site_id INT NULL;
+    END IF;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='validated_reconciliation_days') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='validated_reconciliation_days' AND column_name='admin_site_id') THEN
+      ALTER TABLE validated_reconciliation_days ADD COLUMN admin_site_id INT NULL;
+    END IF;
+  END IF;
+END$$;
+-- === END SAFETY ===
+
 -- USERS
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
@@ -246,7 +329,6 @@ CREATE TABLE IF NOT EXISTS shift_activities (
 
 CREATE INDEX IF NOT EXISTS idx_shift_activities_shift_id ON shift_activities(shift_id);
 ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS admin_site_id INT;
-ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS work_site_id INT;
 
 CREATE INDEX IF NOT EXISTS idx_shift_activities_admin_site_id ON shift_activities(admin_site_id);
 CREATE INDEX IF NOT EXISTS idx_shift_activities_work_site_id ON shift_activities(work_site_id);
@@ -283,14 +365,6 @@ CREATE TABLE IF NOT EXISTS validated_shifts (
 -- add the column BEFORE creating indexes that reference it.
 ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS shift_key TEXT;
 
--- Older databases may not have the newer denormalized columns. These MUST exist
--- before we create indexes / unique constraints that reference them.
-ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS admin_site_id INT;
-ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS work_site_id INT;
-ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS date DATE;
-ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS dn TEXT;
-ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS user_email TEXT;
-
 CREATE INDEX IF NOT EXISTS idx_validated_shifts_admin_site_id ON validated_shifts(admin_site_id);
 CREATE INDEX IF NOT EXISTS idx_validated_shifts_date ON validated_shifts(date);
 CREATE INDEX IF NOT EXISTS idx_validated_shifts_shift_key ON validated_shifts(shift_key);
@@ -325,14 +399,6 @@ CREATE TABLE IF NOT EXISTS validated_shift_activities (
 -- Bootstrap safety: if this table already existed from an older run (without shift_key),
 -- add the column BEFORE creating indexes that reference it.
 ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS shift_key TEXT;
-
--- Older databases may not have the newer denormalized columns. Ensure they exist
--- before we create indexes that reference them.
-ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS admin_site_id INT;
-ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS work_site_id INT;
-ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS date DATE;
-ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS dn TEXT;
-ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS user_email TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_validated_shift_activities_vshift_id ON validated_shift_activities(validated_shift_id);
 CREATE INDEX IF NOT EXISTS idx_validated_shift_activities_admin_site_id ON validated_shift_activities(admin_site_id);
