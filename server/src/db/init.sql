@@ -303,9 +303,17 @@ CREATE TABLE IF NOT EXISTS shifts (
   finalized_at TIMESTAMPTZ,
   user_email TEXT,
   user_name TEXT,
+  site TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(user_id, date, dn)
 );
+
+
+-- Ensure site denormalization column exists and is NOT NULL
+ALTER TABLE shifts ADD COLUMN IF NOT EXISTS site TEXT;
+UPDATE shifts SET site = COALESCE(site,'') WHERE site IS NULL;
+ALTER TABLE shifts ALTER COLUMN site SET DEFAULT '';
+ALTER TABLE shifts ALTER COLUMN site SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_shifts_user_date ON shifts(user_id, date);
 ALTER TABLE shifts ADD COLUMN IF NOT EXISTS admin_site_id INT;
@@ -324,8 +332,16 @@ CREATE TABLE IF NOT EXISTS shift_activities (
   activity TEXT NOT NULL,
   sub_activity TEXT,
   payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  site TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+
+-- Ensure site denormalization column exists and is NOT NULL
+ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS site TEXT;
+UPDATE shift_activities SET site = COALESCE(site,'') WHERE site IS NULL;
+ALTER TABLE shift_activities ALTER COLUMN site SET DEFAULT '';
+ALTER TABLE shift_activities ALTER COLUMN site SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_shift_activities_shift_id ON shift_activities(shift_id);
 ALTER TABLE shift_activities ADD COLUMN IF NOT EXISTS admin_site_id INT;
@@ -355,11 +371,19 @@ CREATE TABLE IF NOT EXISTS validated_shifts (
   validated_by INT REFERENCES users(id) ON DELETE SET NULL,
 
   totals_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  site TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT now(),
 
   UNIQUE(admin_site_id, date, dn, user_email),
   UNIQUE(shift_key)
 );
+
+
+-- Ensure site denormalization column exists and is NOT NULL
+ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS site TEXT;
+UPDATE validated_shifts SET site = COALESCE(site,'') WHERE site IS NULL;
+ALTER TABLE validated_shifts ALTER COLUMN site SET DEFAULT '';
+ALTER TABLE validated_shifts ALTER COLUMN site SET NOT NULL;
 
 -- Bootstrap safety: if this table already existed from an older run (without shift_key),
 -- add the column BEFORE creating indexes that reference it.
@@ -392,8 +416,16 @@ CREATE TABLE IF NOT EXISTS validated_shift_activities (
   activity TEXT NOT NULL,
   sub_activity TEXT,
   payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  site TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+
+-- Ensure site denormalization column exists and is NOT NULL
+ALTER TABLE validated_shift_activities ADD COLUMN IF NOT EXISTS site TEXT;
+UPDATE validated_shift_activities SET site = COALESCE(site,'') WHERE site IS NULL;
+ALTER TABLE validated_shift_activities ALTER COLUMN site SET DEFAULT '';
+ALTER TABLE validated_shift_activities ALTER COLUMN site SET NOT NULL;
 
 -- Bootstrap safety: add shift_key before indexes if this table existed without it.
 -- Bootstrap safety: if this table already existed from an older run (without shift_key),
