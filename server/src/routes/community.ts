@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import geoip from 'geoip-lite';
 import { pool } from '../lib/pg.js';
 import { authMiddleware } from '../lib/auth.js';
 
@@ -15,19 +14,19 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
     const userId = Number(req.user_id);
     if (!userId) return res.status(400).json({ error: 'missing user' });
 
-    const xf = (req.headers['x-forwarded-for'] as string | undefined) || '';
-    const ip = (xf.split(',')[0] || req.ip || '').trim();
+    // Country is derived from trusted edge headers where available (Cloudflare/Vercel/etc).
+    // We intentionally do NOT store raw IPs. If no country header is present we store NULL.
+    const rawCountry = String(
+      (req.headers['cf-ipcountry'] ||
+        req.headers['x-vercel-ip-country'] ||
+        req.headers['x-geo-country'] ||
+        req.headers['x-country-code'] ||
+        req.headers['x-appengine-country'] ||
+        '') as any,
+    ).trim();
 
-    const rawCountry = String((req.headers['cf-ipcountry'] || req.headers['x-vercel-ip-country'] || req.headers['x-geo-country'] || '') as any).trim();
-    let country: string | null = rawCountry && rawCountry !== 'XX' ? rawCountry.toUpperCase().slice(0, 2) : null;
-    if (!country && ip) {
-      try {
-        const g = geoip.lookup(ip);
-        if (g?.country) country = String(g.country).toUpperCase();
-      } catch {
-        // ignore
-      }
-    }
+    const cc = rawCountry && rawCountry !== 'XX' ? rawCountry.toUpperCase().slice(0, 2) : '';
+    const country: string | null = cc && /^[A-Z]{2}$/.test(cc) ? cc : null;
 
     // Note: we intentionally do NOT store raw IPs. We store only country (coarse) + minute buckets.
 
