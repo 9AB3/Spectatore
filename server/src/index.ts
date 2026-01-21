@@ -84,6 +84,30 @@ app.use((req, res, next) => {
   next();
 });
 
+// -------------------- Routes --------------------
+// If these mounts are missing, the API will start but every request will 404.
+// The client expects these exact prefixes (e.g. /api/auth/login).
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+app.use('/api/auth', authRoutes);
+app.use('/api/user', userRoutes);
+app.use('/api/meta', metaRoutes);
+app.use('/api/powerbi', powerBiRoutes);
+
+// Data endpoints (equipment, locations, connections, etc.) are rooted at /api
+app.use('/api', dataRoutes);
+
+app.use('/api/shifts', shiftsRoutes);
+app.use('/api/reports', reportsRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/site-admin', siteAdminRoutes);
+app.use('/api/feedback', feedbackRoutes);
+app.use('/api/notifications', notificationsRoutes);
+app.use('/api/notification-preferences', notificationPreferencesRoutes);
+app.use('/api/push', pushRoutes);
+app.use('/api/public', publicRoutes);
+app.use('/api/work-sites', workSitesRoutes);
+
 async function initDb() {
   // First, ensure required columns exist on *existing* databases before we run init.sql,
   // because init.sql may create indexes that reference these columns.
