@@ -1682,6 +1682,12 @@ async function markValidatedDayUnvalidated(client: any, admin_site_id: number, d
     );
     const cols = new Set<string>((colsR.rows || []).map((r: any) => String(r.column_name || '').toLowerCase()));
 
+    // Some older / drifted databases have a legacy validated_days table keyed differently
+    // (e.g. work_site_id/site_id/site text) and therefore do not contain admin_site_id.
+    // This helper is best-effort only (we can always recompute day status from validated_shifts),
+    // so if admin_site_id is not present, skip rather than failing the calling flow.
+    if (cols.size > 0 && !cols.has('admin_site_id')) return;
+
     if (cols.size === 0) {
       // Create a minimal compatible table using status (newer behavior)
       await client.query(
