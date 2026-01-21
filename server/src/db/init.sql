@@ -385,6 +385,45 @@ UPDATE validated_shifts SET site = COALESCE(site,'') WHERE site IS NULL;
 ALTER TABLE validated_shifts ALTER COLUMN site SET DEFAULT '';
 ALTER TABLE validated_shifts ALTER COLUMN site SET NOT NULL;
 
+
+-- Schema drift guard: validated_shifts.validated must be BOOLEAN (some legacy DBs used INT)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+      FROM information_schema.columns
+     WHERE table_name='validated_shifts'
+       AND column_name='validated'
+       AND data_type IN ('integer','smallint','bigint')
+  ) THEN
+    ALTER TABLE validated_shifts ALTER COLUMN validated DROP DEFAULT;
+    -- Convert 0/1 (or any int) to boolean
+    ALTER TABLE validated_shifts ALTER COLUMN validated TYPE BOOLEAN USING (validated::int <> 0);
+    UPDATE validated_shifts SET validated = FALSE WHERE validated IS NULL;
+    ALTER TABLE validated_shifts ALTER COLUMN validated SET DEFAULT FALSE;
+    ALTER TABLE validated_shifts ALTER COLUMN validated SET NOT NULL;
+  ELSIF EXISTS (
+    SELECT 1
+      FROM information_schema.columns
+     WHERE table_name='validated_shifts'
+       AND column_name='validated'
+       AND data_type IN ('text','character varying')
+  ) THEN
+    ALTER TABLE validated_shifts ALTER COLUMN validated DROP DEFAULT;
+    -- Convert common legacy strings to boolean
+    ALTER TABLE validated_shifts ALTER COLUMN validated TYPE BOOLEAN USING (
+      CASE
+        WHEN lower(coalesce(validated::text,'')) IN ('1','t','true','y','yes') THEN TRUE
+        ELSE FALSE
+      END
+    );
+    UPDATE validated_shifts SET validated = FALSE WHERE validated IS NULL;
+    ALTER TABLE validated_shifts ALTER COLUMN validated SET DEFAULT FALSE;
+    ALTER TABLE validated_shifts ALTER COLUMN validated SET NOT NULL;
+  END IF;
+END $$;
+
+
 -- Bootstrap safety: if this table already existed from an older run (without shift_key),
 -- add the column BEFORE creating indexes that reference it.
 ALTER TABLE validated_shifts ADD COLUMN IF NOT EXISTS shift_key TEXT;
