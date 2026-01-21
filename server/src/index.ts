@@ -108,6 +108,12 @@ app.use('/api/push', pushRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/work-sites', workSitesRoutes);
 
+// Handle malformed URL encodings from internet scanners (prevents noisy URIError logs).
+app.use((err: any, _req: any, res: any, next: any) => {
+  if (err instanceof URIError) return res.status(400).send('Bad Request');
+  return next(err);
+});
+
 async function initDb() {
   // First, ensure required columns exist on *existing* databases before we run init.sql,
   // because init.sql may create indexes that reference these columns.

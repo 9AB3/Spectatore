@@ -1,8 +1,26 @@
 import express from 'express';
+import jwt from 'jsonwebtoken';
+import dotenv from 'dotenv';
 import { pool } from '../lib/pg.js';
 import { authMiddleware } from '../lib/auth.js';
 
+dotenv.config();
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
+
 const router = express.Router();
+
+function getOptionalUserId(req: any): number | null {
+  const h = req.headers['authorization'] || '';
+  const m = /^Bearer\s+(.+)$/.exec(String(h));
+  if (!m) return null;
+  try {
+    const payload: any = jwt.verify(m[1], JWT_SECRET);
+    const id = Number(payload?.id);
+    return Number.isFinite(id) && id > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
 
 function normName(s: any): string {
   return String(s || '')
@@ -17,27 +35,34 @@ router.get('/', async (req, res) => {
   try {
     const qRaw = String(req.query?.q || '').trim();
     const q = normName(qRaw);
+    const authedUserId = getOptionalUserId(req);
 
     let r;
     if (q) {
-      // Prefer prefix match on normalized name, then substring match.
+      // Authenticated users can search all work sites; unauthenticated only see official/synced ones.
+      const where = authedUserId
+        ? `WHERE (name_normalized LIKE $1 || '%' OR name_normalized LIKE '%' || $1 || '%')`
+        : `WHERE (is_official = true OR official_site_id IS NOT NULL)
+             AND (name_normalized LIKE $1 || '%' OR name_normalized LIKE '%' || $1 || '%')`;
       r = await pool.query(
         `SELECT id, name_display, is_official, official_site_id
            FROM work_sites
-          WHERE (is_official = true OR official_site_id IS NOT NULL)
-            AND (name_normalized LIKE $1 || '%' OR name_normalized LIKE '%' || $1 || '%')
+          ${where}
           ORDER BY is_official DESC, name_display ASC
-          LIMIT 25`,
+          LIMIT 200`,
         [q],
       );
     } else {
-      // No query: return a small curated list (official first, then alphabetical).
+      // No query: authenticated users get broader list; unauthenticated get curated official list.
+      const where = authedUserId
+        ? ''
+        : 'WHERE (is_official = true OR official_site_id IS NOT NULL)';
       r = await pool.query(
         `SELECT id, name_display, is_official, official_site_id
            FROM work_sites
-          WHERE (is_official = true OR official_site_id IS NOT NULL)
+          ${where}
           ORDER BY is_official DESC, name_display ASC
-          LIMIT 50`,
+          LIMIT 200`,
       );
     }
     return res.json({ sites: (r.rows || []).map((x: any) => ({ id: Number(x.id), name: String(x.name_display), is_official: !!x.is_official })) });

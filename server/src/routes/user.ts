@@ -199,7 +199,7 @@ router.get('/me', authMiddleware, async (req: any, res) => {
       site: row.site || null,
       workSite: row.work_site_id
         ? { id: Number(row.work_site_id), name: String(row.work_site_name || row.site || '') }
-        : null,
+        : (row.site ? { id: 0, name: String(row.site) } : null),
       subscribedSite: row.primary_site_id
         ? { id: Number(row.primary_site_id), name: String(row.subscribed_site_name || '') }
         : null,

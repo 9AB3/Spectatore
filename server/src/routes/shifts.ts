@@ -480,6 +480,8 @@ function buildMetaJson(items: any[]) {
       const user_email = await getUserEmail(client, user_id);
       const user_name = await getUserName(client, user_id);
 
+      const site = await getUserSite(client, user_id);
+
       // Use a stable identifier for shift_key + validation uniqueness.
       // Some older local DBs / seed users may have empty email; avoid collisions by synthesizing one.
       const stable_email = (user_email || '').trim() || `user-${user_id}@local`;
@@ -487,11 +489,12 @@ function buildMetaJson(items: any[]) {
 
       // Upsert the shift row and mark finalized
       const up = await client.query(
-        `INSERT INTO shifts (user_id, work_site_id, admin_site_id, date, dn, totals_json, meta_json, finalized_at, user_email, user_name, shift_key)
-         VALUES ($1,$2,$3,$4::date,$5,$6::jsonb,$7::jsonb,NOW(),$8,$9,$10)
+        `INSERT INTO shifts (user_id, work_site_id, admin_site_id, site, date, dn, totals_json, meta_json, finalized_at, user_email, user_name, shift_key)
+         VALUES ($1,$2,$3,$4,$5::date,$6,$7::jsonb,$8::jsonb,NOW(),$9,$10,$11)
          ON CONFLICT (user_id, date, dn)
          DO UPDATE SET work_site_id=EXCLUDED.work_site_id,
                        admin_site_id=EXCLUDED.admin_site_id,
+                       site=EXCLUDED.site,
                        totals_json=EXCLUDED.totals_json,
                        meta_json=EXCLUDED.meta_json,
                        finalized_at=NOW(),
@@ -499,7 +502,7 @@ function buildMetaJson(items: any[]) {
                        user_name=EXCLUDED.user_name,
                        shift_key=EXCLUDED.shift_key
          RETURNING id`,
-        [user_id, work_site_id, admin_site_id, date, dn, JSON.stringify(totals || {}), JSON.stringify(meta_json || {}), stable_email, user_name, shift_key],
+        [user_id, work_site_id, admin_site_id, site, date, dn, JSON.stringify(totals || {}), JSON.stringify(meta_json || {}), stable_email, user_name, shift_key],
       );
       const shift_id = up.rows?.[0]?.id;
       if (!shift_id) throw new Error('shift upsert failed');
