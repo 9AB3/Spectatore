@@ -4,6 +4,7 @@ import express from 'express';
 import cors, { type CorsOptions } from 'cors';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 import { pool } from './lib/pg.js';
 
@@ -33,6 +34,11 @@ const app = express();
 
 // Render/containers provide PORT at runtime; keep a sane default for local dev.
 const PORT = Number.parseInt(process.env.PORT || "5000", 10);
+
+// This server is compiled & executed as ESM on Render.
+// Node ESM does not define __dirname, so we derive it from import.meta.url.
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // In dev, disable etag + caching for API responses to ensure the UI updates live
 // without needing hard refreshes.
@@ -87,7 +93,13 @@ async function initDb() {
     console.warn('[db] ensureDbColumns preflight failed (continuing):', e);
   }
 
-  const sqlPath = path.join(__dirname, 'db', 'init.sql');
+  // Prefer the compiled-asset location (dist/db/init.sql). When the Dockerfile
+  // doesn't copy the build helper scripts, postbuild may not run, so dist/db may
+  // be missing. Fall back to the source location (src/db/init.sql).
+  const distSqlPath = path.join(__dirname, 'db', 'init.sql');
+  const srcSqlPath = path.join(process.cwd(), 'src', 'db', 'init.sql');
+
+  const sqlPath = fs.existsSync(distSqlPath) ? distSqlPath : srcSqlPath;
   const sql = fs.readFileSync(sqlPath, 'utf-8');
 
   try {
