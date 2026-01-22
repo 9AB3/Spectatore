@@ -71,7 +71,9 @@ function roundTo(n: number, step: number) {
 router.get('/public-stats', authMiddleware, async (req: any, res) => {
   try {
     const range = String(req.query.range || 'today'); // today | 7d | 30d
-    const delayMinutes = 10;     // delay to avoid true real-time inference
+    // Founder/Beta mode: show stats immediately and don't hide small counts.
+    // You can tighten these guardrails later by bumping delayMinutes and MIN_* thresholds.
+    const delayMinutes = 0;
     const liveWindowMinutes = 15;
 
     const end = `now() - interval '${delayMinutes} minutes'`;
@@ -147,14 +149,14 @@ router.get('/public-stats', authMiddleware, async (req: any, res) => {
       `,
     );
 
-    const MIN_STATE = 5;
+    const MIN_STATE = 1;
     const auStatesAll = byAuStateQ.rows
       .map((r: any) => ({ state: String(r.state || 'UNK'), users: Number(r.users || 0) }))
       .filter((r: any) => r.users >= MIN_STATE)
       .slice(0, 12);
 
 // Privacy guardrail: suppress tiny counts by country
-    const MIN_COUNTRY = 5;
+    const MIN_COUNTRY = 1;
 
     const mapAll = byCountryQ.rows
       .map((r: any) => ({ country_code: String(r.country_code || 'UNK'), users: Number(r.users || 0) }))
@@ -162,8 +164,8 @@ router.get('/public-stats', authMiddleware, async (req: any, res) => {
 
     const topCountries = mapAll.slice(0, 10);
 
-    // Round headline numbers a little (optional, makes inference harder + looks clean)
-    const roundedStep = liveNow < 50 ? 1 : 5;
+    // In beta we show exact counts.
+    const roundedStep = 1;
 
     return res.json({
       ok: true,

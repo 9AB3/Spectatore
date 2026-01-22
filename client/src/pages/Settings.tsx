@@ -108,7 +108,6 @@ export default function Settings() {
     const res = (await api('/api/user/me')) as Me;
     setMe(res);
     setEmail(res.email || '');
-        setCommunityState((res as any).community_state || '');
     setCommunityState((res as any).community_state || '');
     setActiveSiteIdStr(res.subscribedSite?.id ? String(res.subscribedSite.id) : '0');
   }
@@ -121,6 +120,7 @@ export default function Settings() {
         if (cancelled) return;
         setMe(res);
         setEmail(res.email || '');
+        setCommunityState((res as any).community_state || '');
         setActiveSiteIdStr((res as any).subscribedSite?.id ? String((res as any).subscribedSite.id) : '0');
         const wsName = String((res as any).workSite?.name || '').trim();
         if (wsName) {
