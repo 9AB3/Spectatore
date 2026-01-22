@@ -720,3 +720,7 @@ CREATE INDEX IF NOT EXISTS idx_presence_events_bucket ON presence_events(bucket)
 CREATE INDEX IF NOT EXISTS idx_presence_events_country_bucket ON presence_events(country_code, bucket);
 CREATE INDEX IF NOT EXISTS idx_presence_events_region_bucket ON presence_events(region_code, bucket);
 
+-- Community telemetry column evolution (safe for existing DBs)
+ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS country_code TEXT;
+ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS region_code TEXT;
+ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS community_state TEXT;

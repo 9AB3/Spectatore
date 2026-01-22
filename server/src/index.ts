@@ -49,13 +49,22 @@ if (isDev) {
 }
 
 async function ensureDbColumns() {
+  // Best-effort column evolution for existing DBs. This is intentionally defensive:
+  // we use ALTER TABLE IF EXISTS so fresh DBs (where the table doesn't exist yet)
+  // don't fail the whole preflight.
   try {
-    await pool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS meta_json JSONB DEFAULT '{}'::jsonb`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_version TEXT`);
+    await pool.query(`ALTER TABLE IF EXISTS shifts ADD COLUMN IF NOT EXISTS meta_json JSONB DEFAULT '{}'::jsonb`);
+    await pool.query(`ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS terms_version TEXT`);
+
     // Work Site fields (best-effort; init.sql is authoritative)
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS work_site_id INT`);
-    await pool.query(`ALTER TABLE shifts ADD COLUMN IF NOT EXISTS work_site_id INT`);
+    await pool.query(`ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS work_site_id INT`);
+    await pool.query(`ALTER TABLE IF EXISTS shifts ADD COLUMN IF NOT EXISTS work_site_id INT`);
+
+    // Community / telemetry fields
+    await pool.query(`ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS community_state TEXT`);
+    await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS country_code TEXT`);
+    await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS region_code TEXT`);
   } catch (e:any) {
     console.warn('[db] ensure columns failed:', e?.message || e);
   }
