@@ -56,9 +56,15 @@ export default function ProtectedLayout() {
       try {
         const db = await getDB();
         const session: any = await db.get('session', 'auth');
-        const sid = session?.subscribed_site_id ?? session?.work_site_id ?? null;
-        const n = sid === null || sid === undefined || sid === '' ? null : Number(sid);
-        return n && Number.isFinite(n) ? n : null;
+        // If user is subscribed to an official site, use that admin_sites.id (positive).
+        // Otherwise, use -work_site_id (negative) to avoid collisions with admin_sites ids.
+        const subscribed = session?.subscribed_site_id;
+        const work = session?.work_site_id;
+        const subN = subscribed === null || subscribed === undefined || subscribed === '' ? null : Number(subscribed);
+        if (subN && Number.isFinite(subN)) return subN;
+        const workN = work === null || work === undefined || work === '' ? null : Number(work);
+        if (workN && Number.isFinite(workN)) return -Math.abs(workN);
+        return null;
       } catch {
         return null;
       }

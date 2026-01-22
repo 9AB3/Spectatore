@@ -212,12 +212,34 @@ router.get('/engagement', siteAdminMiddleware, async (req: any, res) => {
   try {
     assertSuperAdmin(req);
 
-    const siteName = String(req.query.site || '').trim();
-    let siteId: number | null = null;
-    if (siteName) {
-      const sr = await pool.query(`SELECT id FROM admin_sites WHERE name=$1 LIMIT 1`, [siteName]);
-      siteId = sr.rows?.[0]?.id ? Number(sr.rows[0].id) : null;
-      if (!siteId) return res.status(404).json({ ok: false, error: 'Site not found' });
+    // NOTE: presence tables store a single integer site_id. For users who are NOT
+    // subscribed to an official admin site, we write site_id = -work_site_id to
+    // avoid collisions with admin_sites.id.
+    const siteIdRaw = String(req.query.site_id || '').trim();
+    const siteId = siteIdRaw ? Number(siteIdRaw) : null;
+    const workOnly = siteId === 0;
+    if (siteIdRaw && !Number.isFinite(siteId as any)) {
+      return res.status(400).json({ ok: false, error: 'Invalid site_id' });
+    }
+
+    // Human label for UI.
+    let site_label: string | null = null;
+    if (siteId !== null) {
+      if (workOnly) {
+        site_label = 'Work-site users (all)';
+      } else if (siteId > 0) {
+        const sr = await pool.query(`SELECT name FROM admin_sites WHERE id=$1 LIMIT 1`, [siteId]);
+        site_label = sr.rows?.[0]?.name ? String(sr.rows[0].name) : null;
+      } else {
+        const wsid = Math.abs(siteId);
+        try {
+          const wr = await pool.query(`SELECT name_display FROM work_sites WHERE id=$1 LIMIT 1`, [wsid]);
+          site_label = wr.rows?.[0]?.name_display ? String(wr.rows[0].name_display) : null;
+        } catch {
+          site_label = null;
+        }
+      }
+      if (!site_label) return res.status(404).json({ ok: false, error: 'Site not found' });
     }
 
     const staleMins = Math.max(1, Number(process.env.PRESENCE_STALE_MINUTES || 5));
@@ -225,47 +247,134 @@ router.get('/engagement', siteAdminMiddleware, async (req: any, res) => {
     const onlineQ = await pool.query(
       `
       SELECT pc.user_id, pc.site_id, pc.last_seen,
-             COALESCE(u.name, u.email) AS display_name,
-             u.email
+             u.name,
+             COALESCE(NULLIF(u.name,''), split_part(u.email,'@',1), u.email) AS display_name,
+             u.email,
+             pc.country_code,
+             pc.region_code
       FROM presence_current pc
       JOIN users u ON u.id = pc.user_id
       WHERE pc.last_seen >= now() - ($1::text || ' minutes')::interval
-        AND ($2::int IS NULL OR pc.site_id = $2::int)
+        AND (
+          $2::int IS NULL OR
+          ($2::int = 0 AND pc.site_id < 0) OR
+          pc.site_id = $2::int
+        )
       ORDER BY pc.last_seen DESC
       `,
       [String(staleMins), siteId],
     );
 
-    const today = await pool.query(
-      `
-      SELECT *
-      FROM presence_daily_stats
-      WHERE day >= CURRENT_DATE - 35
-        AND ($1::int IS NULL OR site_id = $1::int)
-      ORDER BY day DESC
-      LIMIT 35
-      `,
-      [siteId],
-    );
+    let dailyRows: any[] = [];
+    let weeklyRows: any[] = [];
 
-    const weekly = await pool.query(
-      `
-      SELECT *
-      FROM presence_weekly_stats
-      WHERE week_start >= (CURRENT_DATE - 120)
-        AND ($1::int IS NULL OR site_id = $1::int)
-      ORDER BY week_start DESC
-      LIMIT 26
-      `,
-      [siteId],
-    );
+    if (workOnly) {
+      // Aggregate across ALL work-site-only users (site_id < 0).
+      const dailyQ = await pool.query(
+        `
+        WITH days AS (
+          SELECT (CURRENT_DATE - gs)::date AS day
+          FROM generate_series(0, 35) AS gs
+        )
+        SELECT
+          d.day,
+          COALESCE((
+            SELECT COUNT(DISTINCT pe.user_id)
+            FROM presence_events pe
+            WHERE pe.site_id < 0
+              AND pe.ts::date = d.day
+          ), 0) AS dau,
+          COALESCE((
+            SELECT COUNT(*)
+            FROM presence_sessions ps
+            WHERE ps.site_id < 0
+              AND ps.started_at::date = d.day
+          ), 0) AS sessions,
+          COALESCE((
+            SELECT ROUND(SUM(EXTRACT(EPOCH FROM (COALESCE(ps.ended_at, ps.last_seen) - ps.started_at)) / 60.0)::numeric, 2)
+            FROM presence_sessions ps
+            WHERE ps.site_id < 0
+              AND ps.started_at::date = d.day
+          ), 0) AS minutes
+        FROM days d
+        ORDER BY d.day DESC
+        LIMIT 35
+        `,
+      );
+
+      const weeklyQ = await pool.query(
+        `
+        WITH weeks AS (
+          SELECT (date_trunc('week', CURRENT_DATE)::date - (gs * 7))::date AS week_start
+          FROM generate_series(0, 26) AS gs
+        )
+        SELECT
+          w.week_start,
+          COALESCE((
+            SELECT COUNT(DISTINCT pe.user_id)
+            FROM presence_events pe
+            WHERE pe.site_id < 0
+              AND pe.ts >= w.week_start
+              AND pe.ts < (w.week_start + INTERVAL '7 days')
+          ), 0) AS wau,
+          COALESCE((
+            SELECT COUNT(*)
+            FROM presence_sessions ps
+            WHERE ps.site_id < 0
+              AND ps.started_at >= w.week_start
+              AND ps.started_at < (w.week_start + INTERVAL '7 days')
+          ), 0) AS sessions,
+          COALESCE((
+            SELECT ROUND(SUM(EXTRACT(EPOCH FROM (COALESCE(ps.ended_at, ps.last_seen) - ps.started_at)) / 60.0)::numeric, 2)
+            FROM presence_sessions ps
+            WHERE ps.site_id < 0
+              AND ps.started_at >= w.week_start
+              AND ps.started_at < (w.week_start + INTERVAL '7 days')
+          ), 0) AS minutes
+        FROM weeks w
+        ORDER BY w.week_start DESC
+        LIMIT 26
+        `,
+      );
+
+      dailyRows = dailyQ.rows || [];
+      weeklyRows = weeklyQ.rows || [];
+    } else {
+      const today = await pool.query(
+        `
+        SELECT *
+        FROM presence_daily_stats
+        WHERE day >= CURRENT_DATE - 35
+          AND ($1::int IS NULL OR site_id = $1::int)
+        ORDER BY day DESC
+        LIMIT 35
+        `,
+        [siteId],
+      );
+
+      const weekly = await pool.query(
+        `
+        SELECT *
+        FROM presence_weekly_stats
+        WHERE week_start >= (CURRENT_DATE - 120)
+          AND ($1::int IS NULL OR site_id = $1::int)
+        ORDER BY week_start DESC
+        LIMIT 26
+        `,
+        [siteId],
+      );
+
+      dailyRows = today.rows || [];
+      weeklyRows = weekly.rows || [];
+    }
 
     return res.json({
       ok: true,
-      site: siteName || null,
+      site_id: siteId,
+      site: site_label,
       online_now: onlineQ.rows || [],
-      daily: today.rows || [],
-      weekly: weekly.rows || [],
+      daily: dailyRows,
+      weekly: weeklyRows,
       stale_minutes: staleMins,
     });
   } catch (e: any) {
@@ -378,9 +487,18 @@ router.get('/me', siteAdminMiddleware, async (req: any, res) => {
   try {
     const sites = allowedSites(req);
     let site_rows: Array<{ id: number; name: string; state?: string | null }> = [];
+    // Include work sites too so super-admin can inspect engagement for users
+    // who only have a work_site_id (not subscribed to an official admin site).
+    let work_site_rows: Array<{ id: number; name_display: string; is_official?: boolean | null; official_site_id?: number | null }> = [];
     if (sites.includes('*')) {
       const r = await pool.query(`SELECT id, name, state FROM admin_sites ORDER BY name ASC`);
       site_rows = r.rows || [];
+      try {
+        const wr = await pool.query(`SELECT id, name_display, is_official, official_site_id FROM work_sites ORDER BY name_display ASC`);
+        work_site_rows = wr.rows || [];
+      } catch {
+        work_site_rows = [];
+      }
     } else if (sites.length) {
       const r = await pool.query(
         `SELECT id, name, state FROM admin_sites WHERE name = ANY($1::text[]) ORDER BY name ASC`,
@@ -388,10 +506,10 @@ router.get('/me', siteAdminMiddleware, async (req: any, res) => {
       );
       site_rows = r.rows || [];
     }
-    return res.json({ ok: true, sites, site_rows, is_super: sites.includes('*'), can_manage: !!req.site_admin?.can_manage });
+    return res.json({ ok: true, sites, site_rows, work_site_rows, is_super: sites.includes('*'), can_manage: !!req.site_admin?.can_manage });
   } catch {
     const sites = allowedSites(req);
-    return res.json({ ok: true, sites, site_rows: [], is_super: sites.includes('*'), can_manage: !!req.site_admin?.can_manage });
+    return res.json({ ok: true, sites, site_rows: [], work_site_rows: [], is_super: sites.includes('*'), can_manage: !!req.site_admin?.can_manage });
   }
 });
 

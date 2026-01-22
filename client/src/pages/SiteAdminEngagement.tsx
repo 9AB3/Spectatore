@@ -24,8 +24,8 @@ function StatCard({ title, value, subtitle }: { title: string; value: any; subti
 
 export default function SiteAdminEngagement() {
   const nav = useNavigate();
-  const [sites, setSites] = useState<Array<{ name: string }>>([]);
-  const [site, setSite] = useState<string>('');
+  const [sites, setSites] = useState<Array<{ label: string; site_id: number }>>([]);
+  const [siteId, setSiteId] = useState<number | null>(null);
   const [data, setData] = useState<any>(null);
   const [err, setErr] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -34,12 +34,25 @@ export default function SiteAdminEngagement() {
     (async () => {
       try {
         const me: any = await api('/api/site-admin/me');
-        const rows = Array.isArray(me?.site_rows) ? me.site_rows : [];
-        const list = rows
-          .map((r: any) => ({ name: String(r?.name || '').trim() }))
-          .filter((x: any) => x.name && x.name !== '*');
+        const adminRows = Array.isArray(me?.site_rows) ? me.site_rows : [];
+        const workRows = Array.isArray(me?.work_site_rows) ? me.work_site_rows : [];
+
+        // presence tables store:
+        //  - admin site: site_id = admin_sites.id (positive)
+        //  - work site (no official subscription): site_id = -work_sites.id (negative)
+        const adminList = adminRows
+          .map((r: any) => ({ label: String(r?.name || '').trim(), site_id: Number(r?.id) }))
+          .filter((x: any) => x.label && Number.isFinite(x.site_id));
+
+        const hasWorkOnlyUsers = workRows.some((r: any) => !r?.is_official && !r?.official_site_id);
+
+// Instead of listing individual work sites, provide a single aggregated view.
+const workList = hasWorkOnlyUsers ? [{ label: 'Work-site users (all)', site_id: 0 }] : [];
+
+// Show official sites first, then the aggregated work-site option (if any).
+const list = [...adminList, ...workList];
         setSites(list);
-        if (!site && list.length) setSite(list[0].name);
+        if (siteId === null && list.length) setSiteId(list[0].site_id);
       } catch {
         // ignore
       }
@@ -48,11 +61,11 @@ export default function SiteAdminEngagement() {
   }, []);
 
   async function load() {
-    if (!site) return;
+    if (siteId === null) return;
     setLoading(true);
     setErr('');
     try {
-      const r: any = await api(`/api/site-admin/engagement?site=${encodeURIComponent(site)}`);
+      const r: any = await api(`/api/site-admin/engagement?site_id=${encodeURIComponent(String(siteId))}`);
       setData(r);
     } catch (e: any) {
       try {
@@ -72,7 +85,7 @@ export default function SiteAdminEngagement() {
     const t = setInterval(load, 60_000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [site]);
+  }, [siteId]);
 
   const onlineNow = Array.isArray(data?.online_now) ? data.online_now : [];
   const daily = Array.isArray(data?.daily) ? data.daily : [];
@@ -102,12 +115,12 @@ export default function SiteAdminEngagement() {
             <div className="text-sm" style={{ color: 'var(--muted)' }}>Site</div>
             <select
               className={cx('input', 'min-w-[220px]')}
-              value={site}
-              onChange={(e) => setSite(e.target.value)}
+              value={siteId ?? ''}
+              onChange={(e) => setSiteId(e.target.value ? Number(e.target.value) : null)}
             >
               {sites.map((s) => (
-                <option key={s.name} value={s.name}>
-                  {s.name}
+                <option key={String(s.site_id)} value={String(s.site_id)}>
+                  {s.site_id < 0 ? `${s.label} (work site)` : s.label}
                 </option>
               ))}
             </select>
@@ -137,8 +150,7 @@ export default function SiteAdminEngagement() {
               onlineNow.map((u: any) => (
                 <div key={String(u.user_id)} className="flex items-center justify-between gap-3 rounded-2xl border p-3" style={{ borderColor: 'var(--hairline)', background: 'rgba(255,255,255,0.04)' }}>
                   <div>
-                    <div className="font-semibold">{u.name || u.email}</div>
-                    <div className="text-xs" style={{ color: 'var(--muted)' }}>{u.email}</div>
+                    <div className="font-semibold">{u.name || u.display_name || 'Unknown'}</div>
                   </div>
                   <div className="text-xs" style={{ color: 'var(--muted)' }}>{u.region_code || u.country_code || ''}</div>
                 </div>
