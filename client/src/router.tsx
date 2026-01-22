@@ -1,4 +1,6 @@
-import { Routes, Route, Navigate, Link } from 'react-router-dom';
+import { Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
+import { gaPageView } from './lib/analytics';
 import Landing from './pages/Landing';
 import Home from './pages/Home';
 import Main from './pages/Main';
@@ -122,6 +124,13 @@ function RequireSiteAdminSuper({ children }: { children: JSX.Element }) {
 
 
 export default function App() {
+  const location = useLocation();
+
+  useEffect(() => {
+    // Send SPA page_view on route changes
+    gaPageView(location.pathname + location.search);
+  }, [location.pathname, location.search]);
+
   return (
     <>
       <StartupSplash />

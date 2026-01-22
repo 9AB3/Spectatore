@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './router';
 import './index.css';
 import { registerSW } from './lib/sw';
+import { initAnalytics } from './lib/analytics';
 
 // Only register the PWA service worker on the app subdomain.
 // IMPORTANT: Do NOT register on localhost during dev, otherwise the SW cache
@@ -17,6 +18,9 @@ const isAppHost = host.startsWith('app.');
 const enableSwDev = String(import.meta.env.VITE_ENABLE_SW_DEV || '') === '1';
 
 if (isAppHost || (isLocal && enableSwDev)) registerSW();
+
+// Init GA4 (works for both spectatore.com and app subdomain)
+initAnalytics();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

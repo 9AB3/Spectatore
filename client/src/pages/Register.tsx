@@ -4,9 +4,16 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getDB } from '../lib/idb';
 import useToast from '../hooks/useToast';
+import { track } from '../lib/analytics';
 
 export default function Register() {
   const nav = useNavigate();
+
+  useEffect(() => {
+    track.signupStart('register_page');
+  }, []);
+
+  
   const { setMsg, Toast } = useToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -61,10 +68,12 @@ export default function Register() {
           'auth',
         );
         setMsg('Registered and signed in');
+        track.signupComplete('email');
         nav('/shift');
    } else {
   localStorage.setItem('spectatore-register-email', email);
   setMsg('Registered. Check your email for the confirmation code.');
+  track.signupComplete('email');
   nav('/ConfirmEmail');
 }
 

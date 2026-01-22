@@ -1,6 +1,7 @@
 import Header from '../components/Header';
 import { useNavigate } from 'react-router-dom';
 import useToast from '../hooks/useToast';
+import { track } from '../lib/analytics';
 import { useEffect, useState } from 'react';
 import { getDB } from '../lib/idb';
 import { api } from '../lib/api';
@@ -72,6 +73,7 @@ export default function Main() {
       // ignore local delete errors
     }
     setMsg('Tagged out');
+    track.tagOut();
     // Keep toast visible for at least 2s before route change
     setTimeout(() => nav('/Home'), 2000);
   }
@@ -122,6 +124,7 @@ export default function Main() {
     const db = await getDB();
     await db.put('shift', { date, dn }, 'current');
     setMsg('Entering portal');
+    track.startShift();
     setOpen(false);
     // Keep toast visible for at least 2s before route change
     setTimeout(() => nav('/Shift'), 2000);
@@ -243,7 +246,7 @@ export default function Main() {
             <button
               type="button"
               className="tv-tile min-w-[260px] w-[260px] md:w-[320px] text-left transition-transform"
-              onClick={() => nav('/Feedback')}
+              onClick={() => { track.feedbackOpen('main_tile'); nav('/Feedback'); }}
             >
               <div className="relative flex items-center justify-center h-full">
                 <span

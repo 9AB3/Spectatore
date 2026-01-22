@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { api } from '../lib/api';
+import { track } from '../lib/analytics';
 
 function getAppUrl() {
   // Prefer explicit env so you can preview locally
@@ -188,6 +189,7 @@ useEffect(() => {
         <a
           className="tv-pill"
           href={`${appUrl}/Register`}
+          onClick={() => track.signupStart('landing_cta')}
         >
           Create account
         </a>

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Header from '../components/Header';
 import { api } from '../lib/api';
+import { track } from '../lib/analytics';
 
 type CountryRow = { country_code: string; users: number };
 
@@ -190,6 +191,10 @@ function WorldChoroplethSvg({ data, maxUsers }: { data: MapDatum[]; maxUsers: nu
 }
 
 export default function Community() {
+  useEffect(() => {
+    track.openCommunity();
+  }, []);
+
   const [range, setRange] = useState<'today' | '7d' | '30d'>('today');
   const [mapMode, setMapMode] = useState<'world' | 'aus'>('world');
   const [loading, setLoading] = useState(true);

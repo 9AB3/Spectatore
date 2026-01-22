@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useToast from '../hooks/useToast';
 import { api } from '../lib/api';
+import { track } from '../lib/analytics';
 
 type ApprovedFeedbackRow = {
   id: number;
@@ -42,6 +43,10 @@ function Tabs({
 }
 
 export default function Feedback() {
+  useEffect(() => {
+    track.feedbackOpen('page');
+  }, []);
+
   const nav = useNavigate();
   const { setMsg, Toast } = useToast();
 

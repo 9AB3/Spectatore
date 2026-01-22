@@ -3,7 +3,7 @@ import TvTileRow from '../components/TvTileRow';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
-
+import { track } from '../lib/analytics';
 
 const fmtInt = (n: number | null | undefined) =>
   new Intl.NumberFormat('en-AU', { maximumFractionDigits: 0 }).format(Math.round(Number(n || 0)));
@@ -599,6 +599,10 @@ function ColumnChartDaily({
 
 
 export default function YouVsNetwork() {
+  useEffect(() => {
+    track.openYouVsCrew();
+  }, []);
+
   const location = useLocation();
   const fromRef = useRef<HTMLInputElement | null>(null);
   const toRef = useRef<HTMLInputElement | null>(null);

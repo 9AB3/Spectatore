@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import { track } from '../lib/analytics';
 
 type ShiftRow = { id: number; date: string; dn: string; totals_json: any; activities?: any[] };
 
@@ -1027,6 +1028,10 @@ type TrendDef = {
 };
 
 export default function YouVsYou() {
+  useEffect(() => {
+    track.openYouVsYou();
+  }, []);
+
   const nav = useNavigate();
   const [online, setOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [rowsAll, setRowsAll] = useState<ShiftRow[]>([]);

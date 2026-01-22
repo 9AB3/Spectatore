@@ -4,6 +4,7 @@ import { getDB } from '../lib/idb';
 import { api } from '../lib/api';
 import useToast from '../hooks/useToast';
 import { useNavigate } from 'react-router-dom';
+import { track } from '../lib/analytics';
 
 function parseYmd(ymd: string): Date {
   const [y, m, d] = ymd.split('-').map((v) => parseInt(v, 10));
@@ -329,6 +330,8 @@ export default function FinalizeShift() {
         method: 'POST',
         body: JSON.stringify(payload),
       });
+
+      track.finalizeShift();
 
       const db = await getDB();
       await db.clear('activities');
