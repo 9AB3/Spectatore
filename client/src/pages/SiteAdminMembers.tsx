@@ -85,6 +85,19 @@ export default function SiteAdminMembers() {
     }
   }
 
+  async function decline(user_id: number) {
+    try {
+      await api('/api/site-admin/members/decline', {
+        method: 'POST',
+        body: JSON.stringify({ user_id, site }),
+      });
+      setMsg('Declined');
+      await load();
+    } catch (e: any) {
+      setMsg(e?.message || 'Failed');
+    }
+  }
+
   async function searchMembers(q: string) {
     const qq = q.trim();
     setMemberQuery(q);
@@ -206,6 +219,9 @@ export default function SiteAdminMembers() {
                     </button>
                     <button className="btn" onClick={() => approve(r.user_id, 'admin')}>
                       Make admin
+                    </button>
+                    <button className="btn btn-outline" onClick={() => decline(r.user_id)}>
+                      Decline
                     </button>
                   </div>
                 </div>

@@ -75,11 +75,16 @@ router.post('/register', async (req, res) => {
     );
     const work_site_id = ws.rows?.[0]?.id;
 
+    // Canonical AU state for Community heatmap. (We keep users.state for legacy/backward compat.)
+    const allowedStates = new Set(['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT']);
+    const community_state = state ? String(state).trim().toUpperCase() : null;
+    const communityStateSafe = community_state && allowedStates.has(community_state) ? community_state : null;
+
     const inserted = await pool.query(
-      `INSERT INTO users (email, password_hash, site, state, name, confirm_code, work_site_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
+      `INSERT INTO users (email, password_hash, site, state, community_state, name, confirm_code, work_site_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        RETURNING id, email, name, is_admin, email_confirmed, work_site_id`,
-      [normEmail, hash, wsName || null, state || null, name, code, work_site_id || null],
+      [normEmail, hash, wsName || null, state || null, communityStateSafe, name, code, work_site_id || null],
     );
 
     const user = inserted.rows[0];

@@ -56,7 +56,7 @@ export default function Settings() {
   const [officialSites, setOfficialSites] = useState<Array<{ id: number; name: string }>>([]);
   const [showAddSite, setShowAddSite] = useState(false);
   const [joinSiteId, setJoinSiteId] = useState<number>(0);
-  const [joinRole, setJoinRole] = useState<'member' | 'validator' | 'admin'>('member');
+  // Join requests are always "member". Role changes happen after approval.
   const [siteConsent, setSiteConsent] = useState<{ site_id: number; site: string; role: 'member' | 'validator' | 'admin' } | null>(null);
   const [siteConsentTick, setSiteConsentTick] = useState(false);
   const [siteConsentScrolled, setSiteConsentScrolled] = useState(false);
@@ -291,7 +291,7 @@ export default function Settings() {
     }
   }
 
-  async function requestJoinWithConsent(site_id: number, role: 'member' | 'validator' | 'admin', consentVersion = 'v1') {
+  async function requestJoinWithConsent(site_id: number, consentVersion = 'v1') {
     try {
       if (!site_id) {
         setMsg('Please select a site');
@@ -300,12 +300,11 @@ export default function Settings() {
       await api('/api/user/site-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ site_id, role, site_consent_version: consentVersion }),
+        body: JSON.stringify({ site_id, site_consent_version: consentVersion }),
       });
       await refreshMe();
       setShowAddSite(false);
       setJoinSiteId(0);
-      setJoinRole('member');
       setMsg('Request sent');
     } catch (e: any) {
       console.error(e);
@@ -319,7 +318,7 @@ export default function Settings() {
       return;
     }
     const site = officialSites.find((s) => Number(s.id) === Number(joinSiteId))?.name || 'Site';
-    setSiteConsent({ site_id: joinSiteId, site, role: joinRole });
+    setSiteConsent({ site_id: joinSiteId, site, role: 'member' });
     setSiteConsentTick(false);
     setSiteConsentScrolled(false);
   }
@@ -496,18 +495,10 @@ export default function Settings() {
                       {workSiteSelect === 'Not in List' ? (
                         <input className="input mt-2" value={workSiteManual} onChange={(e) => setWorkSiteManual(e.target.value)} placeholder="Enter Work Site name" />
                       ) : null}
-                      <div className="text-xs opacity-60 mt-1">Where you work (persists across moves). Independent of subscribed dashboards.</div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm mb-1">Subscribed Site</label>
-                      <select className="input" value={activeSiteIdStr} onChange={(e) => setActiveSiteIdStr(e.target.value)}>
-                        <option value="0">Personal (no subscribed site)</option>
-                        {activeSites.map((s) => (
-                          <option key={String(s.site_id)} value={String(s.site_id)}>{s.site}</option>
-                        ))}
-                      </select>
-                      <div className="text-xs opacity-60 mt-1">Controls site-scoped equipment/locations and crew comparisons.</div>
+                      <div className="text-xs opacity-60 mt-1">
+                        Where you currently work (persists across moves). If your work site has an official Spectatore subscription, select it below as your
+                        <b> subscribed site</b> to enable official equipment/locations, validation and dashboards.
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -517,9 +508,23 @@ export default function Settings() {
                     <div>
                       <div className="text-xs tracking-wider uppercase opacity-70">Membership</div>
                       <div className="text-lg font-semibold mt-1">Access & roles</div>
-                      <div className="text-sm opacity-80 mt-1">Join sites, manage roles, and leave when needed.</div>
+                      <div className="text-sm opacity-80 mt-1">Join sites, set your active subscribed site, and leave when needed.</div>
                     </div>
                     <button type="button" className="btn" onClick={() => setShowAddSite(true)}>+ Add site</button>
+                  </div>
+
+                  <div className="mt-3">
+                    <label className="block text-sm mb-1">Active subscribed site</label>
+                    <select className="input" value={activeSiteIdStr} onChange={(e) => setActiveSiteIdStr(e.target.value)}>
+                      <option value="0">Personal (no subscribed site)</option>
+                      {activeSites.map((s) => (
+                        <option key={String(s.site_id)} value={String(s.site_id)}>{s.site}</option>
+                      ))}
+                    </select>
+                    <div className="text-xs opacity-60 mt-1">
+                      <b>Work site</b> = where you currently work. <b>Subscribed site</b> = the same work site <i>when that site has a paid Spectatore subscription</i>
+                      for official data management (site equipment/locations, validation, and dashboards).
+                    </div>
                   </div>
 
                   <div className="mt-3 text-sm">
@@ -700,13 +705,8 @@ export default function Settings() {
                 </select>
               </div>
 
-              <div>
-                <div className="opacity-70 mb-1">Role requested</div>
-                <select className="input w-full" value={joinRole} onChange={(e) => setJoinRole(e.target.value as any)}>
-                  <option value="member">Member</option>
-                  <option value="validator">Validator</option>
-                  <option value="admin">Admin</option>
-                </select>
+              <div className="text-xs opacity-70">
+                Requests are sent as <b>member</b>. Site admins can promote you to validator/admin after approval.
               </div>
 
               <div className="flex gap-2 justify-end pt-2">
@@ -716,7 +716,6 @@ export default function Settings() {
                   onClick={() => {
                     setShowAddSite(false);
                     setJoinSiteId(0);
-                    setJoinRole('member');
                   }}
                 >
                   Cancel
@@ -734,7 +733,7 @@ export default function Settings() {
           <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-2xl shadow-xl w-full max-w-2xl mx-4 p-5">
             <div className="text-lg font-semibold">Site data consent</div>
             <div className="text-sm text-slate-600 dark:text-slate-300 mt-1">
-              You&apos;re requesting access to <b>{siteConsent.site}</b> as <b>{siteConsent.role}</b>. Before we send the request,
+              You&apos;re requesting access to <b>{siteConsent.site}</b> as a <b>member</b>. Before we send the request,
               please review how site-linked data is shared.
             </div>
 
@@ -794,7 +793,7 @@ export default function Settings() {
                 onClick={async () => {
                   const c = siteConsent;
                   if (!c) return;
-                  await requestJoinWithConsent(c.site_id, c.role, 'v1');
+                  await requestJoinWithConsent(c.site_id, 'v1');
                   setSiteConsent(null);
                 }}
               >

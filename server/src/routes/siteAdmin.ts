@@ -645,7 +645,8 @@ router.get('/members', siteAdminMiddleware, async (req: any, res) => {
        FROM site_memberships m
        JOIN users u ON u.id = m.user_id
        JOIN admin_sites s ON s.id = m.site_id
-       WHERE s.name=$1`,
+       WHERE s.name=$1
+         AND LOWER(COALESCE(m.status,'')) <> 'declined'`,
       [site],
     );
 
@@ -664,7 +665,13 @@ router.get('/members', siteAdminMiddleware, async (req: any, res) => {
          NULL as approved_at
        FROM users u
        LEFT JOIN site_memberships m ON m.user_id=u.id AND m.site_id=(SELECT id FROM admin_sites WHERE lower(name)=lower($1))
-       WHERE u.site=$1 AND m.id IS NULL`,
+       WHERE u.site=$1
+         AND m.id IS NULL
+         AND u.id NOT IN (
+           SELECT user_id FROM site_memberships
+            WHERE site_id=(SELECT id FROM admin_sites WHERE lower(name)=lower($1))
+              AND LOWER(COALESCE(status,''))='declined'
+         )`,
       [site],
     );
 
@@ -770,6 +777,63 @@ router.post('/members/approve', siteAdminMiddleware, async (req: any, res) => {
           [user_id, site_id, site, role, req.user_id || null],
         );
       }
+    }
+
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
+// Decline a membership request so it disappears from the pending list.
+// This is only for admin-side declination of a user's "requested" access.
+router.post('/members/decline', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    if (!site || site === '*') return res.status(400).json({ ok: false, error: 'missing site' });
+    assertSiteAccess(req, site);
+
+    const user_id = Number(req.body?.user_id || 0);
+    if (!user_id) return res.status(400).json({ ok: false, error: 'missing user_id' });
+
+    await pool.query(`INSERT INTO admin_sites (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`, [site]);
+    const sid = await pool.query(`SELECT id FROM admin_sites WHERE lower(name)=lower($1)`, [site]);
+    const site_id = Number(sid.rows?.[0]?.id || 0);
+    if (!site_id) return res.status(500).json({ ok: false, error: 'failed to resolve site_id' });
+
+    // If there's an existing membership row, mark it declined. Otherwise, create a declined row
+    // so legacy "users.site" requests don't keep re-appearing.
+    const hasLegacySiteCol = await hasLegacySiteColumn(pool);
+    const upd = await pool.query(
+      `UPDATE site_memberships
+          SET status='declined'
+        WHERE user_id=$1 AND site_id=$2 AND LOWER(COALESCE(status,'')) IN ('requested','')`,
+      [user_id, site_id],
+    );
+    if ((upd.rowCount || 0) === 0) {
+      if (hasLegacySiteCol) {
+        await pool.query(
+          `INSERT INTO site_memberships (user_id, site_id, site_name, site, role, status, requested_at)
+           VALUES ($1,$2,$3,$3,'member','declined',NOW())
+           ON CONFLICT DO NOTHING`,
+          [user_id, site_id, site],
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO site_memberships (user_id, site_id, site_name, role, status, requested_at)
+           VALUES ($1,$2,$3,'member','declined',NOW())
+           ON CONFLICT DO NOTHING`,
+          [user_id, site_id, site],
+        );
+      }
+    }
+
+    // For legacy users where users.site was used as the request source, clear it so it doesn't keep showing.
+    try {
+      await pool.query(`UPDATE users SET site='default' WHERE id=$1 AND site=$2`, [user_id, site]);
+    } catch {
+      // ignore
     }
 
     return res.json({ ok: true });

@@ -550,8 +550,9 @@ router.post('/site-requests', authMiddleware, async (req: any, res) => {
   try {
     const user_id = req.user_id;
     const site_id = Number(req.body?.site_id || 0);
-    const roleRaw = String(req.body?.role || 'member').toLowerCase();
-    const role = roleRaw === 'admin' || roleRaw === 'validator' ? roleRaw : 'member';
+    // Requests to join a site are always "member".
+    // Role promotion (validator/admin) is managed by the site's admins after approval.
+    const role = 'member';
     const consentVersion = String(req.body?.site_consent_version || '').trim();
     if (!site_id) return res.status(400).json({ error: 'site_id required' });
 

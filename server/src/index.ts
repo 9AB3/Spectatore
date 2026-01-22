@@ -63,6 +63,17 @@ async function ensureDbColumns() {
 
     // Community / telemetry fields
     await pool.query(`ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS community_state TEXT`);
+    // If older rows only have users.state populated, copy it into the canonical community_state.
+    try {
+      await pool.query(
+        `UPDATE users
+            SET community_state = UPPER(NULLIF(state,''))
+          WHERE (community_state IS NULL OR community_state = '')
+            AND state IS NOT NULL AND state <> ''`,
+      );
+    } catch {
+      // ignore
+    }
     await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS country_code TEXT`);
     await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS region_code TEXT`);
   } catch (e:any) {
