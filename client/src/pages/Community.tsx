@@ -223,8 +223,9 @@ export default function Community() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between">
                           <div className="text-sm font-semibold">{r.country_code === 'UNK' ? 'Other/Unknown' : r.country_code}</div>
-                          <div className="text-sm font-bold">{fmtInt(r.users)}</div>
-                        </div>
+                          <div className="text-sm font-bold">{fmtInt(r.users)}
+            </div>
+          </div>
                         <div className="h-2 rounded-full mt-1" style={{ background: 'rgba(255,255,255,0.08)' }}>
                           <div
                             className="h-2 rounded-full"
@@ -306,7 +307,7 @@ export default function Community() {
                 ) : (
                   <div className="text-sm opacity-60">No data yet.</div>
                 )
-              ) : () : (
+              ) : (
                 auStates.length ? (
                   <div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -335,8 +336,9 @@ export default function Community() {
                 ) : (
                   <div className="text-sm opacity-60">Not enough Australia data yet.</div>
                 )
-              )}</div>
-          </div>
+	              )}
+	            </div>
+	          </div>
         </div>
 
         <div className="card p-4 mt-4">

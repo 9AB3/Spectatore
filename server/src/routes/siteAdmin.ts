@@ -724,14 +724,7 @@ router.post('/members/approve', siteAdminMiddleware, async (req: any, res) => {
 
     const hasLegacySiteCol = await hasLegacySiteColumn(pool);
 
-    // Determine current membership status so we can enforce safe transitions.
-    const curRow = await pool.query(`SELECT status, role, invite_status FROM site_memberships WHERE user_id=$1 AND site_id=$2 ORDER BY id DESC LIMIT 1`, [user_id, site_id]);
-    const curStatus = String(curRow.rows?.[0]?.status || '').toLowerCase();
-    const curInvite = String(curRow.rows?.[0]?.invite_status || '').toLowerCase();
-
-    // If this is a *request* approval, we always approve as MEMBER. Admin can promote later from Active list.
-    const requestedApprove = curStatus === 'requested';
-    const effectiveRole = requestedApprove ? 'member' : role;
+    // Decline a pending request/invite. (Role changes happen only after approval on the Active list.)
 
     // Guardrail: "invited" memberships must only transition via the user's accept/deny (or revoke).
     // Admins should NOT be able to approve an invited row (that would bypass user acceptance).
@@ -846,14 +839,6 @@ router.post('/members/decline', siteAdminMiddleware, async (req: any, res) => {
     // so legacy "users.site" requests don't keep re-appearing.
     const hasLegacySiteCol = await hasLegacySiteColumn(pool);
 
-    // Determine current membership status so we can enforce safe transitions.
-    const curRow = await pool.query(`SELECT status, role, invite_status FROM site_memberships WHERE user_id=$1 AND site_id=$2 ORDER BY id DESC LIMIT 1`, [user_id, site_id]);
-    const curStatus = String(curRow.rows?.[0]?.status || '').toLowerCase();
-    const curInvite = String(curRow.rows?.[0]?.invite_status || '').toLowerCase();
-
-    // If this is a *request* approval, we always approve as MEMBER. Admin can promote later from Active list.
-    const requestedApprove = curStatus === 'requested';
-    const effectiveRole = requestedApprove ? 'member' : role;
     const upd = await pool.query(
       `UPDATE site_memberships
           SET status='declined'
