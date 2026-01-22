@@ -43,12 +43,7 @@ export async function api(path: string, init: (Omit<RequestInit, "body"> & { bod
   if (path.startsWith('http')) {
     url = path;
   }
-  // Allow same-origin Vercel Functions for Community endpoints in production.
-  // (We only special-case Community because the rest of the API lives on Render.)
-  else if (path.startsWith('/api/community')) {
-    url = path;
-  }
-  // Dev mode: allow proxy paths like /api/...
+    // Dev mode: allow proxy paths like /api/...
   else if (IS_DEV && path.startsWith('/api')) {
     url = path;
   }
