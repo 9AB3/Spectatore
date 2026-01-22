@@ -23,7 +23,7 @@ import notificationsRoutes from './routes/notifications.js';
 import notificationPreferencesRoutes from './routes/notificationPreferences.js';
 import pushRoutes from './routes/push.js';
 import publicRoutes from './routes/public.js';
-import workSitesRoutes from './routes/workSites.js';
+import { startPresenceJobs } from './lib/presenceJobs.js';
 
 const isDev = process.env.NODE_ENV !== 'production';
 const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173')
@@ -76,6 +76,60 @@ async function ensureDbColumns() {
     }
     await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS country_code TEXT`);
     await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS region_code TEXT`);
+    await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS site_id INT`);
+
+    // Realtime presence + sessions (best-effort for existing DBs)
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS presence_current (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        site_id INTEGER NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+        last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+        country_code TEXT NULL,
+        region_code TEXT NULL,
+        user_agent TEXT NULL,
+        PRIMARY KEY (user_id, site_id)
+      )`,
+    );
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_site_last_seen ON presence_current(site_id, last_seen)`);
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS presence_sessions (
+        id BIGSERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        site_id INTEGER NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+        started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+        ended_at TIMESTAMPTZ NULL,
+        duration_seconds INTEGER NULL,
+        closed_reason TEXT NULL
+      )`,
+    );
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_presence_sessions_open ON presence_sessions(user_id, site_id) WHERE ended_at IS NULL`,
+    );
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_sessions_site_started ON presence_sessions(site_id, started_at)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_sessions_last_seen ON presence_sessions(last_seen)`);
+
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS presence_daily_stats (
+        day DATE NOT NULL,
+        site_id INTEGER NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+        dau INTEGER NOT NULL DEFAULT 0,
+        sessions INTEGER NOT NULL DEFAULT 0,
+        total_minutes INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (day, site_id)
+      )`,
+    );
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS presence_weekly_stats (
+        week_start DATE NOT NULL,
+        site_id INTEGER NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+        wau INTEGER NOT NULL DEFAULT 0,
+        sessions INTEGER NOT NULL DEFAULT 0,
+        total_minutes INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (week_start, site_id)
+      )`,
+    );
 
     // presence_events schema hardening (after DB resets/migrations):
     // - bucket should be TEXT (we store minute-bucket as ISO string)
@@ -193,6 +247,8 @@ async function initDb() {
 initDb()
   .then(async () => {
     await ensureDbColumns();
+    // Presence/engagement background jobs (safe no-op if tables are missing)
+    startPresenceJobs();
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`API listening on 0.0.0.0:${PORT}`);
     });
