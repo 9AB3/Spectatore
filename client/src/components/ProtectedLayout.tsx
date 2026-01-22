@@ -51,12 +51,22 @@ export default function ProtectedLayout() {
     let stopped = false;
     let timer: any = null;
 
+    // Cache site context between pings (refreshed on focus/visibility).
+    const getSiteId = async (): Promise<number | null> => {
+      try {
+        const db = await getDB();
+        const session: any = await db.get('session', 'auth');
+        const sid = session?.subscribed_site_id ?? session?.work_site_id ?? null;
+        const n = sid === null || sid === undefined || sid === '' ? null : Number(sid);
+        return n && Number.isFinite(n) ? n : null;
+      } catch {
+        return null;
+      }
+    };
+
     const send = async () => {
       try {
-        // Include site context so the server can maintain site-scoped realtime presence.
-        const db = await getDB();
-        const session = await db.get('session', 'auth');
-        const site_id = session?.subscribed_site_id ?? session?.work_site_id ?? null;
+        const site_id = await getSiteId();
         await api('/api/community/heartbeat', {
           method: 'POST',
           body: JSON.stringify({ site_id }),

@@ -260,37 +260,6 @@ export default function Main() {
                 />
               </div>
             </button>
-
-<button
-  type="button"
-  className="tv-tile min-w-[260px] w-[260px] md:w-[320px] text-left transition-transform"
-  onClick={() => nav('/Community')}
->
-  <div className="relative flex items-center justify-center h-full">
-    <span
-      className="absolute top-3 left-3 text-[11px] font-bold tracking-wide uppercase opacity-80"
-      style={{ color: 'var(--muted)' }}
-    >
-      Community
-    </span>
-    <div className="flex items-center justify-center w-full">
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="h-[160px] md:h-[190px] w-full object-contain select-none pointer-events-none opacity-90"
-        style={{ color: 'var(--text)' }}
-      >
-        <circle cx="12" cy="12" r="9" />
-        <path d="M3 12h18" />
-        <path d="M12 3c3.5 3 3.5 15 0 18" />
-        <path d="M12 3c-3.5 3-3.5 15 0 18" />
-      </svg>
-    </div>
-  </div>
-</button>
-
           </div>
         </div>
 

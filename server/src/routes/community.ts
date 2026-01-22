@@ -14,10 +14,12 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
     const userId = Number(req.user_id);
     if (!userId) return res.status(400).json({ error: 'missing user' });
 
-    // Optional site context. When provided we maintain realtime "online now" + sessions per site.
-    // site_id refers to admin_sites.id (official sites).
-    const rawSiteId = req.body?.site_id;
-    const siteId = rawSiteId != null && rawSiteId !== '' ? Number(rawSiteId) : null;
+    // Optional site context (used for Site Admin engagement only).
+    // Community stats remain country-level, but we store site_id so admins can see
+    // engagement for their sites.
+    const siteIdRaw = (req.body && (req.body.site_id ?? req.body.siteId)) as any;
+    const siteId = siteIdRaw === null || siteIdRaw === undefined || siteIdRaw === '' ? null : Number(siteIdRaw);
+    const site_id: number | null = siteId && Number.isFinite(siteId) ? siteId : null;
 
     // Country is derived from trusted edge headers where available (Cloudflare/Vercel/etc).
     // We intentionally do NOT store raw IPs. If no country header is present we store NULL.
@@ -64,19 +66,29 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
 
         // Note: we intentionally do NOT store raw IPs. We store only country (coarse) + minute buckets.
 
-        try {
+    // 1) Always write the lightweight community event (minute bucket)
+    try {
       await pool.query(
         `
-      INSERT INTO presence_events (user_id, bucket, ts, meta, country_code, region_code, user_agent, site_id)
-      VALUES ($1, to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'), now(), '{}'::jsonb, $2, $3, $4, $5)
+      INSERT INTO presence_events (user_id, site_id, bucket, ts, meta, country_code, region_code, user_agent)
+      VALUES (
+        $1,
+        $2,
+        to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'),
+        now(),
+        '{}'::jsonb,
+        $3,
+        $4,
+        $5
+      )
       ON CONFLICT (user_id, bucket) DO UPDATE
         SET ts = EXCLUDED.ts,
+            site_id = COALESCE(EXCLUDED.site_id, presence_events.site_id),
             country_code = COALESCE(EXCLUDED.country_code, presence_events.country_code),
             region_code = COALESCE(EXCLUDED.region_code, presence_events.region_code),
-            user_agent = COALESCE(EXCLUDED.user_agent, presence_events.user_agent),
-            site_id = COALESCE(EXCLUDED.site_id, presence_events.site_id)
+            user_agent = COALESCE(EXCLUDED.user_agent, presence_events.user_agent)
       `,
-        [userId, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300), siteId],
+        [userId, site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
       );
     } catch (e: any) {
       // If the table exists without the expected unique constraint/index (older DBs),
@@ -85,49 +97,60 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
       if (msg.includes('no unique or exclusion constraint') || msg.includes('ON CONFLICT')) {
         await pool.query(
           `
-          INSERT INTO presence_events (user_id, bucket, ts, meta, country_code, region_code, user_agent, site_id)
-          SELECT $1, to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'), now(), '{}'::jsonb, $2, $3, $4, $5
+          INSERT INTO presence_events (user_id, site_id, bucket, ts, meta, country_code, region_code, user_agent)
+          SELECT $1, $2,
+                 to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'),
+                 now(),
+                 '{}'::jsonb,
+                 $3, $4, $5
           WHERE NOT EXISTS (
             SELECT 1 FROM presence_events
             WHERE user_id=$1 AND bucket=to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"')
           )
           `,
-          [userId, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300), siteId],
+          [userId, site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
         );
       } else {
         throw e;
       }
     }
 
-    // Maintain realtime presence + sessions when we have a valid site_id.
-    if (siteId && Number.isFinite(siteId)) {
-      try {
-        await pool.query(
-          `
-          INSERT INTO presence_current (user_id, site_id, last_seen, country_code, region_code, user_agent)
-          VALUES ($1, $2, now(), $3, $4, $5)
-          ON CONFLICT (user_id, site_id) DO UPDATE
-            SET last_seen = now(),
-                country_code = COALESCE(EXCLUDED.country_code, presence_current.country_code),
-                region_code = COALESCE(EXCLUDED.region_code, presence_current.region_code),
-                user_agent = COALESCE(EXCLUDED.user_agent, presence_current.user_agent)
-          `,
-          [userId, siteId, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
-        );
+    // 2) If we have a site context, also upsert realtime tables for Site Admin engagement.
+    if (site_id) {
+      // presence_current = last heartbeat per user+site
+      await pool.query(
+        `
+        INSERT INTO presence_current (user_id, site_id, last_seen, country_code, region_code, user_agent)
+        VALUES ($1, $2, now(), $3, $4, $5)
+        ON CONFLICT (user_id, site_id) DO UPDATE
+          SET last_seen = EXCLUDED.last_seen,
+              country_code = COALESCE(EXCLUDED.country_code, presence_current.country_code),
+              region_code = COALESCE(EXCLUDED.region_code, presence_current.region_code),
+              user_agent = COALESCE(EXCLUDED.user_agent, presence_current.user_agent)
+        `,
+        [userId, site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
+      );
 
-        // Ensure a single open session per user+site
-        await pool.query(
-          `
-          INSERT INTO presence_sessions (user_id, site_id, started_at, last_seen)
-          VALUES ($1, $2, now(), now())
-          ON CONFLICT (user_id, site_id) WHERE ended_at IS NULL
-          DO UPDATE SET last_seen = now()
-          `,
-          [userId, siteId],
-        );
-      } catch {
-        // Non-fatal (older DBs may not have these tables yet)
-      }
+      // presence_sessions = one open session per user+site (update last_seen)
+      await pool.query(
+        `
+        UPDATE presence_sessions
+           SET last_seen = now()
+         WHERE user_id=$1 AND site_id=$2 AND ended_at IS NULL
+        `,
+        [userId, site_id],
+      );
+
+      await pool.query(
+        `
+        INSERT INTO presence_sessions (user_id, site_id, started_at, last_seen)
+        SELECT $1, $2, now(), now()
+        WHERE NOT EXISTS (
+          SELECT 1 FROM presence_sessions WHERE user_id=$1 AND site_id=$2 AND ended_at IS NULL
+        )
+        `,
+        [userId, site_id],
+      );
     }
 
     return res.json({ ok: true });
@@ -150,8 +173,6 @@ router.get('/public-stats', authMiddleware, async (req: any, res) => {
     const delayMinutes = 0;
     const liveWindowMinutes = 15;
 
-    // NOTE: presence_events.bucket is stored as TEXT (minute bucket string) for compatibility.
-    // For time-window queries we MUST use the real timestamp column `ts`.
     const end = `now() - interval '${delayMinutes} minutes'`;
     const liveStart = `now() - interval '${delayMinutes + liveWindowMinutes} minutes'`;
     const start24h = `now() - interval '${24 * 60 + delayMinutes} minutes'`;
@@ -159,6 +180,9 @@ router.get('/public-stats', authMiddleware, async (req: any, res) => {
     const start30d = `now() - interval '${30 * 24 * 60 + delayMinutes} minutes'`;
 
     const startExpr = range === '7d' ? start7d : range === '30d' ? start30d : start24h;
+
+    // IMPORTANT: presence_events.bucket is a TEXT minute key, but presence_events.ts is the real timestamp.
+    // All time windows must use ts.
 
     // Live now (unique users in the live window)
     const liveQ = await pool.query(

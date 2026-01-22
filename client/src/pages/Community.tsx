@@ -35,32 +35,47 @@ function intensityFor(users: number, maxUsers: number) {
 }
 
 function WorldChoroplethSvg({ data, maxUsers }: { data: MapDatum[]; maxUsers: number }) {
+  // The app uses a light theme on desktop, and a darker theme on many phones.
+  // This simple map is SVG-only (no external libraries), so we adapt the ink color
+  // based on the user's preferred color scheme so it stays visible.
+  const prefersDark = useMemo(() => {
+    try {
+      return !!window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    } catch {
+      return false;
+    }
+  }, []);
   const byCC = useMemo(() => {
     const m = new Map<string, number>();
     for (const r of data || []) m.set((r.country_code || 'UNK').toUpperCase(), Number(r.users || 0));
     return m;
   }, [data]);
 
+  const ink = prefersDark ? '255,255,255' : '0,0,0';
+  const backdropFill = prefersDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
   const fillFor = (cc: string) => {
     const u = byCC.get(cc) || 0;
     const k = intensityFor(u, maxUsers);
-    return u > 0 ? `rgba(255,255,255,${0.10 + k * 0.55})` : 'rgba(255,255,255,0.06)';
+    return u > 0 ? `rgba(${ink},${0.10 + k * 0.55})` : `rgba(${ink},0.06)`;
   };
 
-  const stroke = 'rgba(255,255,255,0.10)';
+  const stroke = prefersDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)';
 
   return (
-    <div className="w-full overflow-hidden rounded-2xl" style={{ border: '1px solid rgba(255,255,255,0.10)' }}>
+    <div
+      className="w-full overflow-hidden rounded-2xl"
+      style={{ border: prefersDark ? '1px solid rgba(255,255,255,0.10)' : '1px solid rgba(0,0,0,0.10)' }}
+    >
       <svg viewBox="0 0 1000 500" className="w-full h-auto block" role="img" aria-label="World usage heat map">
-        <rect x="0" y="0" width="1000" height="500" fill="rgba(255,255,255,0.03)" />
+        <rect x="0" y="0" width="1000" height="500" fill={prefersDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)'} />
 
         {/* Subtle continents backdrop */}
-        <g opacity="0.55">
-          <path d="M65,165 C95,120 160,95 235,110 C300,120 360,155 380,190 C400,225 380,270 330,285 C285,295 235,300 195,280 C150,260 95,230 65,195 Z" fill="rgba(255,255,255,0.05)" />
-          <path d="M370,290 C395,270 435,265 465,285 C495,305 505,345 485,380 C465,415 430,430 400,410 C370,390 355,325 370,290 Z" fill="rgba(255,255,255,0.05)" />
-          <path d="M430,140 C480,100 560,85 640,95 C720,105 790,130 860,170 C910,200 930,245 900,280 C870,315 820,315 760,305 C690,293 640,315 585,325 C535,333 485,320 455,290 C420,255 405,180 430,140 Z" fill="rgba(255,255,255,0.05)" />
-          <path d="M520,330 C565,310 635,315 700,345 C760,373 785,420 760,450 C735,478 675,480 620,460 C565,440 510,385 520,330 Z" fill="rgba(255,255,255,0.05)" />
-          <path d="M760,335 C790,320 840,320 875,340 C910,360 920,395 900,420 C880,445 835,452 800,435 C770,420 740,365 760,335 Z" fill="rgba(255,255,255,0.05)" />
+        <g opacity={prefersDark ? 0.55 : 0.30}>
+          <path d="M65,165 C95,120 160,95 235,110 C300,120 360,155 380,190 C400,225 380,270 330,285 C285,295 235,300 195,280 C150,260 95,230 65,195 Z" fill={backdropFill} />
+          <path d="M370,290 C395,270 435,265 465,285 C495,305 505,345 485,380 C465,415 430,430 400,410 C370,390 355,325 370,290 Z" fill={backdropFill} />
+          <path d="M430,140 C480,100 560,85 640,95 C720,105 790,130 860,170 C910,200 930,245 900,280 C870,315 820,315 760,305 C690,293 640,315 585,325 C535,333 485,320 455,290 C420,255 405,180 430,140 Z" fill={backdropFill} />
+          <path d="M520,330 C565,310 635,315 700,345 C760,373 785,420 760,450 C735,478 675,480 620,460 C565,440 510,385 520,330 Z" fill={backdropFill} />
+          <path d="M760,335 C790,320 840,320 875,340 C910,360 920,395 900,420 C880,445 835,452 800,435 C770,420 740,365 760,335 Z" fill={backdropFill} />
         </g>
 
         {/* Highlightable country shapes (coarse, map-like) */}
@@ -92,8 +107,18 @@ function WorldChoroplethSvg({ data, maxUsers }: { data: MapDatum[]; maxUsers: nu
         {/* Unknown/Other */}
         {byCC.get('UNK') ? (
           <g>
-            <rect x="18" y="18" width="130" height="34" rx="10" fill="rgba(0,0,0,0.25)" stroke="rgba(255,255,255,0.10)" />
-            <text x="30" y="40" fontSize="14" fill="rgba(255,255,255,0.85)">UNK: {fmtInt(byCC.get('UNK') || 0)}</text>
+            <rect
+              x="18"
+              y="18"
+              width="130"
+              height="34"
+              rx="10"
+              fill={prefersDark ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.75)'}
+              stroke={prefersDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'}
+            />
+            <text x="30" y="40" fontSize="14" fill={prefersDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)'}>
+              UNK: {fmtInt(byCC.get('UNK') || 0)}
+            </text>
           </g>
         ) : null}
       </svg>

@@ -138,12 +138,12 @@ export default function BottomNav() {
           badge={incomingCount}
           icon={<img src={crewIcon} className="h-6 w-6 nav-icon" alt="Crew" />}
         />
-        <Item to="/Community" label="Community" icon={<IconGlobe className="h-6 w-6" />} />
         <Item
           to="/You"
           label="You"
           icon={<img src={youIcon} className="h-6 w-6 nav-icon" alt="You" />}
         />
+        <Item to="/Community" label="Community" icon={<IconGlobe className="h-6 w-6" />} />
         <Item
           to="/Settings"
           label="Settings"
