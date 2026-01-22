@@ -63,7 +63,7 @@ export default function SiteAdminMembers() {
     try {
       await api('/api/site-admin/members/approve', {
         method: 'POST',
-        body: JSON.stringify({ user_id, site, role }),
+        body: JSON.stringify({ user_id, site }),
       });
       setMsg('Updated');
       await load();

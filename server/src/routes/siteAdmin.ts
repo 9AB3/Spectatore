@@ -716,6 +716,9 @@ router.post('/members/approve', siteAdminMiddleware, async (req: any, res) => {
       return res.status(400).json({ ok: false, error: 'invalid role' });
     }
 
+    // Approval always activates as 'member'. Role changes happen via /members/set-role for active members.
+    const effectiveRole: 'member' = 'member';
+
     // Ensure site exists, then resolve site_id
     await pool.query(`INSERT INTO admin_sites (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`, [site]);
     const sid = await pool.query(`SELECT id FROM admin_sites WHERE lower(name)=lower($1)`, [site]);
@@ -736,7 +739,7 @@ router.post('/members/approve', siteAdminMiddleware, async (req: any, res) => {
           LIMIT 1`,
         [user_id, site_id],
       );
-      const curStatus = String(curRow.rows?.[0]?.status || '');
+      const curStatus = String(cur.rows?.[0]?.status || '');
       if (curStatus === 'invited') {
         return res.status(400).json({ ok: false, error: 'cannot approve invited membership (awaiting user response)' });
       }
@@ -785,37 +788,6 @@ router.post('/members/approve', siteAdminMiddleware, async (req: any, res) => {
   } catch (e) {
     return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
   }
-
-// Decline a membership request (removes it from the Requests list)
-router.post('/members/decline', siteAdminMiddleware, async (req: any, res) => {
-  try {
-    assertManager(req);
-    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
-    if (!site || site === '*') return res.status(400).json({ ok: false, error: 'missing site' });
-    assertSiteAccess(req, site);
-
-    const user_id = Number(req.body?.user_id || 0);
-    if (!user_id) return res.status(400).json({ ok: false, error: 'missing user_id' });
-
-    // Ensure site exists, then resolve site_id
-    await pool.query(`INSERT INTO admin_sites (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`, [site]);
-    const sid = await pool.query(`SELECT id FROM admin_sites WHERE lower(name)=lower($1)`, [site]);
-    const site_id = Number(sid.rows?.[0]?.id || 0);
-    if (!site_id) return res.status(500).json({ ok: false, error: 'failed to resolve site_id' });
-
-    // Only decline requests (do not delete active memberships)
-    await pool.query(
-      `DELETE FROM site_memberships WHERE user_id=$1 AND site_id=$2 AND status='requested'`,
-      [user_id, site_id],
-    );
-
-    return res.json({ ok: true });
-  } catch (e: any) {
-    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'Failed to decline request' });
-  }
-});
-
-
 });
 
 // Decline a membership request so it disappears from the pending list.

@@ -171,6 +171,21 @@ async function approveMember(user_id: number) {
     }
   }
 
+
+async function setRole(user_id: number, role: 'member' | 'validator' | 'admin') {
+  try {
+    await api('/api/site-admin/members/set-role', {
+      method: 'POST',
+      body: { site, user_id, role },
+    });
+    setMsg('Updated');
+    await loadMembers(site);
+  } catch (e: any) {
+    setMsg(e?.message || 'Failed');
+  }
+}
+
+
   // While checking permissions, render nothing.
   if (canManage === null) return null;
   // If user lacks manage rights, the effect will redirect; render nothing to avoid flashing.
@@ -323,7 +338,7 @@ async function approveMember(user_id: number) {
                   </div>
                 ) : (
                   <div className="flex gap-2 flex-wrap items-center">
-                    <select className="border rounded-xl px-3 py-2 text-sm bg-[color:var(--card)]" value={r.role} onChange={(e) => approve(r.user_id, e.target.value as any)}>
+                    <select className="border rounded-xl px-3 py-2 text-sm bg-[color:var(--card)]" value={r.role} onChange={(e) => setRole(r.user_id, e.target.value as any)}>
                       <option value="member">Member</option>
                       <option value="validator">Validator</option>
                       <option value="admin">Admin</option>
@@ -345,3 +360,5 @@ async function approveMember(user_id: number) {
     </div>
   );
 }
+
+
