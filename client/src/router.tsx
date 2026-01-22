@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { gaPageView } from './lib/analytics';
 import Landing from './pages/Landing';
 import Home from './pages/Home';
