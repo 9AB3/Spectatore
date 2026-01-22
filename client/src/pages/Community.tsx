@@ -25,6 +25,82 @@ function flagEmoji(cc: string) {
   return String.fromCodePoint(first, second);
 }
 
+
+type MapDatum = { country_code: string; users: number };
+
+function intensityFor(users: number, maxUsers: number) {
+  const u = Number(users || 0);
+  const m = Math.max(1, Number(maxUsers || 1));
+  return Math.max(0.12, Math.min(1, u / m));
+}
+
+function WorldChoroplethSvg({ data, maxUsers }: { data: MapDatum[]; maxUsers: number }) {
+  const byCC = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of data || []) m.set((r.country_code || 'UNK').toUpperCase(), Number(r.users || 0));
+    return m;
+  }, [data]);
+
+  const fillFor = (cc: string) => {
+    const u = byCC.get(cc) || 0;
+    const k = intensityFor(u, maxUsers);
+    return u > 0 ? `rgba(255,255,255,${0.10 + k * 0.55})` : 'rgba(255,255,255,0.06)';
+  };
+
+  const stroke = 'rgba(255,255,255,0.10)';
+
+  return (
+    <div className="w-full overflow-hidden rounded-2xl" style={{ border: '1px solid rgba(255,255,255,0.10)' }}>
+      <svg viewBox="0 0 1000 500" className="w-full h-auto block" role="img" aria-label="World usage heat map">
+        <rect x="0" y="0" width="1000" height="500" fill="rgba(255,255,255,0.03)" />
+
+        {/* Subtle continents backdrop */}
+        <g opacity="0.55">
+          <path d="M65,165 C95,120 160,95 235,110 C300,120 360,155 380,190 C400,225 380,270 330,285 C285,295 235,300 195,280 C150,260 95,230 65,195 Z" fill="rgba(255,255,255,0.05)" />
+          <path d="M370,290 C395,270 435,265 465,285 C495,305 505,345 485,380 C465,415 430,430 400,410 C370,390 355,325 370,290 Z" fill="rgba(255,255,255,0.05)" />
+          <path d="M430,140 C480,100 560,85 640,95 C720,105 790,130 860,170 C910,200 930,245 900,280 C870,315 820,315 760,305 C690,293 640,315 585,325 C535,333 485,320 455,290 C420,255 405,180 430,140 Z" fill="rgba(255,255,255,0.05)" />
+          <path d="M520,330 C565,310 635,315 700,345 C760,373 785,420 760,450 C735,478 675,480 620,460 C565,440 510,385 520,330 Z" fill="rgba(255,255,255,0.05)" />
+          <path d="M760,335 C790,320 840,320 875,340 C910,360 920,395 900,420 C880,445 835,452 800,435 C770,420 740,365 760,335 Z" fill="rgba(255,255,255,0.05)" />
+        </g>
+
+        {/* Highlightable country shapes (coarse, map-like) */}
+        {/* Canada */}
+        <path d="M120,135 L170,115 L250,120 L295,140 L260,160 L175,165 L120,150 Z" fill={fillFor('CA')} stroke={stroke} strokeWidth="1">
+          <title>{`CA: ${fmtInt(byCC.get('CA') || 0)}`}</title>
+        </path>
+
+        {/* United States */}
+        <path d="M130,170 L180,165 L260,170 L290,190 L260,210 L190,215 L135,200 Z" fill={fillFor('US')} stroke={stroke} strokeWidth="1">
+          <title>{`US: ${fmtInt(byCC.get('US') || 0)}`}</title>
+        </path>
+
+        {/* United Kingdom */}
+        <path d="M500,175 L512,170 L520,182 L512,195 L500,190 Z" fill={fillFor('GB')} stroke={stroke} strokeWidth="1">
+          <title>{`GB: ${fmtInt(byCC.get('GB') || 0)}`}</title>
+        </path>
+
+        {/* New Zealand */}
+        <path d="M885,385 L898,380 L905,392 L895,405 L883,398 Z" fill={fillFor('NZ')} stroke={stroke} strokeWidth="1">
+          <title>{`NZ: ${fmtInt(byCC.get('NZ') || 0)}`}</title>
+        </path>
+
+        {/* Australia */}
+        <path d="M780,360 L830,350 L880,360 L900,395 L875,430 L820,440 L780,420 L765,390 Z" fill={fillFor('AU')} stroke={stroke} strokeWidth="1">
+          <title>{`AU: ${fmtInt(byCC.get('AU') || 0)}`}</title>
+        </path>
+
+        {/* Unknown/Other */}
+        {byCC.get('UNK') ? (
+          <g>
+            <rect x="18" y="18" width="130" height="34" rx="10" fill="rgba(0,0,0,0.25)" stroke="rgba(255,255,255,0.10)" />
+            <text x="30" y="40" fontSize="14" fill="rgba(255,255,255,0.85)">UNK: {fmtInt(byCC.get('UNK') || 0)}</text>
+          </g>
+        ) : null}
+      </svg>
+    </div>
+  );
+}
+
 export default function Community() {
   const [range, setRange] = useState<'today' | '7d' | '30d'>('today');
   const [mapMode, setMapMode] = useState<'world' | 'aus'>('world');
@@ -199,32 +275,38 @@ export default function Community() {
                 <div className="text-sm opacity-60">Loading…</div>
               ) : mapMode === 'world' ? (
                 map.length ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {map.slice(0, 36).map((r) => {
-                      const intensity = Math.max(0.15, Math.min(1, Number(r.users || 0) / maxUsers));
-                      return (
-                        <div
-                          key={r.country_code}
-                          className="rounded-xl p-3 flex items-center justify-between gap-2"
-                          style={{
-                            background: `rgba(255,255,255,${0.06 + intensity * 0.18})`,
-                            border: '1px solid rgba(255,255,255,0.08)',
-                          }}
-                          title={`${r.country_code}: ${fmtInt(r.users)}`}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className="text-lg">{flagEmoji(r.country_code)}</div>
-                            <div className="text-sm font-semibold truncate">{r.country_code}</div>
+                  <div>
+                    <WorldChoroplethSvg data={map} maxUsers={maxUsers} />
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3">
+                      {map.slice(0, 12).map((r) => {
+                        const intensity = Math.max(0.15, Math.min(1, Number(r.users || 0) / maxUsers));
+                        return (
+                          <div
+                            key={r.country_code}
+                            className="rounded-xl p-3 flex items-center justify-between gap-2"
+                            style={{
+                              background: `rgba(255,255,255,${0.06 + intensity * 0.18})`,
+                              border: '1px solid rgba(255,255,255,0.08)',
+                            }}
+                            title={`${r.country_code}: ${fmtInt(r.users)}`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="text-lg">{flagEmoji(r.country_code)}</div>
+                              <div className="text-sm font-semibold truncate">{r.country_code}</div>
+                            </div>
+                            <div className="text-sm font-semibold">{fmtInt(r.users)}</div>
                           </div>
-                          <div className="text-sm font-semibold">{fmtInt(r.users)}</div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
+                    <div className="text-xs opacity-60 mt-3">
+                      Map highlights key countries (starting with AU). The list shows the top countries in this range.
+                    </div>
                   </div>
                 ) : (
                   <div className="text-sm opacity-60">No data yet.</div>
                 )
-              ) : (
+              ) : () : (
                 auStates.length ? (
                   <div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
