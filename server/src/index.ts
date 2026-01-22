@@ -23,6 +23,7 @@ import notificationsRoutes from './routes/notifications.js';
 import notificationPreferencesRoutes from './routes/notificationPreferences.js';
 import pushRoutes from './routes/push.js';
 import publicRoutes from './routes/public.js';
+import workSitesRoutes from './routes/workSites.js';
 import { startPresenceJobs } from './lib/presenceJobs.js';
 
 const isDev = process.env.NODE_ENV !== 'production';

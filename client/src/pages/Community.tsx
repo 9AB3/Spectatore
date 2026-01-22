@@ -35,92 +35,155 @@ function intensityFor(users: number, maxUsers: number) {
 }
 
 function WorldChoroplethSvg({ data, maxUsers }: { data: MapDatum[]; maxUsers: number }) {
-  // The app uses a light theme on desktop, and a darker theme on many phones.
-  // This simple map is SVG-only (no external libraries), so we adapt the ink color
-  // based on the user's preferred color scheme so it stays visible.
-  const prefersDark = useMemo(() => {
-    try {
-      return !!window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-    } catch {
-      return false;
-    }
-  }, []);
   const byCC = useMemo(() => {
     const m = new Map<string, number>();
     for (const r of data || []) m.set((r.country_code || 'UNK').toUpperCase(), Number(r.users || 0));
     return m;
   }, [data]);
 
-  const ink = prefersDark ? '255,255,255' : '0,0,0';
-  const backdropFill = prefersDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
-  const fillFor = (cc: string) => {
-    const u = byCC.get(cc) || 0;
-    const k = intensityFor(u, maxUsers);
-    return u > 0 ? `rgba(${ink},${0.10 + k * 0.55})` : `rgba(${ink},0.06)`;
+  // Very lightweight centroid hints (coarse, but gives a recognisable "users on the map" feel)
+  const CENTROIDS: Record<string, { x: number; y: number }> = {
+    CA: { x: 205, y: 150 },
+    US: { x: 220, y: 215 },
+    MX: { x: 235, y: 265 },
+    BR: { x: 330, y: 365 },
+    AR: { x: 340, y: 425 },
+    CL: { x: 305, y: 420 },
+
+    GB: { x: 485, y: 175 },
+    IE: { x: 470, y: 180 },
+    FR: { x: 505, y: 200 },
+    DE: { x: 525, y: 185 },
+    ES: { x: 495, y: 225 },
+    IT: { x: 530, y: 230 },
+    NL: { x: 520, y: 175 },
+    SE: { x: 540, y: 150 },
+    NO: { x: 525, y: 145 },
+    PL: { x: 555, y: 190 },
+    RU: { x: 700, y: 140 },
+
+    EG: { x: 560, y: 265 },
+    NG: { x: 520, y: 330 },
+    ZA: { x: 560, y: 430 },
+
+    TR: { x: 585, y: 230 },
+    SA: { x: 610, y: 300 },
+    AE: { x: 635, y: 290 },
+
+    IN: { x: 670, y: 285 },
+    PK: { x: 645, y: 275 },
+    BD: { x: 700, y: 295 },
+    TH: { x: 735, y: 315 },
+    VN: { x: 760, y: 320 },
+    MY: { x: 760, y: 345 },
+    SG: { x: 772, y: 352 },
+    ID: { x: 800, y: 375 },
+    PH: { x: 820, y: 310 },
+
+    CN: { x: 770, y: 245 },
+    KR: { x: 835, y: 235 },
+    JP: { x: 875, y: 235 },
+
+    AU: { x: 835, y: 405 },
+    NZ: { x: 915, y: 440 },
   };
 
-  const stroke = prefersDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)';
+  const entries = useMemo(() => {
+    const out: Array<{ cc: string; users: number; x: number; y: number }> = [];
+    for (const [cc, users] of byCC.entries()) {
+      const c = CENTROIDS[cc];
+      if (!c) continue;
+      out.push({ cc, users, x: c.x, y: c.y });
+    }
+    // Prefer showing the most active countries if many exist
+    out.sort((a, b) => b.users - a.users);
+    return out.slice(0, 18);
+  }, [byCC]);
+
+  const rFor = (users: number) => {
+    const u = Math.max(0, Number(users || 0));
+    // No glow: just slightly larger icon for more users
+    return Math.min(16, 8 + u * 1.6);
+  };
+
+  const ringFor = (users: number) => {
+    // subtle ring, not a glow
+    const k = intensityFor(Number(users || 0), maxUsers);
+    return `rgba(176,132,44,${0.25 + k * 0.35})`;
+  };
+
+  const markerFill = 'rgba(176,132,44,0.95)';
 
   return (
-    <div
-      className="w-full overflow-hidden rounded-2xl"
-      style={{ border: prefersDark ? '1px solid rgba(255,255,255,0.10)' : '1px solid rgba(0,0,0,0.10)' }}
-    >
-      <svg viewBox="0 0 1000 500" className="w-full h-auto block" role="img" aria-label="World usage heat map">
-        <rect x="0" y="0" width="1000" height="500" fill={prefersDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)'} />
+    <div className="w-full overflow-hidden rounded-2xl" style={{ border: '1px solid rgba(0,0,0,0.08)' }}>
+      <svg viewBox="0 0 1000 500" className="w-full h-auto block" role="img" aria-label="World usage map">
+        <rect x="0" y="0" width="1000" height="500" fill="rgba(0,0,0,0.02)" />
 
-        {/* Subtle continents backdrop */}
-        <g opacity={prefersDark ? 0.55 : 0.30}>
-          <path d="M65,165 C95,120 160,95 235,110 C300,120 360,155 380,190 C400,225 380,270 330,285 C285,295 235,300 195,280 C150,260 95,230 65,195 Z" fill={backdropFill} />
-          <path d="M370,290 C395,270 435,265 465,285 C495,305 505,345 485,380 C465,415 430,430 400,410 C370,390 355,325 370,290 Z" fill={backdropFill} />
-          <path d="M430,140 C480,100 560,85 640,95 C720,105 790,130 860,170 C910,200 930,245 900,280 C870,315 820,315 760,305 C690,293 640,315 585,325 C535,333 485,320 455,290 C420,255 405,180 430,140 Z" fill={backdropFill} />
-          <path d="M520,330 C565,310 635,315 700,345 C760,373 785,420 760,450 C735,478 675,480 620,460 C565,440 510,385 520,330 Z" fill={backdropFill} />
-          <path d="M760,335 C790,320 840,320 875,340 C910,360 920,395 900,420 C880,445 835,452 800,435 C770,420 740,365 760,335 Z" fill={backdropFill} />
+        {/* World silhouette (simple + recognisable, works well in light UI cards) */}
+        <g className="text-black/70 dark:text-white/20">
+          {/* North America */}
+          <path
+            d="M140,130 L210,105 L295,120 L330,155 L310,190 L275,205 L240,200 L215,215 L175,200 L150,175 Z"
+            fill="currentColor"
+            opacity="0.55"
+          />
+          {/* Greenland */}
+          <path d="M310,95 L350,85 L385,95 L370,120 L335,120 Z" fill="currentColor" opacity="0.35" />
+          {/* South America */}
+          <path
+            d="M300,250 L340,255 L365,285 L360,320 L350,360 L330,415 L305,420 L295,385 L305,340 L295,300 Z"
+            fill="currentColor"
+            opacity="0.55"
+          />
+          {/* Europe */}
+          <path
+            d="M470,160 L510,150 L540,160 L545,185 L520,200 L485,195 L465,180 Z"
+            fill="currentColor"
+            opacity="0.55"
+          />
+          {/* Africa */}
+          <path
+            d="M520,230 L565,240 L590,275 L585,320 L565,365 L535,410 L505,395 L490,350 L495,295 Z"
+            fill="currentColor"
+            opacity="0.55"
+          />
+          {/* Asia */}
+          <path
+            d="M545,155 L620,140 L710,150 L800,185 L860,225 L845,265 L780,265 L735,245 L695,265 L645,255 L610,275 L580,255 L560,220 Z"
+            fill="currentColor"
+            opacity="0.55"
+          />
+          {/* SE Asia islands (hint) */}
+          <path d="M770,305 L810,315 L825,335 L790,345 L760,330 Z" fill="currentColor" opacity="0.45" />
+          {/* Australia */}
+          <path d="M800,360 L860,360 L900,395 L890,435 L835,450 L795,420 Z" fill="currentColor" opacity="0.55" />
+          {/* New Zealand */}
+          <path d="M920,445 L940,455 L935,475 L915,470 Z" fill="currentColor" opacity="0.45" />
         </g>
 
-        {/* Highlightable country shapes (coarse, map-like) */}
-        {/* Canada */}
-        <path d="M120,135 L170,115 L250,120 L295,140 L260,160 L175,165 L120,150 Z" fill={fillFor('CA')} stroke={stroke} strokeWidth="1">
-          <title>{`CA: ${fmtInt(byCC.get('CA') || 0)}`}</title>
-        </path>
-
-        {/* United States */}
-        <path d="M130,170 L180,165 L260,170 L290,190 L260,210 L190,215 L135,200 Z" fill={fillFor('US')} stroke={stroke} strokeWidth="1">
-          <title>{`US: ${fmtInt(byCC.get('US') || 0)}`}</title>
-        </path>
-
-        {/* United Kingdom */}
-        <path d="M500,175 L512,170 L520,182 L512,195 L500,190 Z" fill={fillFor('GB')} stroke={stroke} strokeWidth="1">
-          <title>{`GB: ${fmtInt(byCC.get('GB') || 0)}`}</title>
-        </path>
-
-        {/* New Zealand */}
-        <path d="M885,385 L898,380 L905,392 L895,405 L883,398 Z" fill={fillFor('NZ')} stroke={stroke} strokeWidth="1">
-          <title>{`NZ: ${fmtInt(byCC.get('NZ') || 0)}`}</title>
-        </path>
-
-        {/* Australia */}
-        <path d="M780,360 L830,350 L880,360 L900,395 L875,430 L820,440 L780,420 L765,390 Z" fill={fillFor('AU')} stroke={stroke} strokeWidth="1">
-          <title>{`AU: ${fmtInt(byCC.get('AU') || 0)}`}</title>
-        </path>
-
-        {/* Unknown/Other */}
-        {byCC.get('UNK') ? (
-          <g>
-            <rect
-              x="18"
-              y="18"
-              width="130"
-              height="34"
-              rx="10"
-              fill={prefersDark ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.75)'}
-              stroke={prefersDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'}
-            />
-            <text x="30" y="40" fontSize="14" fill={prefersDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)'}>
-              UNK: {fmtInt(byCC.get('UNK') || 0)}
-            </text>
-          </g>
-        ) : null}
+        {/* User markers */}
+        {entries.map(({ cc, users, x, y }) => {
+          const r = rFor(users);
+          return (
+            <g key={cc} transform={`translate(${x},${y})`}>
+              <title>{cc} • {users} user{users === 1 ? '' : 's'}</title>
+              <circle r={r + 2} fill={ringFor(users)} />
+              <circle r={r} fill={markerFill} />
+              {/* simple "user" icon */}
+              <g fill="rgba(255,255,255,0.98)">
+                <circle cx="0" cy={-r * 0.25} r={Math.max(2.8, r * 0.28)} />
+                <path
+                  d={`
+                    M ${-r * 0.55} ${r * 0.70}
+                    C ${-r * 0.55} ${r * 0.25}, ${-r * 0.22} ${r * 0.05}, 0 ${r * 0.05}
+                    C ${r * 0.22} ${r * 0.05}, ${r * 0.55} ${r * 0.25}, ${r * 0.55} ${r * 0.70}
+                    Z
+                  `}
+                />
+              </g>
+            </g>
+          );
+        })}
       </svg>
     </div>
   );
