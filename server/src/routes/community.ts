@@ -59,17 +59,39 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
 
         // Note: we intentionally do NOT store raw IPs. We store only country (coarse) + minute buckets.
 
-    await pool.query(
-      `
-      INSERT INTO presence_events (user_id, bucket, country_code, region_code, user_agent)
-      VALUES ($1, date_trunc('minute', now()), $2, $3, $4)
+        try {
+      await pool.query(
+        `
+      INSERT INTO presence_events (user_id, bucket, ts, meta, country_code, region_code, user_agent)
+      VALUES ($1, to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'), now(), '{}'::jsonb, $2, $3, $4)
       ON CONFLICT (user_id, bucket) DO UPDATE
-        SET country_code = COALESCE(EXCLUDED.country_code, presence_events.country_code),
+        SET ts = EXCLUDED.ts,
+            country_code = COALESCE(EXCLUDED.country_code, presence_events.country_code),
             region_code = COALESCE(EXCLUDED.region_code, presence_events.region_code),
             user_agent = COALESCE(EXCLUDED.user_agent, presence_events.user_agent)
       `,
-      [userId, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
-    );
+        [userId, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
+      );
+    } catch (e: any) {
+      // If the table exists without the expected unique constraint/index (older DBs),
+      // fall back to an idempotent insert without ON CONFLICT.
+      const msg = String(e?.message || '');
+      if (msg.includes('no unique or exclusion constraint') || msg.includes('ON CONFLICT')) {
+        await pool.query(
+          `
+          INSERT INTO presence_events (user_id, bucket, ts, meta, country_code, region_code, user_agent)
+          SELECT $1, to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'), now(), '{}'::jsonb, $2, $3, $4
+          WHERE NOT EXISTS (
+            SELECT 1 FROM presence_events
+            WHERE user_id=$1 AND bucket=to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"')
+          )
+          `,
+          [userId, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
+        );
+      } else {
+        throw e;
+      }
+    }
 
     return res.json({ ok: true });
   } catch (e: any) {

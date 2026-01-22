@@ -716,6 +716,8 @@ CREATE TABLE IF NOT EXISTS presence_events (
   PRIMARY KEY (user_id, bucket)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_presence_events_user_bucket ON presence_events(user_id, bucket);
+
 CREATE INDEX IF NOT EXISTS idx_presence_events_bucket ON presence_events(bucket);
 CREATE INDEX IF NOT EXISTS idx_presence_events_country_bucket ON presence_events(country_code, bucket);
 CREATE INDEX IF NOT EXISTS idx_presence_events_region_bucket ON presence_events(region_code, bucket);

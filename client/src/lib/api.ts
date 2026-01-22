@@ -23,13 +23,11 @@ const DEV_FALLBACK_BASE =
 
 const BASE = IS_DEV
   ? import.meta.env.VITE_API_BASE || DEV_FALLBACK_BASE
-  : import.meta.env.VITE_API_BASE;
+  : (import.meta.env.VITE_API_BASE || ''); // allow same-origin /api in production if not set
 
 if (!IS_DEV && !BASE) {
-  // Fail fast instead of silently hitting the wrong host
-  console.error(
-    '❌ VITE_API_BASE is not set for production build – API calls will fail',
-  );
+  // Not fatal: we can still use same-origin /api if the frontend is served by the same host as the API.
+  console.warn('⚠️ VITE_API_BASE is not set for production build – using same-origin /api paths');
 }
 
 /**
@@ -44,7 +42,8 @@ export async function api(path: string, init: (Omit<RequestInit, "body"> & { bod
     url = path;
   }
     // Dev mode: allow proxy paths like /api/...
-  else if (IS_DEV && path.startsWith('/api')) {
+  else if (path.startsWith('/api') && (IS_DEV || !BASE)) {
+    // allow proxy in dev, and same-origin /api in prod when BASE isn't set
     url = path;
   }
   // Everything else must go via BASE
