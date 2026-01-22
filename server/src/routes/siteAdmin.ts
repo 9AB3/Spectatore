@@ -724,6 +724,15 @@ router.post('/members/approve', siteAdminMiddleware, async (req: any, res) => {
 
     const hasLegacySiteCol = await hasLegacySiteColumn(pool);
 
+    // Determine current membership status so we can enforce safe transitions.
+    const curRow = await pool.query(`SELECT status, role, invite_status FROM site_memberships WHERE user_id=$1 AND site_id=$2 ORDER BY id DESC LIMIT 1`, [user_id, site_id]);
+    const curStatus = String(curRow.rows?.[0]?.status || '').toLowerCase();
+    const curInvite = String(curRow.rows?.[0]?.invite_status || '').toLowerCase();
+
+    // If this is a *request* approval, we always approve as MEMBER. Admin can promote later from Active list.
+    const requestedApprove = curStatus === 'requested';
+    const effectiveRole = requestedApprove ? 'member' : role;
+
     // Guardrail: "invited" memberships must only transition via the user's accept/deny (or revoke).
     // Admins should NOT be able to approve an invited row (that would bypass user acceptance).
     try {
@@ -734,7 +743,7 @@ router.post('/members/approve', siteAdminMiddleware, async (req: any, res) => {
           LIMIT 1`,
         [user_id, site_id],
       );
-      const curStatus = String(cur.rows?.[0]?.status || '');
+      const curStatus = String(curRow.rows?.[0]?.status || '');
       if (curStatus === 'invited') {
         return res.status(400).json({ ok: false, error: 'cannot approve invited membership (awaiting user response)' });
       }
@@ -761,7 +770,7 @@ router.post('/members/approve', siteAdminMiddleware, async (req: any, res) => {
               site_name=COALESCE(site_name,$2)
         WHERE user_id=$1 AND site_id=$5`;
 
-    const upd = await pool.query(updSql, [user_id, site, role, req.user_id || null, site_id]);
+    const upd = await pool.query(updSql, [user_id, site, effectiveRole, req.user_id || null, site_id]);
 
     if ((upd.rowCount || 0) === 0) {
       if (hasLegacySiteCol) {
@@ -783,6 +792,37 @@ router.post('/members/approve', siteAdminMiddleware, async (req: any, res) => {
   } catch (e) {
     return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
   }
+
+// Decline a membership request (removes it from the Requests list)
+router.post('/members/decline', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    if (!site || site === '*') return res.status(400).json({ ok: false, error: 'missing site' });
+    assertSiteAccess(req, site);
+
+    const user_id = Number(req.body?.user_id || 0);
+    if (!user_id) return res.status(400).json({ ok: false, error: 'missing user_id' });
+
+    // Ensure site exists, then resolve site_id
+    await pool.query(`INSERT INTO admin_sites (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`, [site]);
+    const sid = await pool.query(`SELECT id FROM admin_sites WHERE lower(name)=lower($1)`, [site]);
+    const site_id = Number(sid.rows?.[0]?.id || 0);
+    if (!site_id) return res.status(500).json({ ok: false, error: 'failed to resolve site_id' });
+
+    // Only decline requests (do not delete active memberships)
+    await pool.query(
+      `DELETE FROM site_memberships WHERE user_id=$1 AND site_id=$2 AND status='requested'`,
+      [user_id, site_id],
+    );
+
+    return res.json({ ok: true });
+  } catch (e: any) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'Failed to decline request' });
+  }
+});
+
+
 });
 
 // Decline a membership request so it disappears from the pending list.
@@ -805,6 +845,15 @@ router.post('/members/decline', siteAdminMiddleware, async (req: any, res) => {
     // If there's an existing membership row, mark it declined. Otherwise, create a declined row
     // so legacy "users.site" requests don't keep re-appearing.
     const hasLegacySiteCol = await hasLegacySiteColumn(pool);
+
+    // Determine current membership status so we can enforce safe transitions.
+    const curRow = await pool.query(`SELECT status, role, invite_status FROM site_memberships WHERE user_id=$1 AND site_id=$2 ORDER BY id DESC LIMIT 1`, [user_id, site_id]);
+    const curStatus = String(curRow.rows?.[0]?.status || '').toLowerCase();
+    const curInvite = String(curRow.rows?.[0]?.invite_status || '').toLowerCase();
+
+    // If this is a *request* approval, we always approve as MEMBER. Admin can promote later from Active list.
+    const requestedApprove = curStatus === 'requested';
+    const effectiveRole = requestedApprove ? 'member' : role;
     const upd = await pool.query(
       `UPDATE site_memberships
           SET status='declined'
@@ -924,6 +973,15 @@ router.post('/members/add', siteAdminMiddleware, async (req: any, res) => {
     if (!site_id) return res.status(500).json({ ok: false, error: 'failed to resolve site_id' });
 
     const hasLegacySiteCol = await hasLegacySiteColumn(pool);
+
+    // Determine current membership status so we can enforce safe transitions.
+    const curRow = await pool.query(`SELECT status, role, invite_status FROM site_memberships WHERE user_id=$1 AND site_id=$2 ORDER BY id DESC LIMIT 1`, [user_id, site_id]);
+    const curStatus = String(curRow.rows?.[0]?.status || '').toLowerCase();
+    const curInvite = String(curRow.rows?.[0]?.invite_status || '').toLowerCase();
+
+    // If this is a *request* approval, we always approve as MEMBER. Admin can promote later from Active list.
+    const requestedApprove = curStatus === 'requested';
+    const effectiveRole = requestedApprove ? 'member' : role;
 
     const updSql = hasLegacySiteCol
       ? `UPDATE site_memberships

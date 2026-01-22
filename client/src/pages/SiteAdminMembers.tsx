@@ -59,7 +59,7 @@ export default function SiteAdminMembers() {
   const requested = useMemo(() => rows.filter((r) => r.status === 'requested'), [rows]);
   const active = useMemo(() => rows.filter((r) => r.status === 'active'), [rows]);
 
-  async function approve(user_id: number, role: 'member' | 'validator' | 'admin') {
+  async function approveMember(user_id: number) {
     try {
       await api('/api/site-admin/members/approve', {
         method: 'POST',
@@ -211,16 +211,10 @@ export default function SiteAdminMembers() {
                     <div className="font-semibold">{r.name || 'Unnamed'}</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <button className="btn" onClick={() => approve(r.user_id, 'member')}>
+                    <button className="btn" onClick={() => approveMember(r.user_id)}>
                       Approve member
                     </button>
-                    <button className="btn" onClick={() => approve(r.user_id, 'validator')}>
-                      Approve validator
-                    </button>
-                    <button className="btn" onClick={() => approve(r.user_id, 'admin')}>
-                      Make admin
-                    </button>
-                    <button className="btn btn-outline" onClick={() => decline(r.user_id)}>
+<button className="btn btn-outline" onClick={() => decline(r.user_id)}>
                       Decline
                     </button>
                   </div>
@@ -243,16 +237,10 @@ export default function SiteAdminMembers() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs px-2 py-1 rounded-full bg-slate-100">{r.role}</span>
-                    <button className="btn" onClick={() => approve(r.user_id, 'member')}>
+                    <button className="btn" onClick={() => approveMember(r.user_id)}>
                       Member
                     </button>
-                    <button className="btn" onClick={() => approve(r.user_id, 'validator')}>
-                      Validator
-                    </button>
-                    <button className="btn" onClick={() => approve(r.user_id, 'admin')}>
-                      Admin
-                    </button>
-                    <button className="btn" onClick={() => revoke(r.user_id)}>
+<button className="btn" onClick={() => revoke(r.user_id)}>
                       Revoke
                     </button>
                   </div>

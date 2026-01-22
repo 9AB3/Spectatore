@@ -42,6 +42,21 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
     const regionCode: string | null =
       country && regionPart && /^[A-Z0-9]{1,3}$/.test(regionPart) ? `${country}-${regionPart}` : null;
 
+
+    // Two-tier fallback: if we're in AU and region header isn't available, use the user's saved community_state.
+    let finalRegionCode: string | null = regionCode;
+    if (!finalRegionCode && country === 'AU') {
+      try {
+        const u = await pool.query('SELECT community_state FROM users WHERE id=$1', [userId]);
+        const st = String(u.rows?.[0]?.community_state || '').trim().toUpperCase();
+        if (st && /^[A-Z]{2,3}$/.test(st) && st !== 'UNK') {
+          finalRegionCode = `AU-${st}`;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
         // Note: we intentionally do NOT store raw IPs. We store only country (coarse) + minute buckets.
 
     await pool.query(
@@ -53,7 +68,7 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
             region_code = COALESCE(EXCLUDED.region_code, presence_events.region_code),
             user_agent = COALESCE(EXCLUDED.user_agent, presence_events.user_agent)
       `,
-      [userId, country, regionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
+      [userId, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
     );
 
     return res.json({ ok: true });

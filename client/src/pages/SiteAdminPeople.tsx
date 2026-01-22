@@ -93,11 +93,26 @@ export default function SiteAdminPeople() {
   const requests = useMemo(() => rows.filter((r) => r.status === 'requested' || r.status === 'invited'), [rows]);
   const active = useMemo(() => rows.filter((r) => r.status === 'active'), [rows]);
 
-  async function approve(user_id: number, role: 'member' | 'validator' | 'admin') {
+  
+
+async function decline(user_id: number) {
+  try {
+    await api('/api/site-admin/members/decline', {
+      method: 'POST',
+      body: { site, user_id },
+    });
+    setMsg('Declined');
+    await loadMembers(site);
+  } catch (e: any) {
+    setMsg(e?.message || 'Failed');
+  }
+}
+
+async function approveMember(user_id: number) {
     try {
       await api('/api/site-admin/members/approve', {
         method: 'POST',
-        body: { site, user_id, role },
+        body: { site, user_id, role: 'member' },
       });
       setMsg('Updated');
       await loadMembers(site);
@@ -293,23 +308,17 @@ export default function SiteAdminPeople() {
                       <>
                         <button
                           className="px-3 py-2 rounded-xl text-sm font-semibold bg-slate-900 text-white"
-                          onClick={() => approve(r.user_id, 'member')}
+                          onClick={() => approveMember(r.user_id)}
                         >
                           Approve member
                         </button>
                         <button
-                          className="px-3 py-2 rounded-xl text-sm font-semibold bg-green-600 text-white"
-                          onClick={() => approve(r.user_id, 'validator')}
+                          className="px-3 py-2 rounded-xl text-sm font-semibold bg-red-600 text-white"
+                          onClick={() => decline(r.user_id)}
                         >
-                          Approve validator
+                          Decline
                         </button>
-                        <button
-                          className="px-3 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white"
-                          onClick={() => approve(r.user_id, 'admin')}
-                        >
-                          Approve admin
-                        </button>
-                      </>
+</>
                     )}
                   </div>
                 ) : (
