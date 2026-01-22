@@ -53,7 +53,14 @@ export default function ProtectedLayout() {
 
     const send = async () => {
       try {
-        await api('/api/community/heartbeat', { method: 'POST' });
+        // Include site context so the server can maintain site-scoped realtime presence.
+        const db = await getDB();
+        const session = await db.get('session', 'auth');
+        const site_id = session?.subscribed_site_id ?? session?.work_site_id ?? null;
+        await api('/api/community/heartbeat', {
+          method: 'POST',
+          body: JSON.stringify({ site_id }),
+        });
       } catch {
         // ignore (offline, etc.)
       }

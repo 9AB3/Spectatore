@@ -708,7 +708,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_shifts_shift_key ON shifts(shift_key);
 -- === COMMUNITY / PUBLIC STATS (APP USAGE) ===
 CREATE TABLE IF NOT EXISTS presence_events (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  bucket TIMESTAMPTZ NOT NULL,
+  -- Minute-bucket key stored as TEXT for maximum compatibility across DB resets/migrations.
+  -- Example: 2026-01-22T05:53Z
+  bucket TEXT NOT NULL,
+  -- Real timestamp of the last heartbeat for this (user_id, bucket)
+  ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+  meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+  -- Optional: site context (official site/admin site). NULL for older rows.
+  site_id INT NULL,
   country_code TEXT NULL,
   region_code TEXT NULL,
   user_agent TEXT NULL,
@@ -718,11 +725,82 @@ CREATE TABLE IF NOT EXISTS presence_events (
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_presence_events_user_bucket ON presence_events(user_id, bucket);
 
-CREATE INDEX IF NOT EXISTS idx_presence_events_bucket ON presence_events(bucket);
-CREATE INDEX IF NOT EXISTS idx_presence_events_country_bucket ON presence_events(country_code, bucket);
-CREATE INDEX IF NOT EXISTS idx_presence_events_region_bucket ON presence_events(region_code, bucket);
+CREATE INDEX IF NOT EXISTS idx_presence_events_ts ON presence_events(ts);
+CREATE INDEX IF NOT EXISTS idx_presence_events_country_ts ON presence_events(country_code, ts);
+CREATE INDEX IF NOT EXISTS idx_presence_events_region_ts ON presence_events(region_code, ts);
+CREATE INDEX IF NOT EXISTS idx_presence_events_site_ts ON presence_events(site_id, ts);
 
 -- Community telemetry column evolution (safe for existing DBs)
 ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS country_code TEXT;
 ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS region_code TEXT;
+ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS ts TIMESTAMPTZ DEFAULT now();
+ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS site_id INT;
+-- bucket may have existed as TIMESTAMPTZ on older schemas; normalize to TEXT.
+DO $$ BEGIN
+  IF to_regclass('public.presence_events') IS NOT NULL THEN
+    BEGIN
+      ALTER TABLE presence_events DROP CONSTRAINT IF EXISTS presence_events_pkey;
+    EXCEPTION WHEN OTHERS THEN
+      NULL;
+    END;
+    BEGIN
+      ALTER TABLE presence_events ALTER COLUMN bucket TYPE TEXT USING bucket::text;
+    EXCEPTION WHEN OTHERS THEN
+      NULL;
+    END;
+    BEGIN
+      ALTER TABLE presence_events ADD PRIMARY KEY (user_id, bucket);
+    EXCEPTION WHEN OTHERS THEN
+      NULL;
+    END;
+  END IF;
+END $$;
 ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS community_state TEXT;
+
+-- === REALTIME PRESENCE (PER SITE) ===
+CREATE TABLE IF NOT EXISTS presence_current (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  site_id INTEGER NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+  country_code TEXT NULL,
+  region_code TEXT NULL,
+  user_agent TEXT NULL,
+  PRIMARY KEY (user_id, site_id)
+);
+CREATE INDEX IF NOT EXISTS idx_presence_current_site_last_seen ON presence_current(site_id, last_seen);
+
+CREATE TABLE IF NOT EXISTS presence_sessions (
+  id BIGSERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  site_id INTEGER NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+  ended_at TIMESTAMPTZ NULL,
+  duration_seconds INTEGER NULL,
+  closed_reason TEXT NULL
+);
+-- At most 1 open session per user+site
+CREATE UNIQUE INDEX IF NOT EXISTS uq_presence_sessions_open ON presence_sessions(user_id, site_id)
+  WHERE ended_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_presence_sessions_site_started ON presence_sessions(site_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_presence_sessions_last_seen ON presence_sessions(last_seen);
+
+-- === ENGAGEMENT AGGREGATES ===
+CREATE TABLE IF NOT EXISTS presence_daily_stats (
+  day DATE NOT NULL,
+  site_id INTEGER NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  dau INTEGER NOT NULL DEFAULT 0,
+  sessions INTEGER NOT NULL DEFAULT 0,
+  total_minutes INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, site_id)
+);
+
+CREATE TABLE IF NOT EXISTS presence_weekly_stats (
+  week_start DATE NOT NULL,
+  site_id INTEGER NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  wau INTEGER NOT NULL DEFAULT 0,
+  sessions INTEGER NOT NULL DEFAULT 0,
+  total_minutes INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (week_start, site_id)
+);

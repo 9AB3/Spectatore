@@ -41,6 +41,7 @@ import SiteAdminFeedbackApproval from './pages/SiteAdminFeedbackApproval';
 import SiteAdminSeed from './pages/SiteAdminSeed';
 import SiteAdminReconciliation from './pages/SiteAdminReconciliation';
 import SiteAdminPowerBiTokens from './pages/SiteAdminPowerBiTokens';
+import SiteAdminEngagement from './pages/SiteAdminEngagement';
 import StartupSplash from './components/StartupSplash';
 import { useEffect, useState } from 'react';
 import { getDB } from './lib/idb';
@@ -193,6 +194,7 @@ export default function App() {
         <Route path="Sites" element={<RequireSiteAdminSuper><SiteAdminSites /></RequireSiteAdminSuper>} />
         <Route path="People" element={<RequireSiteAdminManage><SiteAdminPeople /></RequireSiteAdminManage>} />
         <Route path="PowerBiTokens" element={<RequireSiteAdminManage><SiteAdminPowerBiTokens /></RequireSiteAdminManage>} />
+        <Route path="Engagement" element={<RequireSiteAdminSuper><SiteAdminEngagement /></RequireSiteAdminSuper>} />
         
         {/* allow lowercase for convenience */}
         <Route path="members" element={<Navigate to="/SiteAdmin/Members" replace />} />

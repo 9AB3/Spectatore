@@ -14,6 +14,11 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
     const userId = Number(req.user_id);
     if (!userId) return res.status(400).json({ error: 'missing user' });
 
+    // Optional site context. When provided we maintain realtime "online now" + sessions per site.
+    // site_id refers to admin_sites.id (official sites).
+    const rawSiteId = req.body?.site_id;
+    const siteId = rawSiteId != null && rawSiteId !== '' ? Number(rawSiteId) : null;
+
     // Country is derived from trusted edge headers where available (Cloudflare/Vercel/etc).
     // We intentionally do NOT store raw IPs. If no country header is present we store NULL.
     const rawCountry = String(
@@ -62,15 +67,16 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
         try {
       await pool.query(
         `
-      INSERT INTO presence_events (user_id, bucket, ts, meta, country_code, region_code, user_agent)
-      VALUES ($1, to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'), now(), '{}'::jsonb, $2, $3, $4)
+      INSERT INTO presence_events (user_id, bucket, ts, meta, country_code, region_code, user_agent, site_id)
+      VALUES ($1, to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'), now(), '{}'::jsonb, $2, $3, $4, $5)
       ON CONFLICT (user_id, bucket) DO UPDATE
         SET ts = EXCLUDED.ts,
             country_code = COALESCE(EXCLUDED.country_code, presence_events.country_code),
             region_code = COALESCE(EXCLUDED.region_code, presence_events.region_code),
-            user_agent = COALESCE(EXCLUDED.user_agent, presence_events.user_agent)
+            user_agent = COALESCE(EXCLUDED.user_agent, presence_events.user_agent),
+            site_id = COALESCE(EXCLUDED.site_id, presence_events.site_id)
       `,
-        [userId, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
+        [userId, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300), siteId],
       );
     } catch (e: any) {
       // If the table exists without the expected unique constraint/index (older DBs),
@@ -79,17 +85,48 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
       if (msg.includes('no unique or exclusion constraint') || msg.includes('ON CONFLICT')) {
         await pool.query(
           `
-          INSERT INTO presence_events (user_id, bucket, ts, meta, country_code, region_code, user_agent)
-          SELECT $1, to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'), now(), '{}'::jsonb, $2, $3, $4
+          INSERT INTO presence_events (user_id, bucket, ts, meta, country_code, region_code, user_agent, site_id)
+          SELECT $1, to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'), now(), '{}'::jsonb, $2, $3, $4, $5
           WHERE NOT EXISTS (
             SELECT 1 FROM presence_events
             WHERE user_id=$1 AND bucket=to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"')
           )
           `,
-          [userId, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
+          [userId, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300), siteId],
         );
       } else {
         throw e;
+      }
+    }
+
+    // Maintain realtime presence + sessions when we have a valid site_id.
+    if (siteId && Number.isFinite(siteId)) {
+      try {
+        await pool.query(
+          `
+          INSERT INTO presence_current (user_id, site_id, last_seen, country_code, region_code, user_agent)
+          VALUES ($1, $2, now(), $3, $4, $5)
+          ON CONFLICT (user_id, site_id) DO UPDATE
+            SET last_seen = now(),
+                country_code = COALESCE(EXCLUDED.country_code, presence_current.country_code),
+                region_code = COALESCE(EXCLUDED.region_code, presence_current.region_code),
+                user_agent = COALESCE(EXCLUDED.user_agent, presence_current.user_agent)
+          `,
+          [userId, siteId, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
+        );
+
+        // Ensure a single open session per user+site
+        await pool.query(
+          `
+          INSERT INTO presence_sessions (user_id, site_id, started_at, last_seen)
+          VALUES ($1, $2, now(), now())
+          ON CONFLICT (user_id, site_id) WHERE ended_at IS NULL
+          DO UPDATE SET last_seen = now()
+          `,
+          [userId, siteId],
+        );
+      } catch {
+        // Non-fatal (older DBs may not have these tables yet)
       }
     }
 
@@ -113,6 +150,8 @@ router.get('/public-stats', authMiddleware, async (req: any, res) => {
     const delayMinutes = 0;
     const liveWindowMinutes = 15;
 
+    // NOTE: presence_events.bucket is stored as TEXT (minute bucket string) for compatibility.
+    // For time-window queries we MUST use the real timestamp column `ts`.
     const end = `now() - interval '${delayMinutes} minutes'`;
     const liveStart = `now() - interval '${delayMinutes + liveWindowMinutes} minutes'`;
     const start24h = `now() - interval '${24 * 60 + delayMinutes} minutes'`;
@@ -126,7 +165,7 @@ router.get('/public-stats', authMiddleware, async (req: any, res) => {
       `
       SELECT COUNT(DISTINCT user_id)::int AS n
       FROM presence_events
-      WHERE bucket >= ${liveStart} AND bucket < ${end}
+      WHERE ts >= ${liveStart} AND ts < ${end}
       `,
     );
     const liveNow = Number(liveQ.rows?.[0]?.n || 0);
@@ -136,7 +175,7 @@ router.get('/public-stats', authMiddleware, async (req: any, res) => {
       `
       SELECT COUNT(DISTINCT user_id)::int AS n
       FROM presence_events
-      WHERE bucket >= ${start24h} AND bucket < ${end}
+      WHERE ts >= ${start24h} AND ts < ${end}
       `,
     );
     const today = Number(todayQ.rows?.[0]?.n || 0);
@@ -147,7 +186,7 @@ router.get('/public-stats', authMiddleware, async (req: any, res) => {
       WITH uniq AS (
         SELECT DISTINCT user_id, country_code
         FROM presence_events
-        WHERE bucket >= ${startExpr} AND bucket < ${end}
+        WHERE ts >= ${startExpr} AND ts < ${end}
       )
       SELECT COALESCE(country_code, 'UNK') AS country_code,
              COUNT(*)::int AS users
@@ -165,7 +204,7 @@ router.get('/public-stats', authMiddleware, async (req: any, res) => {
       WITH base AS (
         SELECT user_id, bucket, country_code, region_code
         FROM presence_events
-        WHERE bucket >= ${startExpr} AND bucket < ${end}
+        WHERE ts >= ${startExpr} AND ts < ${end}
       ),
       uniq AS (
         SELECT DISTINCT b.user_id,

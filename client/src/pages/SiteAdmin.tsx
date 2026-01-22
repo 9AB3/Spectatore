@@ -363,6 +363,14 @@ export default function SiteAdmin() {
           ) : null}
 
           {superAdmin ? (
+            <TvTileButton title="Engagement" subtitle="Presence analytics" tone="neutral" onClick={() => nav('/SiteAdmin/Engagement')}>
+              <div className="text-sm" style={{ color: 'var(--muted)' }}>
+                Online now + DAU/WAU from heartbeat sessions.
+              </div>
+            </TvTileButton>
+          ) : null}
+
+          {superAdmin ? (
             <TvTileButton title="Sites" subtitle="Admin list" tone="neutral" onClick={() => nav('/SiteAdmin/Sites')}>
               <div className="text-sm" style={{ color: 'var(--muted)' }}>
                 Create sites and view the admin site list.

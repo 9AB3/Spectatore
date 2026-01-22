@@ -206,6 +206,72 @@ router.post('/powerbi-tokens/:id/revoke', siteAdminMiddleware, async (req: any, 
   }
 });
 
+// --- Presence / Engagement (SUPER ADMIN ONLY: users.is_admin=true) ---
+router.get('/engagement', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertSuperAdmin(req);
+
+    const siteName = String(req.query.site || '').trim();
+    let siteId: number | null = null;
+    if (siteName) {
+      const sr = await pool.query(`SELECT id FROM admin_sites WHERE name=$1 LIMIT 1`, [siteName]);
+      siteId = sr.rows?.[0]?.id ? Number(sr.rows[0].id) : null;
+      if (!siteId) return res.status(404).json({ ok: false, error: 'Site not found' });
+    }
+
+    const staleMins = Math.max(1, Number(process.env.PRESENCE_STALE_MINUTES || 5));
+
+    const onlineQ = await pool.query(
+      `
+      SELECT pc.user_id, pc.site_id, pc.last_seen,
+             COALESCE(u.name, u.email) AS display_name,
+             u.email
+      FROM presence_current pc
+      JOIN users u ON u.id = pc.user_id
+      WHERE pc.last_seen >= now() - ($1::text || ' minutes')::interval
+        AND ($2::int IS NULL OR pc.site_id = $2::int)
+      ORDER BY pc.last_seen DESC
+      `,
+      [String(staleMins), siteId],
+    );
+
+    const today = await pool.query(
+      `
+      SELECT *
+      FROM presence_daily_stats
+      WHERE day >= CURRENT_DATE - 35
+        AND ($1::int IS NULL OR site_id = $1::int)
+      ORDER BY day DESC
+      LIMIT 35
+      `,
+      [siteId],
+    );
+
+    const weekly = await pool.query(
+      `
+      SELECT *
+      FROM presence_weekly_stats
+      WHERE week_start >= (CURRENT_DATE - 120)
+        AND ($1::int IS NULL OR site_id = $1::int)
+      ORDER BY week_start DESC
+      LIMIT 26
+      `,
+      [siteId],
+    );
+
+    return res.json({
+      ok: true,
+      site: siteName || null,
+      online_now: onlineQ.rows || [],
+      daily: today.rows || [],
+      weekly: weekly.rows || [],
+      stale_minutes: staleMins,
+    });
+  } catch (e: any) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'Failed to load engagement' });
+  }
+});
+
 router.post('/admin-sites', siteAdminMiddleware, async (req, res) => {
   const name = String(req.body?.name || '').trim();
   const state = String(req.body?.state || '').trim();
@@ -2790,6 +2856,70 @@ router.post('/powerbi-tokens/:id/revoke', siteAdminMiddleware, async (req: any, 
   }
 });
 
+// --- Presence / Engagement (SUPER ADMIN ONLY: users.is_admin=true) ---
+router.get('/engagement', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertSuperAdmin(req);
 
+    const siteName = String(req.query.site || '').trim();
+    if (!siteName) return res.status(400).json({ ok: false, error: 'site required' });
+
+    // Resolve admin_sites.id from name
+    const sr = await pool.query(`SELECT id, name FROM admin_sites WHERE name=$1 LIMIT 1`, [siteName]);
+    const siteId = Number(sr.rows?.[0]?.id || 0);
+    if (!siteId) return res.status(404).json({ ok: false, error: 'site not found' });
+
+    // Online now = last heartbeat within stale window
+    const staleMins = Number(process.env.PRESENCE_STALE_MINUTES || 5);
+    const onlineQ = await pool.query(
+      `
+      SELECT pc.user_id,
+             COALESCE(u.name, u.email) AS name,
+             u.email,
+             pc.last_seen,
+             pc.country_code,
+             pc.region_code
+        FROM presence_current pc
+        JOIN users u ON u.id = pc.user_id
+       WHERE pc.site_id = $1
+         AND pc.last_seen >= now() - ($2::text || ' minutes')::interval
+       ORDER BY pc.last_seen DESC
+      `,
+      [siteId, String(Math.max(1, staleMins))],
+    );
+
+    const dailyQ = await pool.query(
+      `
+      SELECT day, dau, sessions, total_minutes
+        FROM presence_daily_stats
+       WHERE site_id = $1
+       ORDER BY day DESC
+       LIMIT 30
+      `,
+      [siteId],
+    );
+
+    const weeklyQ = await pool.query(
+      `
+      SELECT week_start, wau, sessions, total_minutes
+        FROM presence_weekly_stats
+       WHERE site_id = $1
+       ORDER BY week_start DESC
+       LIMIT 16
+      `,
+      [siteId],
+    );
+
+    return res.json({
+      ok: true,
+      site: { id: siteId, name: siteName },
+      online_now: onlineQ.rows,
+      daily: dailyQ.rows,
+      weekly: weeklyQ.rows,
+    });
+  } catch (e: any) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'Failed to load engagement' });
+  }
+});
 
 export default router;
