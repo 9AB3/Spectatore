@@ -29,9 +29,7 @@ export default function ProtectedLayout() {
   const [invites, setInvites] = useState<Array<{ id: number; site: string; role: string }>>([]);
   const [invitesPrompt, setInvitesPrompt] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-
-  // Reset & ensure scroll gating works even when the content doesn't overflow.
+  const [err, setErr] = useState('');  // Reset & ensure scroll gating works even when the content doesn't overflow.
   useEffect(() => {
     if (!needsTerms) return;
     setTermsTick(false);
@@ -44,43 +42,45 @@ export default function ProtectedLayout() {
       const noScrollNeeded = el.scrollHeight <= el.clientHeight + 2;
       if (noScrollNeeded) setTermsScrolled(true);
     }, 0);
-    
-
-// Community heartbeat (app usage telemetry)
-useEffect(() => {
-  let alive = true;
-  let t: any = null;
-
-  const send = async () => {
-    try {
-      await api('/api/community/heartbeat', { method: 'POST' });
-    } catch {
-      // ignore
-    }
-  };
-
-  const start = () => {
-    if (!alive) return;
-    // send quickly on load/visibility
-    send();
-    if (t) clearInterval(t);
-    t = setInterval(send, 60000);
-  };
-
-  const onVis = () => {
-    if (document.visibilityState === 'visible') start();
-  };
-
-  start();
-  document.addEventListener('visibilitychange', onVis);
-  return () => {
-    alive = false;
-    if (t) clearInterval(t);
-    document.removeEventListener('visibilitychange', onVis);
-  };
-}, []);
-return () => clearTimeout(t);
+    return () => clearTimeout(t);
   }, [needsTerms]);
+
+  // Community heartbeat (app usage telemetry)
+  // Sends an authenticated ping while the app is open so the Community page can show live usage.
+  useEffect(() => {
+    let stopped = false;
+    let timer: any = null;
+
+    const send = async () => {
+      try {
+        await api('/api/community/heartbeat', { method: 'POST' });
+      } catch {
+        // ignore (offline, etc.)
+      }
+    };
+
+    const start = () => {
+      if (stopped) return;
+      // fire immediately, then every minute
+      send();
+      if (timer) clearInterval(timer);
+      timer = setInterval(send, 60000);
+    };
+
+    const onVis = () => {
+      if (document.visibilityState === 'visible') start();
+    };
+
+    start();
+    window.addEventListener('focus', start);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      stopped = true;
+      if (timer) clearInterval(timer);
+      window.removeEventListener('focus', start);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, []);
 
   // Same logic for site-invite consent: if content doesn't overflow, don't block the button.
   useEffect(() => {

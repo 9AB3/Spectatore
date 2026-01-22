@@ -1158,6 +1158,22 @@ if (activity === 'Production Drilling') {
           for (const k of Object.keys(v)) {
             if (k.startsWith('__manual_location_')) delete v[k];
           }
+
+          // Persist bolt consumables from the modal into the saved row.
+          // (This is critical for View Activities / Finalize + GS Drillm rollups.)
+          const b = (boltInputs || [])[0] || null;
+          if (b) {
+            const cnt = Number(String((b as any).count || '').replace(/[^0-9]/g, ''));
+            const type = String((b as any).type || '').trim();
+            const len = String((b as any).length || '').trim();
+            const lenOther = String((b as any).lengthOther || '').trim();
+            const lengthValue = len === 'Other' ? (lenOther ? `${lenOther}m` : '') : (len ? len : '');
+
+            if (lengthValue) v['Bolt Length'] = lengthValue;
+            if (type) v['Bolt Type'] = type;
+            if (Number.isFinite(cnt) && cnt > 0) v['No. of Bolts'] = cnt;
+          }
+
           return v;
         })();
         await saveOne({ activity, sub, values: valuesToSave });

@@ -65,7 +65,6 @@ async function ensureDbColumns() {
     await pool.query(`ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS community_state TEXT`);
     await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS country_code TEXT`);
     await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS region_code TEXT`);
-    await pool.query(`ALTER TABLE IF EXISTS shift_activities ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()`);
   } catch (e:any) {
     console.warn('[db] ensure columns failed:', e?.message || e);
   }
