@@ -372,6 +372,15 @@ export default function Settings() {
             </div>
 
             <div className="card">
+              <div className="text-xs tracking-wider uppercase opacity-70">Billing</div>
+              <div className="text-lg font-semibold mt-1">My subscription</div>
+              <div className="text-sm opacity-80 mt-1">View your plan, renewal date, and manage billing.</div>
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <button type="button" className="btn" onClick={() => nav('/Subscription')}>Open</button>
+              </div>
+            </div>
+
+            <div className="card">
               <div className="text-xs tracking-wider uppercase opacity-70">Sites</div>
               <div className="text-lg font-semibold mt-1">Work & subscribed</div>
               <div className="text-sm opacity-80 mt-1">Memberships, roles, active subscribed site.</div>

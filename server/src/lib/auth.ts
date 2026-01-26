@@ -15,7 +15,51 @@ export function authMiddleware(req: any, res: any, next: any) {
     // Backwards compatible: still expose role if present, but prefer is_admin flag
     req.role = payload.role;
     req.is_admin = !!payload.is_admin;
-    next();
+    // Optional Stripe subscription enforcement
+    const enforce = String(process.env.STRIPE_ENFORCE_SUBSCRIPTION || '0') === '1';
+    const path = String(req.originalUrl || req.url || '');
+
+    // Always allow the billing endpoints so a logged-in user can subscribe/manage
+    // even while they are gated.
+    if (enforce && path.startsWith('/api/billing')) return next();
+
+    if (!enforce) return next();
+
+    // Enforced: user must be subscribed unless exempt/admin/dev-bypass
+    pool
+      .query(
+        `SELECT email, is_admin, billing_exempt, subscription_status, current_period_end
+           FROM users
+          WHERE id=$1`,
+        [payload.id],
+      )
+      .then((r) => {
+        const u = r.rows?.[0];
+        if (!u) return res.status(401).json({ error: 'invalid token' });
+
+        const status = String(u.subscription_status || '').toLowerCase();
+        const active = status === 'active' || status === 'trialing';
+        const cpe = u.current_period_end ? new Date(u.current_period_end).getTime() : 0;
+        const withinPaidWindow = !!cpe && cpe > Date.now();
+
+        const devBypassEnabled = String(process.env.STRIPE_DEV_BYPASS || '0') === '1';
+        const allowEmails = (process.env.STRIPE_DEV_BYPASS_EMAILS || '')
+          .split(',')
+          .map((s) => s.trim().toLowerCase())
+          .filter(Boolean);
+        const email = String(u.email || '').toLowerCase();
+        const devBypass = devBypassEnabled && !!email && allowEmails.includes(email);
+
+        // Admin bypass: reflect DB truth
+        req.is_admin = !!u.is_admin;
+
+        const allowed = !!u.billing_exempt || !!u.is_admin || devBypass || active || withinPaidWindow;
+        if (!allowed) {
+          return res.status(402).json({ error: 'subscription_required', code: 'SUBSCRIPTION_REQUIRED' });
+        }
+        return next();
+      })
+      .catch(() => res.status(401).json({ error: 'invalid token' }));
   } catch (e) {
     return res.status(401).json({ error: 'invalid token' });
   }

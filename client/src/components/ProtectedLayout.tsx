@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import BottomNav from './BottomNav';
 import TermsContent from './TermsContent';
 import { api } from '../lib/api';
@@ -16,6 +16,8 @@ export default function ProtectedLayout() {
   const location = useLocation();
 
   const [checked, setChecked] = useState(false);
+  const [billing, setBilling] = useState<any>(null);
+  const [needsBilling, setNeedsBilling] = useState(false);
   const [needsTerms, setNeedsTerms] = useState(false);
   const [termsTick, setTermsTick] = useState(false);
   const [termsScrolled, setTermsScrolled] = useState(false);
@@ -127,6 +129,20 @@ export default function ProtectedLayout() {
         const session = await db.get('session', 'auth');
         if (!session?.token) return;
 
+        // Billing gate (must run BEFORE any other authenticated calls)
+        try {
+          const st: any = await api('/api/billing/status');
+          setBilling(st);
+          if (st?.enforced && !st?.allowed) {
+            setNeedsBilling(true);
+            setChecked(true);
+            return;
+          }
+        } catch {
+          // If billing status fails, don't hard block the app (dev/local),
+          // but still allow normal flow.
+        }
+
         // Terms gate
         const me = await api('/api/user/me');
         const accepted = !!(me as any)?.termsAccepted;
@@ -164,6 +180,37 @@ export default function ProtectedLayout() {
     // Re-check when route changes (helps after accepting terms / enabling push)
   }, [location.key]);
 
+  async function startCheckout(interval: 'month' | 'year') {
+    setErr('');
+    setBusy(true);
+    try {
+      const r: any = await api('/api/billing/create-checkout-session', {
+        method: 'POST',
+        body: JSON.stringify({ interval }),
+      });
+      if (r?.url) window.location.href = r.url;
+      else setErr(r?.error || 'Could not start checkout');
+    } catch (e: any) {
+      setErr('Could not start checkout');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openPortal() {
+    setErr('');
+    setBusy(true);
+    try {
+      const r: any = await api('/api/billing/create-portal-session', { method: 'POST' });
+      if (r?.url) window.location.href = r.url;
+      else setErr(r?.error || 'Could not open billing portal');
+    } catch {
+      setErr('Could not open billing portal');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function acceptTerms() {
     setErr('');
     if (!termsTick) {
@@ -194,6 +241,12 @@ export default function ProtectedLayout() {
     } finally {
       setBusy(false);
     }
+  }
+
+  // Hard billing gate UI
+  if (needsBilling) {
+    // Billing is enforced server-side. If not allowed, route to /subscribe.
+    return <Navigate to="/subscribe" replace />;
   }
 
   async function enableNotifications() {

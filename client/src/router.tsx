@@ -1,5 +1,4 @@
 import { Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
-import { useEffect, useState } from 'react';
 import { gaPageView } from './lib/analytics';
 import Landing from './pages/Landing';
 import Home from './pages/Home';
@@ -25,6 +24,8 @@ import AddConnection from './pages/AddConnection';
 import ViewConnections from './pages/ViewConnections';
 import AdminUsers from './pages/AdminUsers';
 import Settings from './pages/Settings';
+import Subscribe from './pages/Subscribe';
+import Subscription from './pages/Subscription';
 import NotificationPreferences from './pages/NotificationPreferences';
 
 import Feedback from './pages/Feedback';
@@ -45,7 +46,7 @@ import SiteAdminReconciliation from './pages/SiteAdminReconciliation';
 import SiteAdminPowerBiTokens from './pages/SiteAdminPowerBiTokens';
 import SiteAdminEngagement from './pages/SiteAdminEngagement';
 import StartupSplash from './components/StartupSplash';
-
+import { useEffect, useState } from 'react';
 import { getDB } from './lib/idb';
 import ProtectedLayout from './components/ProtectedLayout';
 import { api } from './lib/api';
@@ -157,6 +158,14 @@ export default function App() {
       <Route path="/ConfirmEmail" element={<ConfirmEmail />} />
       <Route path="/ForgotPassword" element={<ForgotPassword />} />
       <Route path="/ResetPassword" element={<ResetPassword />} />
+      <Route
+        path="/subscribe"
+        element={
+          <RequireAuth>
+            <Subscribe />
+          </RequireAuth>
+        }
+      />
 
       {/* Explicit SiteAdmin child paths (defensive): ensure /SiteAdmin/People works even if nesting breaks */}
       <Route
@@ -248,6 +257,8 @@ export default function App() {
         <Route path="/YouVsYou" element={<Navigate to="/You" replace />} />
         <Route path="/YouVsNetwork" element={<Navigate to="/You/Crew" replace />} />
         <Route path="/Settings" element={<Settings />} />
+        <Route path="/Subscription" element={<Subscription />} />
+        <Route path="/subscription" element={<Navigate to="/Subscription" replace />} />
         <Route path="/NotificationPreferences" element={<NotificationPreferences />} />
         <Route path="/Feedback" element={<Feedback />} />
         <Route path="/Notifications" element={<Notifications />} />

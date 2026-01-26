@@ -24,6 +24,7 @@ import notificationPreferencesRoutes from './routes/notificationPreferences.js';
 import pushRoutes from './routes/push.js';
 import publicRoutes from './routes/public.js';
 import workSitesRoutes from './routes/workSites.js';
+import billingRoutes, { handleStripeWebhook } from './routes/billing.js';
 import { startPresenceJobs } from './lib/presenceJobs.js';
 
 const isDev = process.env.NODE_ENV !== 'production';
@@ -78,6 +79,24 @@ async function ensureDbColumns() {
     await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS country_code TEXT`);
     await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS region_code TEXT`);
     await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS site_id INT`);
+
+    // Billing / Stripe (best-effort for existing DBs)
+    await pool.query(`ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT`);
+    await pool.query(`ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT`);
+    await pool.query(`ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS subscription_status TEXT`);
+    await pool.query(`ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS subscription_price_id TEXT`);
+    await pool.query(`ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS subscription_interval TEXT`);
+    await pool.query(`ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS current_period_end TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS cancel_at_period_end BOOLEAN DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS billing_exempt BOOLEAN DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ`);
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+        id TEXT PRIMARY KEY,
+        type TEXT,
+        created_at TIMESTAMPTZ DEFAULT now()
+      )`,
+    );
 
     // Realtime presence + sessions (best-effort for existing DBs)
     await pool.query(
@@ -153,6 +172,22 @@ async function ensureDbColumns() {
     console.warn('[db] ensure columns failed:', e?.message || e);
   }
 }
+
+// Stripe webhook requires the *raw* request body for signature verification.
+// Mount it BEFORE express.json().
+app.post(
+  '/api/billing/webhook',
+  express.raw({ type: 'application/json' }),
+  async (req: any, res: any) => {
+    try {
+      const out = await handleStripeWebhook(req.body, req.headers['stripe-signature']);
+      return res.json(out);
+    } catch (e: any) {
+      return res.status(400).send(`Webhook Error: ${e?.message || 'unknown'}`);
+    }
+  },
+);
+
 app.use(express.json({ limit: '5mb' }));
 
 const corsOptions: CorsOptions = isDev
@@ -185,6 +220,7 @@ app.use((req, res, next) => {
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 app.use('/api/auth', authRoutes);
+app.use('/api/billing', billingRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/meta', metaRoutes);
 app.use('/api/community', communityRoutes);

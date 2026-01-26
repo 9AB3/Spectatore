@@ -14,6 +14,34 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='community_state') THEN
       ALTER TABLE users ADD COLUMN community_state TEXT NULL;
     END IF;
+    -- Stripe / billing
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='stripe_customer_id') THEN
+      ALTER TABLE users ADD COLUMN stripe_customer_id TEXT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='stripe_subscription_id') THEN
+      ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='subscription_status') THEN
+      ALTER TABLE users ADD COLUMN subscription_status TEXT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='subscription_price_id') THEN
+      ALTER TABLE users ADD COLUMN subscription_price_id TEXT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='subscription_interval') THEN
+      ALTER TABLE users ADD COLUMN subscription_interval TEXT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='current_period_end') THEN
+      ALTER TABLE users ADD COLUMN current_period_end TIMESTAMPTZ NULL;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='cancel_at_period_end') THEN
+      ALTER TABLE users ADD COLUMN cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='billing_exempt') THEN
+      ALTER TABLE users ADD COLUMN billing_exempt BOOLEAN NOT NULL DEFAULT FALSE;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='trial_ends_at') THEN
+      ALTER TABLE users ADD COLUMN trial_ends_at TIMESTAMPTZ NULL;
+    END IF;
   END IF;
 
   -- shifts
@@ -104,7 +132,23 @@ CREATE TABLE IF NOT EXISTS users (
   reset_code TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
   terms_accepted_at TIMESTAMPTZ,
-  terms_version TEXT
+  terms_version TEXT,
+  -- Stripe / billing
+  stripe_customer_id TEXT,
+  stripe_subscription_id TEXT,
+  subscription_status TEXT,
+  subscription_price_id TEXT,
+  subscription_interval TEXT,
+  current_period_end TIMESTAMPTZ,
+  cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE,
+  billing_exempt BOOLEAN NOT NULL DEFAULT FALSE,
+  trial_ends_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+  id TEXT PRIMARY KEY,
+  type TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- WORK SITES (where a user works / worked) - NOT tied to subscribed Site Admin.
