@@ -215,12 +215,30 @@ export default function Subscribe() {
 
   const statusLabel = String(st?.subscription_status || 'none');
 
+  const periodEndLabel = useMemo(() => {
+    if (!st?.current_period_end) return '';
+    try {
+      return new Date(st.current_period_end).toLocaleString();
+    } catch {
+      return String(st.current_period_end);
+    }
+  }, [st?.current_period_end]);
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 shadow-xl">
-          <div className="text-xl font-semibold">Checking subscription…</div>
-          <div className="mt-2 text-sm text-neutral-300">One moment.</div>
+      <div className="w-full flex items-center justify-center p-4" style={{ minHeight: '100dvh' }}>
+        <div className="w-full max-w-3xl">
+          <div className="card">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-2xl font-semibold">Subscription</div>
+              <span className="tv-pill">Status: {statusLabel}</span>
+            </div>
+            <div className="mt-2 text-sm tv-muted">Checking your subscription…</div>
+            <div className="mt-5 flex items-center gap-3">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-[color:var(--hairline)] border-t-[color:var(--text)]" />
+              <div className="text-sm tv-muted">One moment.</div>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -229,44 +247,40 @@ export default function Subscribe() {
   // If user just paid, show unlocking state (even if still not active yet).
   if (cameFromSuccess && st?.enforced && !st?.allowed) {
     return (
-      <div className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 shadow-xl">
-          <div className="text-2xl font-semibold">Unlocking your account…</div>
-          <div className="mt-2 text-sm text-neutral-300">
-            We’re waiting for Stripe to confirm your subscription. This usually takes only a few seconds.
-          </div>
+      <div className="w-full flex items-center justify-center p-4" style={{ minHeight: '100dvh' }}>
+        <div className="w-full max-w-3xl">
+          <div className="card">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-2xl font-semibold">Unlocking your account</div>
+                <div className="mt-2 text-sm tv-muted">
+                  We’re waiting for Stripe to confirm your subscription. This usually takes only a few seconds.
+                </div>
+              </div>
+              <span className="tv-pill">Status: {statusLabel}</span>
+            </div>
 
-          <div className="mt-4 rounded-xl bg-neutral-950/40 border border-neutral-800 p-3 text-xs text-neutral-300">
-            Status: <span className="text-neutral-100">{statusLabel}</span>
-            {st?.current_period_end ? (
-              <div className="mt-1">
-                Paid until: <span className="text-neutral-100">{new Date(st.current_period_end).toLocaleString()}</span>
+            {periodEndLabel ? (
+              <div className="mt-4 text-xs tv-muted">
+                Paid until: <span className="font-semibold" style={{ color: 'var(--text)' }}>{periodEndLabel}</span>
               </div>
             ) : null}
-          </div>
 
-          <div className="mt-5 flex items-center gap-3">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-neutral-700 border-t-neutral-100" />
-            <div className="text-sm text-neutral-300">Checking…</div>
-          </div>
+            <div className="mt-5 flex items-center gap-3">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-[color:var(--hairline)] border-t-[color:var(--text)]" />
+              <div className="text-sm tv-muted">Checking…</div>
+            </div>
 
-          {err ? <div className="mt-4 text-sm text-red-400">{err}</div> : null}
+            {err ? <div className="mt-4 text-sm" style={{ color: 'var(--bad)' }}>{err}</div> : null}
 
-          <div className="mt-6 grid grid-cols-1 gap-3">
-            <button
-              disabled={busy}
-              onClick={openPortal}
-              className="rounded-xl border border-neutral-700 hover:bg-neutral-800/50 disabled:opacity-60 px-4 py-3 font-semibold"
-            >
-              Manage subscription
-            </button>
-            <button
-              disabled={busy}
-              onClick={logout}
-              className="rounded-xl text-neutral-300 hover:text-neutral-100 px-4 py-2"
-            >
-              Log out
-            </button>
+            <div className="mt-6 flex flex-col sm:flex-row gap-3">
+              <button disabled={busy} onClick={openPortal} className="btn">
+                Manage subscription
+              </button>
+              <button disabled={busy} onClick={logout} className="btn" style={{ background: 'var(--bg-elev)', color: 'var(--text)', border: '1px solid var(--hairline)' }}>
+                Log out
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -275,53 +289,87 @@ export default function Subscribe() {
 
   // Default paywall state
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 shadow-xl">
-        <div className="text-2xl font-semibold">Subscription required</div>
-        <div className="mt-2 text-sm text-neutral-300">
-          This account needs an active subscription before you can access Spectatore.
-        </div>
+    <div className="w-full flex items-center justify-center p-4" style={{ minHeight: '100dvh' }}>
+      <div className="w-full max-w-3xl">
+        <div className="card">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-2xl font-semibold">Subscription</div>
+              <div className="mt-2 text-sm tv-muted">
+                This account needs an active subscription before you can access Spectatore.
+              </div>
+            </div>
+            <span className="tv-pill">Status: {statusLabel}</span>
+          </div>
 
-        <div className="mt-4 rounded-xl bg-neutral-950/40 border border-neutral-800 p-3 text-xs text-neutral-300">
-          Status: <span className="text-neutral-100">{statusLabel}</span>
-          {st?.current_period_end ? (
-            <div className="mt-1">
-              Paid until: <span className="text-neutral-100">{new Date(st.current_period_end).toLocaleString()}</span>
+          {periodEndLabel ? (
+            <div className="mt-3 text-xs tv-muted">
+              Paid until: <span className="font-semibold" style={{ color: 'var(--text)' }}>{periodEndLabel}</span>
             </div>
           ) : null}
-        </div>
 
-        {err ? <div className="mt-4 text-sm text-red-400">{err}</div> : null}
+          {prices?.error ? (
+            <div className="mt-3 text-sm" style={{ color: 'var(--warn)' }}>{prices.error}</div>
+          ) : null}
 
-        <div className="mt-5 grid grid-cols-1 gap-3">
-          <button
-            disabled={busy}
-            onClick={() => startCheckout('month')}
-            className="rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 px-4 py-3 font-semibold"
-          >
-            {monthlyLabel}
-          </button>
-          <button
-            disabled={busy}
-            onClick={() => startCheckout('year')}
-            className="rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-60 px-4 py-3 font-semibold"
-          >
-            {yearlyLabel}
-          </button>
-          <button
-            disabled={busy}
-            onClick={openPortal}
-            className="rounded-xl border border-neutral-700 hover:bg-neutral-800/50 disabled:opacity-60 px-4 py-3 font-semibold"
-          >
-            Manage subscription
-          </button>
-          <button
-            disabled={busy}
-            onClick={logout}
-            className="rounded-xl text-neutral-300 hover:text-neutral-100 px-4 py-2"
-          >
-            Log out
-          </button>
+          {err ? <div className="mt-4 text-sm" style={{ color: 'var(--bad)' }}>{err}</div> : null}
+
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="tv-tile tv-hoverable">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-lg font-semibold">Monthly</div>
+                  <div className="mt-1 text-sm tv-muted">
+                    {typeof monthlyMajor === 'number' ? `${moneyFmt.fmt(monthlyMajor)} / month` : 'Loading price…'}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4">
+                <button disabled={busy} onClick={() => startCheckout('month')} className="btn w-full">
+                  Choose Monthly
+                </button>
+              </div>
+            </div>
+
+            <div className="tv-tile tv-hoverable" style={{ borderColor: 'rgba(184, 135, 47, 0.35)' }}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-lg font-semibold">Yearly</div>
+                    <span className="tv-pill" style={{ background: 'rgba(184, 135, 47, 0.18)', borderColor: 'rgba(184, 135, 47, 0.35)' }}>
+                      Recommended
+                    </span>
+                  </div>
+                  <div className="mt-1 text-sm tv-muted">
+                    {typeof yearlyMajor === 'number' ? `${moneyFmt.fmt(yearlyMajor)} / year` : 'Loading price…'}
+                  </div>
+                  {typeof yearlyPerMonth === 'number' ? (
+                    <div className="mt-1 text-xs tv-muted">
+                      ≈ {moneyFmt.fmt(yearlyPerMonth)} / month{typeof savingsPct === 'number' && savingsPct > 0 ? ` • Save ~${savingsPct}%` : ''}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+              <div className="mt-4">
+                <button disabled={busy} onClick={() => startCheckout('year')} className="btn btn-secondary w-full">
+                  Choose Yearly
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 flex flex-col sm:flex-row gap-3">
+            <button disabled={busy} onClick={openPortal} className="btn" style={{ background: 'var(--bg-elev)', color: 'var(--text)', border: '1px solid var(--hairline)' }}>
+              Manage subscription
+            </button>
+            <button disabled={busy} onClick={logout} className="btn" style={{ background: 'transparent', color: 'var(--muted)', border: '1px solid var(--hairline)' }}>
+              Log out
+            </button>
+          </div>
+
+          <div className="mt-4 text-xs tv-muted">
+            Pricing is pulled live from Stripe (the Price IDs set in your environment).
+          </div>
         </div>
       </div>
     </div>
