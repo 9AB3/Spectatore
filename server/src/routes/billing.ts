@@ -205,6 +205,48 @@ if (u.stripe_subscription_id && process.env.STRIPE_SECRET_KEY) {
 });
 
 // Creates a Stripe Checkout session.
+
+
+// Returns the current Stripe prices for the configured monthly/yearly price IDs.
+// The client uses this so pricing UI is not hard-coded.
+router.get('/prices', authMiddleware, async (req: any, res) => {
+  try {
+    const stripe = getStripe();
+    const monthlyId = (process.env.STRIPE_PRICE_MONTHLY || '').trim();
+    const yearlyId = (process.env.STRIPE_PRICE_YEARLY || '').trim();
+    if (!monthlyId || !yearlyId) {
+      return res.status(400).json({ ok: false, error: 'Stripe price ids not configured' });
+    }
+
+    const [m, y] = await Promise.all([
+      stripe.prices.retrieve(monthlyId, { expand: ['product'] }),
+      stripe.prices.retrieve(yearlyId, { expand: ['product'] }),
+    ]);
+
+    const norm = (p: Stripe.Price) => ({
+      id: p.id,
+      active: p.active,
+      currency: p.currency,
+      unit_amount: p.unit_amount,
+      unit_amount_decimal: p.unit_amount_decimal,
+      recurring: p.recurring
+        ? { interval: p.recurring.interval, interval_count: p.recurring.interval_count }
+        : null,
+      nickname: p.nickname || null,
+      product:
+        typeof p.product === 'string'
+          ? { id: p.product }
+          : p.product
+            ? { id: (p.product as any).id, name: (p.product as any).name || null }
+            : null,
+    });
+
+    return res.json({ ok: true, monthly: norm(m as any), yearly: norm(y as any) });
+  } catch (e: any) {
+    return res.status(500).json({ ok: false, error: e?.message || 'Could not load Stripe prices' });
+  }
+});
+
 router.post('/create-checkout-session', authMiddleware, async (req: any, res) => {
   try {
     const stripe = getStripe();
