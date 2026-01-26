@@ -60,15 +60,15 @@ export default function OnboardingChecklist({
 
     const shell = {
       width: isMobile ? 'calc(100vw - 24px)' : 'min(560px, 100%)',
-      maxHeight: isMobile ? '76vh' : 'min(78vh, 720px)',
-      overflow: 'auto',
+      maxHeight: isMobile ? 'none' : 'min(78vh, 720px)',
+      overflow: isMobile ? 'hidden' : 'auto',
       overscrollBehavior: 'contain',
       borderRadius: isMobile ? 26 : 18,
       background: 'rgba(18,18,18,0.96)',
       color: '#fff',
       border: '1px solid rgba(255,255,255,0.08)',
       boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
-      padding: isMobile ? 14 : 16,    };
+      padding: isMobile ? 12 : 16,    };
 
     const item = {
       display: 'flex',
@@ -111,7 +111,7 @@ export default function OnboardingChecklist({
       <div style={styles.shell} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
           <div>
-            <div style={{ fontSize: isMobile ? 20 : 18, fontWeight: 900 }}>Getting started</div>
+            <div style={{ fontSize: isMobile ? 18 : 18, fontWeight: 900 }}>Getting started</div>
             <div style={{ opacity: 0.8, marginTop: 2 }}>
               {status.completedCount}/{status.total} complete ({pct}%)
             </div>
@@ -134,46 +134,119 @@ export default function OnboardingChecklist({
           </button>
         </div>
 
-        <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
-          {status.steps.map((s) => (
-            <div key={s.key} style={{ ...styles.item, opacity: s.done ? 0.75 : 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                <div
-                  style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: 999,
-                    border: '2px solid rgba(255,255,255,0.35)',
-                    background: s.done ? 'rgba(255,255,255,0.92)' : 'transparent',
-                    flex: '0 0 auto',
-                  }}
-                  aria-hidden="true"
-                />
-                <div style={{ fontWeight: 800, overflow: 'auto',
-      overscrollBehavior: 'contain', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {s.label}
+        <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+          {status.steps.map((s) => {
+            const rowBase: React.CSSProperties = { ...styles.item, opacity: s.done ? 0.75 : 1 };
+
+            // Mobile: prevent horizontal overflow and keep everything within viewport (no scrolling)
+            if (isMobile) {
+              return (
+                <div key={s.key} style={{ ...rowBase, padding: '10px 10px', gap: 10, alignItems: 'stretch' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                    <div
+                      style={{
+                        width: 18,
+                        height: 18,
+                        borderRadius: 999,
+                        border: '2px solid rgba(255,255,255,0.35)',
+                        background: s.done ? 'rgba(255,255,255,0.92)' : 'transparent',
+                        flex: '0 0 auto',
+                      }}
+                      aria-hidden="true"
+                    />
+                    <div
+                      style={{
+                        fontWeight: 850,
+                        fontSize: 16,
+                        lineHeight: 1.2,
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical' as const,
+                        opacity: s.done ? 0.85 : 1,
+                      }}
+                    >
+                      {s.label}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                    {!s.done ? (
+                      <>
+                        <button
+                          onClick={() => go(s.key)}
+                          style={{
+                            ...styles.btnGhost,
+                            padding: '8px 12px',
+                            borderRadius: 14,
+                            fontSize: 15,
+                            fontWeight: 900,
+                          }}
+                        >
+                          Go
+                        </button>
+                        <button
+                          onClick={() => markDone(s.key)}
+                          style={{
+                            ...styles.btnPrimary,
+                            padding: '8px 12px',
+                            borderRadius: 14,
+                            fontSize: 15,
+                            fontWeight: 900,
+                          }}
+                        >
+                          Done
+                        </button>
+                      </>
+                    ) : (
+                      <span style={{ fontWeight: 900, opacity: 0.9 }}>Done</span>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+
+            // Desktop/tablet
+            return (
+              <div key={s.key} style={rowBase}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                  <div
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 999,
+                      border: '2px solid rgba(255,255,255,0.35)',
+                      background: s.done ? 'rgba(255,255,255,0.92)' : 'transparent',
+                      flex: '0 0 auto',
+                    }}
+                    aria-hidden="true"
+                  />
+                  <div style={{ fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.label}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {!s.done ? (
+                    <>
+                      <button onClick={() => go(s.key)} style={styles.btnGhost}>
+                        Go
+                      </button>
+                      <button onClick={() => markDone(s.key)} style={styles.btnPrimary}>
+                        Mark done
+                      </button>
+                    </>
+                  ) : (
+                    <span style={{ fontWeight: 900, opacity: 0.9 }}>Done</span>
+                  )}
                 </div>
               </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {!s.done ? (
-                  <>
-                    <button onClick={() => go(s.key)} style={styles.btnGhost}>
-                      Go
-                    </button>
-                    <button onClick={() => markDone(s.key)} style={styles.btnPrimary}>
-                      Mark done
-                    </button>
-                  </>
-                ) : (
-                  <span style={{ fontWeight: 900, opacity: 0.9 }}>Done</span>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
           <button
             onClick={async () => {
               localStorage.setItem('spectatore-onboarding-hide-until', String(Date.now() + 7 * 24 * 3600 * 1000));
@@ -183,7 +256,7 @@ export default function OnboardingChecklist({
               border: '1px solid rgba(255,255,255,0.18)',
               background: 'transparent',
               color: '#fff',
-              padding: '10px 12px',
+              padding: isMobile ? '8px 12px' : '10px 12px',
               borderRadius: 14,
               cursor: 'pointer',
               fontWeight: 900,
