@@ -1,5 +1,5 @@
 import Header from '../components/Header';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import useToast from '../hooks/useToast';
 import { track } from '../lib/analytics';
 import { useEffect, useState } from 'react';
@@ -55,14 +55,27 @@ function formatYmd(d: Date): string {
 
 export default function Main() {
   const nav = useNavigate();
+  const location = useLocation();
   const { setMsg, Toast } = useToast();
   const [open, setOpen] = useState(false);
+  const [calendarAutoOpen, setCalendarAutoOpen] = useState(false);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [dn, setDn] = useState<'DS' | 'NS'>('DS');
   const [isAdmin, setIsAdmin] = useState(false);
   const [datesWithData, setDatesWithData] = useState<Set<string>>(() => new Set());
   const [dupeOpen, setDupeOpen] = useState<boolean>(false);
   const [dupeInfo, setDupeInfo] = useState<any>(null);
+
+  // Allow deep-linking to open Start Shift modal from onboarding
+  useEffect(() => {
+    const sp = new URLSearchParams(location.search || '');
+    if (sp.get('openStartShift') === '1') {
+      setOpen(true);
+      setCalendarAutoOpen(true);
+      // Clean the URL so refreshing doesn't keep re-opening
+      nav('/Main', { replace: true });
+    }
+  }, [location.search]);
 
   async function tagOut() {
     try {
@@ -379,12 +392,17 @@ function ShiftDateCalendar({
   value,
   onChange,
   datesWithData,
+  autoOpen,
+  onAutoOpened,
 }: {
   value: string;
   onChange: (v: string) => void;
   datesWithData: Set<string>;
+  autoOpen?: boolean;
+  onAutoOpened?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [calendarAutoOpen, setCalendarAutoOpen] = useState(false);
 
   const baseDate = value ? parseYmd(value) : new Date();
   const [month, setMonth] = useState(baseDate.getMonth());

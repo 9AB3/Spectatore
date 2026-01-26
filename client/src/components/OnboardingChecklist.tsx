@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 
@@ -15,42 +15,100 @@ export default function OnboardingChecklist({
   onClose: () => void;
 }) {
   const nav = useNavigate();
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 430px)');
+    const apply = () => setIsMobile(Boolean(mq.matches));
+    apply();
+    mq.addEventListener?.('change', apply);
+    return () => mq.removeEventListener?.('change', apply);
+  }, []);
 
   async function markDone(key: string) {
     await api('/api/user/onboarding/complete', { method: 'POST', body: { key } });
     await onRefresh();
   }
 
+  function go(key: string) {
+    if (key === 'setup_equipment_locations') nav('/Equipment&Locations');
+    if (key === 'start_shift') nav('/Main?openStartShift=1');
+    if (key === 'connect_crew') nav('/Connections');
+    if (key === 'review_progress') nav('/You');
+  }
+
   const pct = status.total ? Math.round((status.completedCount / status.total) * 100) : 0;
 
+  const styles = useMemo(() => {
+    const backdrop = {
+      position: 'fixed' as const,
+      inset: 0,
+      background: 'rgba(0,0,0,0.72)',
+      WebkitBackdropFilter: 'blur(10px)',
+      backdropFilter: 'blur(10px)',
+      zIndex: 9999,
+      display: 'flex',
+      alignItems: isMobile ? 'flex-end' : 'center',
+      justifyContent: 'center',
+      padding: isMobile ? 8 : 16,
+    };
+
+    const shell = {
+      width: isMobile ? 'calc(100vw - 16px)' : 'min(560px, 100%)',
+      maxHeight: isMobile ? '82vh' : 'min(78vh, 720px)',
+      overflow: 'hidden',
+      borderRadius: isMobile ? 26 : 18,
+      background: 'rgba(18,18,18,0.96)',
+      color: '#fff',
+      border: '1px solid rgba(255,255,255,0.08)',
+      boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
+      padding: isMobile ? 14 : 16,
+      marginBottom: isMobile ? 6 : 0,
+    };
+
+    const item = {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      padding: isMobile ? '14px 12px' : '10px 12px',
+      borderRadius: 16,
+      border: '1px solid rgba(255,255,255,0.10)',
+      background: 'rgba(255,255,255,0.04)',
+    };
+
+    const btnGhost = {
+      border: '1px solid rgba(255,255,255,0.18)',
+      background: 'transparent',
+      color: '#fff',
+      padding: '8px 10px',
+      borderRadius: 12,
+      cursor: 'pointer',
+      fontWeight: 800,
+      whiteSpace: 'nowrap' as const,
+    };
+
+    const btnPrimary = {
+      border: 0,
+      background: 'rgba(255,255,255,0.90)',
+      color: '#000',
+      padding: '8px 10px',
+      borderRadius: 12,
+      cursor: 'pointer',
+      fontWeight: 900,
+      whiteSpace: 'nowrap' as const,
+    };
+
+    return { backdrop, shell, item, btnGhost, btnPrimary };
+  }, [isMobile]);
+
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.35)',
-        zIndex: 9999,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 16,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          width: 'min(560px, 100%)',
-          borderRadius: 18,
-          background: 'var(--card, #fff)',
-          boxShadow: '0 12px 40px rgba(0,0,0,0.18)',
-          padding: 16,
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+    <div style={styles.backdrop} onClick={onClose}>
+      <div style={styles.shell} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 800 }}>Getting started</div>
-            <div style={{ opacity: 0.7, marginTop: 2 }}>
+            <div style={{ fontSize: isMobile ? 20 : 18, fontWeight: 900 }}>Getting started</div>
+            <div style={{ opacity: 0.8, marginTop: 2 }}>
               {status.completedCount}/{status.total} complete ({pct}%)
             </div>
           </div>
@@ -59,10 +117,11 @@ export default function OnboardingChecklist({
             style={{
               border: 0,
               background: 'transparent',
-              fontSize: 22,
+              fontSize: 26,
               cursor: 'pointer',
               lineHeight: 1,
-              opacity: 0.7,
+              opacity: 0.8,
+              color: '#fff',
             }}
             aria-label="Close"
             title="Close"
@@ -73,72 +132,36 @@ export default function OnboardingChecklist({
 
         <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
           {status.steps.map((s) => (
-            <div
-              key={s.key}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 12,
-                padding: '10px 12px',
-                borderRadius: 14,
-                border: '1px solid rgba(0,0,0,0.08)',
-                background: s.done ? 'rgba(0,0,0,0.03)' : 'transparent',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div key={s.key} style={{ ...styles.item, opacity: s.done ? 0.75 : 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                 <div
                   style={{
                     width: 22,
                     height: 22,
                     borderRadius: 999,
-                    border: '2px solid rgba(0,0,0,0.35)',
-                    background: s.done ? 'rgba(0,0,0,0.75)' : 'transparent',
+                    border: '2px solid rgba(255,255,255,0.35)',
+                    background: s.done ? 'rgba(255,255,255,0.92)' : 'transparent',
+                    flex: '0 0 auto',
                   }}
                   aria-hidden="true"
                 />
-                <div style={{ fontWeight: 700 }}>{s.label}</div>
+                <div style={{ fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {s.label}
+                </div>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {!s.done ? (
                   <>
-                    <button
-                      onClick={() => {
-                        // Helpful shortcuts
-                        if (s.key === 'start_shift') nav('/Main');
-                        if (s.key === 'submit_feedback') nav('/Feedback');
-                        if (s.key === 'join_site') nav('/Connections');
-                        if (s.key === 'tag_out') nav('/Main');
-                      }}
-                      style={{
-                        border: '1px solid rgba(0,0,0,0.18)',
-                        background: 'transparent',
-                        padding: '8px 10px',
-                        borderRadius: 12,
-                        cursor: 'pointer',
-                        fontWeight: 700,
-                      }}
-                    >
+                    <button onClick={() => go(s.key)} style={styles.btnGhost}>
                       Go
                     </button>
-                    <button
-                      onClick={() => markDone(s.key)}
-                      style={{
-                        border: 0,
-                        background: 'rgba(0,0,0,0.85)',
-                        color: '#fff',
-                        padding: '8px 10px',
-                        borderRadius: 12,
-                        cursor: 'pointer',
-                        fontWeight: 800,
-                      }}
-                    >
+                    <button onClick={() => markDone(s.key)} style={styles.btnPrimary}>
                       Mark done
                     </button>
                   </>
                 ) : (
-                  <span style={{ fontWeight: 800, opacity: 0.7 }}>Done</span>
+                  <span style={{ fontWeight: 900, opacity: 0.9 }}>Done</span>
                 )}
               </div>
             </div>
@@ -152,12 +175,13 @@ export default function OnboardingChecklist({
               onClose();
             }}
             style={{
-              border: '1px solid rgba(0,0,0,0.18)',
+              border: '1px solid rgba(255,255,255,0.18)',
               background: 'transparent',
+              color: '#fff',
               padding: '10px 12px',
               borderRadius: 14,
               cursor: 'pointer',
-              fontWeight: 800,
+              fontWeight: 900,
             }}
           >
             Hide for a week

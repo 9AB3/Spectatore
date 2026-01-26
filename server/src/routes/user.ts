@@ -925,10 +925,10 @@ router.post('/site-invites/respond', authMiddleware, async (req: any, res) => {
 // Tracks simple "getting started" steps for new users.
 // Client can display a checklist and mark steps completed.
 const DEFAULT_ONBOARDING_STEPS: Array<{ key: string; label: string }> = [
+  { key: 'setup_equipment_locations', label: 'Add your equipment / locations' },
   { key: 'start_shift', label: 'Start your first shift' },
-  { key: 'tag_out', label: 'Tag out / end a shift' },
-  { key: 'submit_feedback', label: 'Send one piece of feedback' },
-  { key: 'join_site', label: 'Join a work site (optional)' },
+  { key: 'connect_crew', label: 'Connect with your crew' },
+  { key: 'review_progress', label: 'Review your progress' },
 ];
 
 // GET /api/user/onboarding/status
