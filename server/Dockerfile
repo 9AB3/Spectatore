@@ -7,11 +7,6 @@ WORKDIR /app
 ENV npm_config_registry=https://registry.npmjs.org/
 ENV NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
 
-# Make npm fetches more resilient on CI/builders that occasionally drop connections
-ENV npm_config_fetch_retries=5
-ENV npm_config_fetch_retry_mintimeout=20000
-ENV npm_config_fetch_retry_maxtimeout=120000
-
 # If Render/builder injects proxies, blank them (common cause of "internal registry" fetches)
 ENV HTTP_PROXY=
 ENV HTTPS_PROXY=
@@ -28,10 +23,7 @@ COPY package.json package-lock.json tsconfig.json ./
 RUN node -p "process.version" \
  && echo "npm registry (env)=$npm_config_registry" \
  && npm config get registry \
- && echo "Sanitizing package-lock.json (in case an internal registry URL was injected)..." \
- && sed -i 's#https://packages\\.applied-caas-gateway1\\.internal\\.api\\.openai\\.org/artifactory/api/npm/npm-public/#https://registry.npmjs.org/#g' package-lock.json \
- && npm cache verify \
- && npm ci --registry=https://registry.npmjs.org/ --include=optional --no-audit --no-fund
+ && npm install --registry=https://registry.npmjs.org/ --include=optional --no-audit --no-fund
 
 # 3) Copy source + build helpers
 COPY src ./src

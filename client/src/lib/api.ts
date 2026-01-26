@@ -21,13 +21,23 @@ const DEV_FALLBACK_BASE =
     ? `${window.location.protocol}//${window.location.hostname}:5000`
     : 'http://localhost:5000';
 
+const PROD_FALLBACK_BASE =
+  typeof window !== 'undefined' && window.location
+    ? (window.location.hostname.startsWith('app.')
+        ? `${window.location.protocol}//${window.location.hostname.replace(/^app\./, 'api.')}`
+        : '')
+    : '';
+
 const BASE = IS_DEV
   ? import.meta.env.VITE_API_BASE || DEV_FALLBACK_BASE
-  : (import.meta.env.VITE_API_BASE || ''); // allow same-origin /api in production if not set
+  : (import.meta.env.VITE_API_BASE || PROD_FALLBACK_BASE || ''); // same-origin only as last resort
 
-if (!IS_DEV && !BASE) {
-  // Not fatal: we can still use same-origin /api if the frontend is served by the same host as the API.
-  console.warn('⚠️ VITE_API_BASE is not set for production build – using same-origin /api paths');
+if (!IS_DEV && !import.meta.env.VITE_API_BASE) {
+  // If VITE_API_BASE isn't set, we try a safe heuristic:
+  // app.example.com -> api.example.com
+  // If that doesn't apply, we fall back to same-origin /api (may fail on static hosts with SPA rewrites).
+  console.warn('⚠️ VITE_API_BASE is not set for production build – using fallback API base:', BASE || '(same-origin /api)');
+}
 }
 
 /**
