@@ -226,6 +226,116 @@ function normWorkSiteName(s: any): string {
 }
 
 // Get current Work Site + history
+// Onboarding checklist status (derived - no schema changes)
+router.get('/onboarding/status', authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as any).user_id;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+    const uRes = await pool.query(
+      `SELECT id, email_confirmed, terms_accepted_at, work_site_id, site,
+              subscription_status, billing_exempt, trial_ends_at
+       FROM users WHERE id = $1`,
+      [userId]
+    );
+    const user = uRes.rows[0];
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const shiftRes = await pool.query(
+      `SELECT id, finalized_at
+       FROM shifts
+       WHERE user_id = $1
+       ORDER BY created_at ASC
+       LIMIT 1`,
+      [userId]
+    );
+    const firstShift = shiftRes.rows[0];
+
+    let hasActivity = false;
+    if (firstShift?.id) {
+      const actRes = await pool.query(
+        `SELECT 1
+         FROM shift_activities
+         WHERE shift_id = $1
+         LIMIT 1`,
+        [firstShift.id]
+      );
+      hasActivity = actRes.rowCount > 0;
+    }
+
+    const steps = [
+      {
+        key: 'confirm_email',
+        title: 'Confirm your email',
+        description: 'Verify your email so you can recover access and receive notifications.',
+        completed: !!user.email_confirmed,
+        cta: { label: 'Check email', path: '/ConfirmEmail' }
+      },
+      {
+        key: 'accept_terms',
+        title: 'Accept terms',
+        description: 'Required before you can log shifts.',
+        completed: !!user.terms_accepted_at,
+        cta: { label: 'Open terms', path: '/Terms' }
+      },
+      {
+        key: 'select_site',
+        title: 'Select your work site',
+        description: 'So your shifts and stats are grouped correctly.',
+        completed: !!user.work_site_id || (user.site && user.site !== 'default'),
+        cta: { label: 'Set site', path: '/Settings' }
+      },
+      {
+        key: 'start_shift',
+        title: 'Start your first shift',
+        description: 'Create a shift for today (DS/NS).',
+        completed: !!firstShift,
+        cta: { label: 'Start shift', path: '/Shift' }
+      },
+      {
+        key: 'log_activity',
+        title: 'Log your first activity',
+        description: 'Add one activity (e.g. Hauling, Loading, Development).',
+        completed: !!hasActivity,
+        cta: { label: 'Add activity', path: '/Activity' }
+      },
+      {
+        key: 'finalize_shift',
+        title: 'Finalize your shift',
+        description: 'Lock it in and generate clean totals.',
+        completed: !!firstShift?.finalized_at,
+        cta: { label: 'Finalize', path: '/FinalizeShift' }
+      }
+    ];
+
+    // Optional billing step (only if not exempt)
+    const billingRequired = !user.billing_exempt;
+    const billingOk = user.subscription_status === 'active' || user.subscription_status === 'trial';
+    if (billingRequired) {
+      steps.unshift({
+        key: 'subscribe',
+        title: 'Activate subscription',
+        description: 'Required to use the app (unless exempt).',
+        completed: billingOk,
+        cta: { label: 'Manage billing', path: '/Subscription' }
+      });
+    }
+
+    const completedCount = steps.filter(s => s.completed).length;
+
+    return res.json({
+      user_id: userId,
+      steps,
+      completedCount,
+      totalCount: steps.length,
+      completed: completedCount === steps.length
+    });
+  } catch (e: any) {
+    console.error('[onboarding] status failed', e);
+    return res.status(500).json({ error: 'onboarding status failed' });
+  }
+});
+
 router.get('/work-site', authMiddleware, async (req: any, res) => {
   try {
     const user_id = req.user_id;

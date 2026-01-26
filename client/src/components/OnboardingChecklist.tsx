@@ -42,7 +42,7 @@ export default function OnboardingChecklist() {
     let alive = true;
     (async () => {
       try {
-        const res = await api.get('/user/onboarding/status');
+        const res = await api('/api/user/onboarding/status');
         if (!alive) return;
         setStatus(res);
       } catch {
