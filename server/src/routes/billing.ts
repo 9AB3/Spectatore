@@ -2,6 +2,7 @@ import express from 'express';
 import Stripe from 'stripe';
 import { pool } from '../lib/pg.js';
 import { authMiddleware } from '../lib/auth.js';
+import { auditLog } from '../lib/audit.js';
 
 const router = express.Router();
 
@@ -67,45 +68,8 @@ router.get('/status', authMiddleware, async (req: any, res) => {
     );
     const u = r.rows?.[0];
     if (!u?.id) return res.status(404).json({ ok: false, error: 'user not found' });
-    // Backfill current_period_end from Stripe if missing but we have a subscription id.
-    // This prevents the UI showing a blank renew date in local/dev if webhooks arrived before the period end was set.
-    if (!u.current_period_end && u.stripe_subscription_id && process.env.STRIPE_SECRET_KEY) {
-      try {
-        const stripe = getStripe();
-        const sub = await stripe.subscriptions.retrieve(String(u.stripe_subscription_id));
-        const price = sub.items?.data?.[0]?.price;
-        const interval = (price?.recurring?.interval || null) as any;
-        const periodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000) : null;
-
-        if (periodEnd) {
-          await pool.query(
-            `UPDATE users
-                SET subscription_status = $2,
-                    subscription_price_id = $3,
-                    subscription_interval = $4,
-                    current_period_end = $5,
-                    cancel_at_period_end = $6
-              WHERE id = $1`,
-            [
-              u.id,
-              String(sub.status || ''),
-              price?.id || null,
-              interval,
-              periodEnd,
-              !!sub.cancel_at_period_end,
-            ],
-          );
-          // reflect for this response too
-          u.subscription_status = String(sub.status || '');
-          u.subscription_price_id = price?.id || null;
-          u.subscription_interval = interval;
-          u.current_period_end = periodEnd;
-          u.cancel_at_period_end = !!sub.cancel_at_period_end;
-        }
-      } catch {
-        // ignore backfill errors; webhook remains source of truth
-      }
-    }
+    // Webhooks are authoritative for subscription state.
+    // Do NOT backfill and write to DB from this endpoint.
 
 
     
@@ -186,6 +150,18 @@ if (u.stripe_subscription_id && process.env.STRIPE_SECRET_KEY) {
 
     const allowed = !!u.billing_exempt || !!u.is_admin || devBypass || activeStatus || withinPaidWindow;
 
+    await auditLog('billing.status', {
+      user_id: req.user_id,
+      ip: String(req.ip || ''),
+      ua: String(req.headers?.['user-agent'] || ''),
+      meta: {
+        enforced: isEnforced(),
+        allowed,
+        subscription_status: u.subscription_status || null,
+        subscription_interval: u.subscription_interval || null,
+      },
+    });
+
     return res.json({
       ok: true,
       enforced: isEnforced(),
@@ -241,6 +217,15 @@ router.get('/prices', authMiddleware, async (req: any, res) => {
             : null,
     });
 
+    await auditLog('billing.prices', {
+      user_id: req.user_id,
+      ip: String(req.ip || ''),
+      ua: String(req.headers?.['user-agent'] || ''),
+      meta: {
+        monthly: monthlyId,
+        yearly: yearlyId,
+      },
+    });
     return res.json({ ok: true, monthly: norm(m as any), yearly: norm(y as any) });
   } catch (e: any) {
     return res.status(500).json({ ok: false, error: e?.message || 'Could not load Stripe prices' });
@@ -268,6 +253,13 @@ router.post('/create-checkout-session', authMiddleware, async (req: any, res) =>
       metadata: { user_id: String(req.user_id), interval },
     });
 
+    await auditLog('billing.checkout.create', {
+      user_id: req.user_id,
+      ip: String(req.ip || ''),
+      ua: String(req.headers?.['user-agent'] || ''),
+      meta: { interval, price_id: priceId, customer_id: customerId, session_id: session.id },
+    });
+
     return res.json({ ok: true, url: session.url });
   } catch (e: any) {
     return res.status(500).json({ ok: false, error: e?.message || 'checkout failed' });
@@ -283,6 +275,12 @@ router.post('/create-portal-session', authMiddleware, async (req: any, res) => {
       customer: customerId,
       return_url: `${clientBaseUrl()}/Settings`,
     });
+    await auditLog('billing.portal.create', {
+      user_id: req.user_id,
+      ip: String(req.ip || ''),
+      ua: String(req.headers?.['user-agent'] || ''),
+      meta: { customerId },
+    });
     return res.json({ ok: true, url: session.url });
   } catch (e: any) {
     return res.status(500).json({ ok: false, error: e?.message || 'portal failed' });
@@ -296,6 +294,12 @@ router.post('/create-portal-session', authMiddleware, async (req: any, res) => {
 // charged again immediately for a shorter interval.
 router.post('/change-plan', authMiddleware, async (req: any, res) => {
   try {
+    await auditLog('billing.plan_change', {
+      user_id: userId,
+      ip: String(req.ip || ''),
+      ua: String(req.headers?.['user-agent'] || ''),
+      meta: { targetInterval },
+    });
     const intervalRaw = (req.body?.interval ?? '').toString().toLowerCase();
     const targetInterval = intervalRaw === 'month' || intervalRaw === 'monthly'
       ? 'month'
@@ -379,6 +383,13 @@ router.post('/change-plan', authMiddleware, async (req: any, res) => {
         ],
       });
 
+      await auditLog('billing.plan_change', {
+        user_id: userId,
+        ip: String(req.ip || ''),
+        ua: String(req.headers?.['user-agent'] || ''),
+        meta: { from: currentInterval, to: targetInterval, scheduled: true, effective_at: new Date(cpe * 1000).toISOString() },
+      });
+
       return res.json({
         ok: true,
         scheduled: true,
@@ -402,6 +413,13 @@ router.post('/change-plan', authMiddleware, async (req: any, res) => {
         },
       } as any);
 
+      await auditLog('billing.plan_change', {
+        user_id: userId,
+        ip: String(req.ip || ''),
+        ua: String(req.headers?.['user-agent'] || ''),
+        meta: { from: currentInterval, to: targetInterval, scheduled: false, redirect: true, session_id: session.id },
+      });
+
       return res.json({
         ok: true,
         redirect: true,
@@ -414,6 +432,13 @@ router.post('/change-plan', authMiddleware, async (req: any, res) => {
     await stripe.subscriptions.update(sub.id, {
       items: [{ id: item.id, price: targetPriceId }],
       proration_behavior: 'none',
+    });
+
+    await auditLog('billing.plan_change', {
+      user_id: userId,
+      ip: String(req.ip || ''),
+      ua: String(req.headers?.['user-agent'] || ''),
+      meta: { from: currentInterval, to: targetInterval, scheduled: false, redirect: false },
     });
 
     return res.json({ ok: true, scheduled: false, charged_now: false, message: 'Plan updated.' });
@@ -432,6 +457,12 @@ export async function handleStripeWebhook(rawBody: Buffer, sig: string | string[
 
   const event = stripe.webhooks.constructEvent(rawBody, signature, secret);
 
+  // Best-effort audit trail
+  await auditLog('billing.webhook.received', {
+    user_id: null,
+    meta: { id: event.id, type: String((event as any).type || ''), livemode: !!(event as any).livemode },
+  });
+
   // Idempotency: store processed events
   await pool.query(
     `CREATE TABLE IF NOT EXISTS stripe_webhook_events (
@@ -441,7 +472,10 @@ export async function handleStripeWebhook(rawBody: Buffer, sig: string | string[
       )`,
   );
   const already = await pool.query(`SELECT 1 FROM stripe_webhook_events WHERE id=$1`, [event.id]);
-  if (already.rowCount) return { ok: true, skipped: true };
+  if (already.rowCount) {
+    await auditLog('billing.webhook.skipped', { meta: { id: event.id, type: String((event as any).type || '') } });
+    return { ok: true, skipped: true };
+  }
   await pool.query(`INSERT INTO stripe_webhook_events(id, type) VALUES ($1,$2)`, [event.id, String((event as any).type || '')]);
 
   const upsertUserFromSubscription = async (sub: Stripe.Subscription) => {
@@ -553,6 +587,8 @@ export async function handleStripeWebhook(rawBody: Buffer, sig: string | string[
     default:
       break;
   }
+
+  await auditLog('billing.webhook.processed', { meta: { id: event.id, type: eventType } });
 
   return { ok: true };
 }

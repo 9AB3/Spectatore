@@ -98,6 +98,22 @@ async function ensureDbColumns() {
       )`,
     );
 
+    // Audit logging (best-effort)
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS audit_logs (
+        id BIGSERIAL PRIMARY KEY,
+        ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+        action TEXT NOT NULL,
+        user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+        ip TEXT NULL,
+        ua TEXT NULL,
+        meta JSONB NOT NULL DEFAULT '{}'::jsonb
+      )`,
+    );
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_ts ON audit_logs(ts)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id)`);
+
     // Realtime presence + sessions (best-effort for existing DBs)
     await pool.query(
       `CREATE TABLE IF NOT EXISTS presence_current (
