@@ -1192,6 +1192,51 @@ router.post('/members/revoke', siteAdminMiddleware, async (req: any, res) => {
 });
 
 
+
+router.post('/members/set-role', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+
+    if (site === '*') return res.status(400).json({ ok: false, error: 'site required' });
+
+    const adminSiteId = await resolveAdminSiteId(pool as any, site);
+    if (!adminSiteId) return res.status(404).json({ ok: false, error: 'site not found' });
+
+    const user_id = Number(req.body?.user_id);
+    const role = String(req.body?.role || '').trim();
+
+    if (!user_id) return res.status(400).json({ ok: false, error: 'missing user_id' });
+
+    // Keep roles tight and consistent across the app.
+    const allowed = new Set(['member', 'validator', 'admin']);
+    if (!allowed.has(role)) return res.status(400).json({ ok: false, error: 'invalid role' });
+
+    const r = await pool.query(
+      `UPDATE site_memberships
+          SET role=$1
+        WHERE user_id=$2 AND site_id=$3 AND status='active'`,
+      [role, user_id, adminSiteId],
+    );
+
+    if (!r.rowCount) {
+      // fallback: if status isn't 'active' yet (e.g., invited), still allow updating role
+      await pool.query(
+        `UPDATE site_memberships
+            SET role=$1
+          WHERE user_id=$2 AND site_id=$3`,
+        [role, user_id, adminSiteId],
+      );
+    }
+
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
+
 function hashDaySnapshot(input: unknown) {
   return crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
 }

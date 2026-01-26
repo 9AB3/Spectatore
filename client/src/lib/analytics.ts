@@ -9,7 +9,7 @@ declare global {
   }
 }
 
-const DEFAULT_MEASUREMENT_ID = 'G-K3B0KNBQ6T';
+const DEFAULT_MEASUREMENT_ID = 'G-Z7X38HRNDZ';
 
 let _inited = false;
 let _mid = '';
