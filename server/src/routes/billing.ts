@@ -294,12 +294,6 @@ router.post('/create-portal-session', authMiddleware, async (req: any, res) => {
 // charged again immediately for a shorter interval.
 router.post('/change-plan', authMiddleware, async (req: any, res) => {
   try {
-    await auditLog('billing.plan_change', {
-      user_id: userId,
-      ip: String(req.ip || ''),
-      ua: String(req.headers?.['user-agent'] || ''),
-      meta: { targetInterval },
-    });
     const intervalRaw = (req.body?.interval ?? '').toString().toLowerCase();
     const targetInterval = intervalRaw === 'month' || intervalRaw === 'monthly'
       ? 'month'
@@ -312,6 +306,12 @@ router.post('/change-plan', authMiddleware, async (req: any, res) => {
     }
 
     const userId = req.user_id;
+    await auditLog('billing.plan_change', {
+      user_id: userId,
+      ip: String(req.ip || ''),
+      ua: String(req.headers?.['user-agent'] || ''),
+      meta: { targetInterval },
+    });
     const stripe = getStripe();
     const { customerId } = await ensureCustomer(stripe, userId);
 

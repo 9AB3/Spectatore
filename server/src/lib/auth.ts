@@ -24,7 +24,7 @@ export function authMiddleware(req: any, res: any, next: any) {
 }
 
 // Separate middleware for Site Admin tools
-export function siteAdminMiddleware(req: any, res: any, next: any) {
+export async function siteAdminMiddleware(req: any, res: any, next: any) {
   const h = req.headers['authorization'] || '';
   const m = /^Bearer\s+(.+)$/.exec(h as string);
   if (!m) return res.status(401).json({ error: 'missing token' });
