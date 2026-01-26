@@ -158,8 +158,8 @@ export default function ProtectedLayout() {
             const list = Array.isArray(inv?.invites) ? inv.invites : [];
             setInvites(list);
             setInvitesPrompt(list.length > 0);
-          } catch {
-            // ignore
+          } catch (e) {
+            console.warn('[onboarding] status check failed', e);
           }
         }
 
@@ -179,7 +179,7 @@ export default function ProtectedLayout() {
         if (accepted) {
           try {
             const hideUntil = Number(localStorage.getItem('spectatore-onboarding-hide-until') || '0');
-            const shouldConsider = location.pathname === '/Main' && (!hideUntil || Date.now() > hideUntil);
+            const shouldConsider = location.pathname.toLowerCase() === '/main' && (!hideUntil || Date.now() > hideUntil);
             if (shouldConsider) {
               const st: any = await api('/api/user/onboarding/status');
               setOnboarding(st);
@@ -188,8 +188,8 @@ export default function ProtectedLayout() {
             } else {
               setShowOnboarding(false);
             }
-          } catch {
-            // ignore
+          } catch (e) {
+            console.warn('[onboarding] status check failed', e);
           }
         }
       } catch {
@@ -325,7 +325,7 @@ export default function ProtectedLayout() {
         paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))',
       }}
     >
-      {showOnboarding && onboarding && location.pathname === '/Main' && (
+      {showOnboarding && onboarding && location.pathname.toLowerCase() === '/main' && (
         <OnboardingChecklist
           status={onboarding}
           onRefresh={async () => {

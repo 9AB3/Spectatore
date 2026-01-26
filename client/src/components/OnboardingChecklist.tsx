@@ -31,10 +31,15 @@ export default function OnboardingChecklist({
   }
 
   function go(key: string) {
-    if (key === 'setup_equipment_locations') nav('/Equipment&Locations');
-    if (key === 'start_shift') nav('/Main?openStartShift=1');
-    if (key === 'connect_crew') nav('/Connections');
-    if (key === 'review_progress') nav('/You');
+    // Close the onboarding sheet before navigating/opening other UI (e.g. Start Shift modal),
+    // otherwise the target modal can render "behind" this overlay on mobile.
+    onClose();
+    window.setTimeout(() => {
+      if (key === 'setup_equipment_locations') nav('/Equipment&Locations');
+      if (key === 'start_shift') nav('/Main?openStartShift=1');
+      if (key === 'connect_crew') nav('/Connections');
+      if (key === 'review_progress') nav('/You');
+    }, 50);
   }
 
   const pct = status.total ? Math.round((status.completedCount / status.total) * 100) : 0;
@@ -43,28 +48,27 @@ export default function OnboardingChecklist({
     const backdrop = {
       position: 'fixed' as const,
       inset: 0,
-      background: 'rgba(0,0,0,0.72)',
-      WebkitBackdropFilter: 'blur(10px)',
-      backdropFilter: 'blur(10px)',
+      background: 'rgba(0,0,0,0.86)',
+      WebkitBackdropFilter: 'blur(14px)',
+      backdropFilter: 'blur(14px)',
       zIndex: 9999,
       display: 'flex',
-      alignItems: isMobile ? 'flex-end' : 'center',
+      alignItems: 'center',
       justifyContent: 'center',
-      padding: isMobile ? 8 : 16,
+      padding: isMobile ? 12 : 16,
     };
 
     const shell = {
-      width: isMobile ? 'calc(100vw - 16px)' : 'min(560px, 100%)',
-      maxHeight: isMobile ? '82vh' : 'min(78vh, 720px)',
-      overflow: 'hidden',
+      width: isMobile ? 'calc(100vw - 24px)' : 'min(560px, 100%)',
+      maxHeight: isMobile ? '76vh' : 'min(78vh, 720px)',
+      overflow: 'auto',
+      overscrollBehavior: 'contain',
       borderRadius: isMobile ? 26 : 18,
       background: 'rgba(18,18,18,0.96)',
       color: '#fff',
       border: '1px solid rgba(255,255,255,0.08)',
       boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
-      padding: isMobile ? 14 : 16,
-      marginBottom: isMobile ? 6 : 0,
-    };
+      padding: isMobile ? 14 : 16,    };
 
     const item = {
       display: 'flex',
@@ -145,7 +149,8 @@ export default function OnboardingChecklist({
                   }}
                   aria-hidden="true"
                 />
-                <div style={{ fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ fontWeight: 800, overflow: 'auto',
+      overscrollBehavior: 'contain', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {s.label}
                 </div>
               </div>
