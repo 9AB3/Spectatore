@@ -23,7 +23,7 @@ COPY package.json package-lock.json tsconfig.json ./
 RUN node -p "process.version" \
  && echo "npm registry (env)=$npm_config_registry" \
  && npm config get registry \
- && npm ci --registry=https://registry.npmjs.org/ --include=optional --no-audit --no-fund
+ && npm install --registry=https://registry.npmjs.org/ --include=optional --no-audit --no-fund
 
 # 3) Copy source + build helpers
 COPY src ./src

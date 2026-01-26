@@ -400,7 +400,7 @@ export async function handleStripeWebhook(rawBody: Buffer, sig: string | string[
   );
   const already = await pool.query(`SELECT 1 FROM stripe_webhook_events WHERE id=$1`, [event.id]);
   if (already.rowCount) return { ok: true, skipped: true };
-  await pool.query(`INSERT INTO stripe_webhook_events(id, type) VALUES ($1,$2)`, [event.id, event.type]);
+  await pool.query(`INSERT INTO stripe_webhook_events(id, type) VALUES ($1,$2)`, [event.id, String((event as any).type || '')]);
 
   const upsertUserFromSubscription = async (sub: Stripe.Subscription) => {
     const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id;
@@ -456,7 +456,9 @@ export async function handleStripeWebhook(rawBody: Buffer, sig: string | string[
     await upsertUserFromSubscription(sub);
   };
 
-  switch (event.type) {
+  const eventType = String((event as any).type || '');
+
+  switch (eventType) {
     case 'checkout.session.completed': {
       const s = event.data.object as Stripe.Checkout.Session;
       // Stripe may not expand subscription; fetch it when present.
