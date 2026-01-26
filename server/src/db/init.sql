@@ -578,6 +578,11 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
   UNIQUE(user_id)
 );
 
+-- Back-compat: some older DBs created notification_preferences without prefs_json.
+-- Ensure the JSONB column exists so the preferences UI doesn't break.
+ALTER TABLE notification_preferences
+  ADD COLUMN IF NOT EXISTS prefs_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+
 -- USER FEEDBACK
 CREATE TABLE IF NOT EXISTS user_feedback (
   id SERIAL PRIMARY KEY,

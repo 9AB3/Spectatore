@@ -982,18 +982,32 @@ haulClickerWeightStep,
     // Development (Rehab / Ground Support): bolt consumables and shotcrete are captured via modals
     // and therefore must be present even though their fields are hidden from the main schema.
     if (activity === 'Development' && (sub === 'Rehab' || sub === 'Ground Support')) {
-      const hasBolt = (boltInputs || []).some((b) => {
+      // Rule: you may submit with ZERO shotcrete OR ZERO bolt consumables, but not BOTH.
+      // i.e., require at least one of (bolt count > 0) or (agi+spray > 0).
+
+      // Validate bolt rows: only rows with count > 0 require type/length details.
+      let boltTotal = 0;
+      for (const b of (boltInputs || [])) {
         const cnt = Number(String(b.count || '').replace(/[^0-9]/g, ''));
+        if (!Number.isFinite(cnt) || cnt <= 0) continue;
         const lenOk = !!String(b.length || '').trim() && (String(b.length) !== 'Other' || !!String(b.lengthOther || '').trim());
         const typeOk = !!String(b.type || '').trim();
-        return Number.isFinite(cnt) && cnt > 0 && lenOk && typeOk;
-      });
-      if (!hasBolt) return false;
+        if (!lenOk || !typeOk) return false;
+        boltTotal += cnt;
+      }
 
-      const agi = (values as any)['Agi Volume'];
-      const spray = (values as any)['Spray Volume'];
-      if (agi === undefined || agi === null || String(agi) === '') return false;
-      if (spray === undefined || spray === null || String(spray) === '') return false;
+      const agiRaw = (values as any)['Agi Volume'];
+      const sprayRaw = (values as any)['Spray Volume'];
+      const agi = Number(String(agiRaw ?? '0').replace(/[^0-9.\-]/g, ''));
+      const spray = Number(String(sprayRaw ?? '0').replace(/[^0-9.\-]/g, ''));
+      const agiOk = Number.isFinite(agi) && agi >= 0;
+      const sprayOk = Number.isFinite(spray) && spray >= 0;
+      if (!agiOk || !sprayOk) return false;
+
+      const shotcreteTotal = (agiOk ? agi : 0) + (sprayOk ? spray : 0);
+
+      // Disallow both being 0
+      if (!(boltTotal > 0 || shotcreteTotal > 0)) return false;
     }
 
     return true;

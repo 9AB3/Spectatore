@@ -20,21 +20,39 @@ async function getPrefs(user_id: number): Promise<any | null> {
   }
 }
 
+function normalizePrefsRow(row: any | null): any {
+  if (!row) return null;
+  // New schema: prefs_json JSONB
+  if (row.prefs_json && typeof row.prefs_json === 'object') {
+    return row.prefs_json;
+  }
+  // Older schema: columns stored directly
+  const out: any = {};
+  for (const k of ['in_app_milestones', 'in_app_crew_requests', 'push_milestones', 'push_crew_requests']) {
+    if (typeof row[k] === 'boolean') out[k] = row[k];
+  }
+  return out;
+}
+
 async function isInAppEnabled(user_id: number, bucket: PrefBucket): Promise<boolean> {
   if (bucket === 'other') return true;
-  const prefs = await getPrefs(user_id);
-  if (!prefs) return true;
-  if (bucket === 'milestones') return !!prefs.in_app_milestones;
-  if (bucket === 'crew_requests') return !!prefs.in_app_crew_requests;
+  const row = await getPrefs(user_id);
+  if (!row) return true;
+  const prefs = normalizePrefsRow(row) || {};
+  // default ON unless explicitly disabled
+  if (bucket === 'milestones') return prefs.in_app_milestones !== false;
+  if (bucket === 'crew_requests') return prefs.in_app_crew_requests !== false;
   return true;
 }
 
 async function isPushEnabled(user_id: number, bucket: PrefBucket): Promise<boolean> {
   if (bucket === 'other') return true;
-  const prefs = await getPrefs(user_id);
-  if (!prefs) return true;
-  if (bucket === 'milestones') return !!prefs.push_milestones;
-  if (bucket === 'crew_requests') return !!prefs.push_crew_requests;
+  const row = await getPrefs(user_id);
+  if (!row) return true;
+  const prefs = normalizePrefsRow(row) || {};
+  // default OFF for push unless explicitly enabled
+  if (bucket === 'milestones') return prefs.push_milestones === true;
+  if (bucket === 'crew_requests') return prefs.push_crew_requests === true;
   return true;
 }
 
