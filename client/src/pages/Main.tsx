@@ -1,4 +1,5 @@
 import Header from '../components/Header';
+import OnboardingChecklist from '../components/OnboardingChecklist';
 import { useNavigate } from 'react-router-dom';
 import useToast from '../hooks/useToast';
 import { track } from '../lib/analytics';
@@ -183,6 +184,7 @@ export default function Main() {
     <div>
       <Toast />
       <Header />
+        <OnboardingChecklist />
       <div className="p-4 max-w-5xl mx-auto space-y-5">
         <div className="card">
           <div className="text-xs" style={{ color: 'var(--muted)' }}>Home</div>
