@@ -184,6 +184,16 @@ async function ensureDbColumns() {
       `CREATE UNIQUE INDEX IF NOT EXISTS uq_presence_events_user_bucket ON presence_events(user_id, bucket)`,
     );
 
+    // Onboarding checklist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_onboarding_steps (
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        step_key TEXT NOT NULL,
+        completed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (user_id, step_key)
+      )
+    `);
+
   } catch (e:any) {
     console.warn('[db] ensure columns failed:', e?.message || e);
   }

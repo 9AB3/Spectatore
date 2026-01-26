@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import BottomNav from './BottomNav';
+import OnboardingChecklist from './OnboardingChecklist';
 import TermsContent from './TermsContent';
 import { api } from '../lib/api';
 import { getDB } from '../lib/idb';
@@ -17,6 +18,8 @@ export default function ProtectedLayout() {
 
   const [checked, setChecked] = useState(false);
   const [billing, setBilling] = useState<any>(null);
+  const [onboarding, setOnboarding] = useState<any>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [needsBilling, setNeedsBilling] = useState(false);
   const [needsTerms, setNeedsTerms] = useState(false);
   const [termsTick, setTermsTick] = useState(false);
@@ -171,6 +174,24 @@ export default function ProtectedLayout() {
             }
           }
         }
+
+        // Onboarding checklist (only on Main route)
+        if (accepted) {
+          try {
+            const hideUntil = Number(localStorage.getItem('spectatore-onboarding-hide-until') || '0');
+            const shouldConsider = location.pathname === '/Main' && (!hideUntil || Date.now() > hideUntil);
+            if (shouldConsider) {
+              const st: any = await api('/api/user/onboarding/status');
+              setOnboarding(st);
+              if (st && !st.allDone) setShowOnboarding(true);
+              else setShowOnboarding(false);
+            } else {
+              setShowOnboarding(false);
+            }
+          } catch {
+            // ignore
+          }
+        }
       } catch {
         // ignore
       } finally {
@@ -304,6 +325,18 @@ export default function ProtectedLayout() {
         paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))',
       }}
     >
+      {showOnboarding && onboarding && location.pathname === '/Main' && (
+        <OnboardingChecklist
+          status={onboarding}
+          onRefresh={async () => {
+            const st: any = await api('/api/user/onboarding/status');
+            setOnboarding(st);
+            if (st && !st.allDone) setShowOnboarding(true);
+            else setShowOnboarding(false);
+          }}
+          onClose={() => setShowOnboarding(false)}
+        />
+      )}
       <Outlet />
       {!location.pathname.toLowerCase().startsWith('/siteadmin') && <BottomNav />}
 

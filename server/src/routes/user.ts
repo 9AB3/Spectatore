@@ -920,4 +920,63 @@ router.post('/site-invites/respond', authMiddleware, async (req: any, res) => {
   }
 });
 
+
+// ---------------- Onboarding checklist ----------------
+// Tracks simple "getting started" steps for new users.
+// Client can display a checklist and mark steps completed.
+const DEFAULT_ONBOARDING_STEPS: Array<{ key: string; label: string }> = [
+  { key: 'start_shift', label: 'Start your first shift' },
+  { key: 'tag_out', label: 'Tag out / end a shift' },
+  { key: 'submit_feedback', label: 'Send one piece of feedback' },
+  { key: 'join_site', label: 'Join a work site (optional)' },
+];
+
+// GET /api/user/onboarding/status
+router.get('/onboarding/status', authMiddleware, async (req: any, res: any) => {
+  try {
+    const userId = req.user_id;
+    const r = await pool.query(
+      `SELECT step_key, completed_at FROM user_onboarding_steps WHERE user_id=$1`,
+      [userId],
+    );
+    const done = new Set<string>((r.rows || []).map((x: any) => String(x.step_key)));
+    const steps = DEFAULT_ONBOARDING_STEPS.map((s) => ({
+      key: s.key,
+      label: s.label,
+      done: done.has(s.key),
+    }));
+    const completedCount = steps.filter((s) => s.done).length;
+    res.json({
+      steps,
+      completedCount,
+      total: steps.length,
+      allDone: completedCount >= steps.length,
+    });
+  } catch (e: any) {
+    console.warn('[onboarding] status failed', e?.message || e);
+    res.status(500).json({ error: 'failed' });
+  }
+});
+
+// POST /api/user/onboarding/complete  { key: string }
+router.post('/onboarding/complete', authMiddleware, async (req: any, res: any) => {
+  try {
+    const userId = req.user_id;
+    const key = String(req.body?.key || '').trim();
+    if (!key) return res.status(400).json({ error: 'missing key' });
+
+    await pool.query(
+      `INSERT INTO user_onboarding_steps(user_id, step_key, completed_at)
+       VALUES ($1,$2,now())
+       ON CONFLICT (user_id, step_key) DO UPDATE SET completed_at=EXCLUDED.completed_at`,
+      [userId, key],
+    );
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.warn('[onboarding] complete failed', e?.message || e);
+    res.status(500).json({ error: 'failed' });
+  }
+});
+
+
 export default router;

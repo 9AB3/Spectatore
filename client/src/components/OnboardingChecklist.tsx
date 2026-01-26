@@ -1,122 +1,168 @@
-import { useEffect, useMemo, useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 
-type Step = {
-  key: string;
-  title: string;
-  description?: string;
-  completed: boolean;
-  cta?: { label: string; path: string };
-};
+type Step = { key: string; label: string; done: boolean };
+type Status = { steps: Step[]; completedCount: number; total: number; allDone: boolean };
 
-type Status = {
-  steps: Step[];
-  completedCount: number;
-  totalCount: number;
-  completed: boolean;
-};
-
-function CheckIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function CircleIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
-    </svg>
-  );
-}
-
-export default function OnboardingChecklist() {
+export default function OnboardingChecklist({
+  status,
+  onRefresh,
+  onClose,
+}: {
+  status: Status;
+  onRefresh: () => Promise<void>;
+  onClose: () => void;
+}) {
   const nav = useNavigate();
-  const [status, setStatus] = useState<Status | null>(null);
-  const [dismissed, setDismissed] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const res = await api('/api/user/onboarding/status');
-        if (!alive) return;
-        setStatus(res);
-      } catch {
-        // If this fails, don't block the UI.
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
+  async function markDone(key: string) {
+    await api('/api/user/onboarding/complete', { method: 'POST', body: { key } });
+    await onRefresh();
+  }
 
-  const remaining = useMemo(() => {
-    if (!status) return 0;
-    return status.totalCount - status.completedCount;
-  }, [status]);
-
-  if (dismissed) return null;
-  if (!status) return null;
-  if (status.completed) return null;
+  const pct = status.total ? Math.round((status.completedCount / status.total) * 100) : 0;
 
   return (
-    <div className="mb-4 rounded-2xl border border-white/10 bg-black/30 p-4 backdrop-blur">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-base font-semibold">Quick start checklist</div>
-          <div className="mt-1 text-sm text-white/70">
-            {status.completedCount}/{status.totalCount} complete • {remaining} left
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.35)',
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          width: 'min(560px, 100%)',
+          borderRadius: 18,
+          background: 'var(--card, #fff)',
+          boxShadow: '0 12px 40px rgba(0,0,0,0.18)',
+          padding: 16,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>Getting started</div>
+            <div style={{ opacity: 0.7, marginTop: 2 }}>
+              {status.completedCount}/{status.total} complete ({pct}%)
+            </div>
           </div>
+          <button
+            onClick={onClose}
+            style={{
+              border: 0,
+              background: 'transparent',
+              fontSize: 22,
+              cursor: 'pointer',
+              lineHeight: 1,
+              opacity: 0.7,
+            }}
+            aria-label="Close"
+            title="Close"
+          >
+            ×
+          </button>
         </div>
-        <button
-          className="rounded-lg px-3 py-1 text-sm text-white/70 hover:bg-white/10"
-          onClick={() => setDismissed(true)}
-        >
-          Hide
-        </button>
-      </div>
 
-      <div className="mt-3 space-y-2">
-        {status.steps.slice(0, 6).map((s) => (
-          <div key={s.key} className="flex items-start justify-between gap-3 rounded-xl bg-white/5 p-3">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 text-white/80">
-                {s.completed ? <CheckIcon className="h-5 w-5" /> : <CircleIcon className="h-5 w-5" />}
+        <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
+          {status.steps.map((s) => (
+            <div
+              key={s.key}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                padding: '10px 12px',
+                borderRadius: 14,
+                border: '1px solid rgba(0,0,0,0.08)',
+                background: s.done ? 'rgba(0,0,0,0.03)' : 'transparent',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: 999,
+                    border: '2px solid rgba(0,0,0,0.35)',
+                    background: s.done ? 'rgba(0,0,0,0.75)' : 'transparent',
+                  }}
+                  aria-hidden="true"
+                />
+                <div style={{ fontWeight: 700 }}>{s.label}</div>
               </div>
-              <div>
-                <div className="text-sm font-medium">{s.title}</div>
-                {s.description ? <div className="mt-0.5 text-xs text-white/60">{s.description}</div> : null}
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {!s.done ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        // Helpful shortcuts
+                        if (s.key === 'start_shift') nav('/Main');
+                        if (s.key === 'submit_feedback') nav('/Feedback');
+                        if (s.key === 'join_site') nav('/Connections');
+                        if (s.key === 'tag_out') nav('/Main');
+                      }}
+                      style={{
+                        border: '1px solid rgba(0,0,0,0.18)',
+                        background: 'transparent',
+                        padding: '8px 10px',
+                        borderRadius: 12,
+                        cursor: 'pointer',
+                        fontWeight: 700,
+                      }}
+                    >
+                      Go
+                    </button>
+                    <button
+                      onClick={() => markDone(s.key)}
+                      style={{
+                        border: 0,
+                        background: 'rgba(0,0,0,0.85)',
+                        color: '#fff',
+                        padding: '8px 10px',
+                        borderRadius: 12,
+                        cursor: 'pointer',
+                        fontWeight: 800,
+                      }}
+                    >
+                      Mark done
+                    </button>
+                  </>
+                ) : (
+                  <span style={{ fontWeight: 800, opacity: 0.7 }}>Done</span>
+                )}
               </div>
             </div>
+          ))}
+        </div>
 
-            {!s.completed && s.cta?.path ? (
-              <button
-                className="shrink-0 rounded-lg bg-white/10 px-3 py-2 text-xs font-medium hover:bg-white/15"
-                onClick={() => nav(s.cta!.path)}
-              >
-                {s.cta?.label || 'Open'}
-              </button>
-            ) : (
-              <div className="shrink-0 text-xs text-white/50">{s.completed ? 'Done' : ''}</div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-3 flex justify-end">
-        <button
-          className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:opacity-90"
-          onClick={() => {
-            const next = status.steps.find((x) => !x.completed && x.cta?.path)?.cta?.path;
-            if (next) nav(next);
-          }}
-        >
-          Continue
-        </button>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+          <button
+            onClick={async () => {
+              localStorage.setItem('spectatore-onboarding-hide-until', String(Date.now() + 7 * 24 * 3600 * 1000));
+              onClose();
+            }}
+            style={{
+              border: '1px solid rgba(0,0,0,0.18)',
+              background: 'transparent',
+              padding: '10px 12px',
+              borderRadius: 14,
+              cursor: 'pointer',
+              fontWeight: 800,
+            }}
+          >
+            Hide for a week
+          </button>
+        </div>
       </div>
     </div>
   );
