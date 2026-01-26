@@ -105,6 +105,18 @@ export async function api(path: string, init: (Omit<RequestInit, "body"> & { bod
     }
 
     const ct = res.headers.get('content-type') || '';
+    // If an API call comes back as HTML, it almost always means one of:
+    //  - the PWA service worker (or SPA host) served index.html instead of JSON
+    //  - the frontend is hitting the wrong origin because VITE_API_BASE isn't set
+    if (ct.includes('text/html') && url.startsWith('/api')) {
+      const text = await res.text().catch(() => '');
+      const hint = text?.toLowerCase?.().includes('<!doctype html')
+        ? 'Received index.html instead of JSON.'
+        : 'Received HTML instead of JSON.';
+      throw new Error(
+        `${hint} This usually means your Service Worker/SPA fallback is intercepting /api/*, or VITE_API_BASE is not pointing at your backend.`,
+      );
+    }
     if (ct.includes('application/json')) {
       return await res.json();
     }

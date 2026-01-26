@@ -4,7 +4,8 @@
 // - Runtime-caches same-origin GET requests (JS/CSS/images)
 // - Handles Web Push notifications
 
-const CACHE = 'spectatore-static-v3';
+// Bump this whenever the SW logic changes so clients reliably pick up fixes.
+const CACHE = 'spectatore-static-v4';
 
 // Keep this list SMALL and RELIABLE. If any item 404s, install can fail.
 // We cache best-effort below so even if something is missing the SW still installs.
@@ -60,6 +61,17 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Allow the page to tell the SW to activate immediately (helps fix stale SW bugs).
+self.addEventListener('message', (event) => {
+  try {
+    if (event?.data && (event.data === 'SKIP_WAITING' || event.data?.type === 'SKIP_WAITING')) {
+      self.skipWaiting();
+    }
+  } catch {
+    // ignore
+  }
+});
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
@@ -67,10 +79,15 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
-  // Never cache API responses. Caching /api in dev makes the UI appear stale
-  // and in prod it can serve incorrect permissioned data.
-  if (url.pathname.startsWith('/api/')) {
-    event.respondWith(fetch(req));
+  // ---- IMPORTANT: Never serve SPA shell for API requests ----
+  // If this happens, fetch(...).json() will explode and you'll see index.html
+  // coming back with Content-Type: text/html.
+  //
+  // We bypass ALL caching for API routes and anything that *looks* like JSON.
+  const accept = (req.headers && req.headers.get && req.headers.get('accept')) || '';
+  const looksJson = accept.includes('application/json') || accept.includes('text/json');
+  if (url.pathname.startsWith('/api') || looksJson) {
+    event.respondWith(fetch(req, { cache: 'no-store' }));
     return;
   }
 
@@ -85,7 +102,8 @@ self.addEventListener('fetch', (event) => {
   }
 
   // SPA navigation fallback
-  if (req.mode === 'navigate') {
+  // (Safety: ignore any accidental navigation to /api/*)
+  if (req.mode === 'navigate' && !url.pathname.startsWith('/api')) {
     event.respondWith(
       fetch(req)
         .then((res) => {
