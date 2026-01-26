@@ -28,6 +28,8 @@ COPY package.json package-lock.json tsconfig.json ./
 RUN node -p "process.version" \
  && echo "npm registry (env)=$npm_config_registry" \
  && npm config get registry \
+ && echo "Sanitizing package-lock.json (in case an internal registry URL was injected)..." \
+ && sed -i 's#https://packages\\.applied-caas-gateway1\\.internal\\.api\\.openai\\.org/artifactory/api/npm/npm-public/#https://registry.npmjs.org/#g' package-lock.json \
  && npm cache verify \
  && npm ci --registry=https://registry.npmjs.org/ --include=optional --no-audit --no-fund
 
