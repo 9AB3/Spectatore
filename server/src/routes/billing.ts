@@ -431,6 +431,31 @@ export async function handleStripeWebhook(rawBody: Buffer, sig: string | string[
     );
   };
 
+  const upsertUserFromInvoiceLike = async (obj: any) => {
+    // Some Stripe flows (and some webhook configurations) may deliver invoice-related
+    // events before (or instead of) a useful checkout.session.completed payload.
+    // We can always map an invoice -> subscription -> user, so use invoices as a
+    // reliable fallback to keep the app from "hanging" waiting for status updates.
+    // Object can be either an Invoice (invoice.* events) OR an InvoicePayment
+    // (invoice_payment.* events). Normalize to an invoice first.
+    let invoice: Stripe.Invoice | null = null;
+
+    if (obj?.object === 'invoice') {
+      invoice = obj as Stripe.Invoice;
+    } else if (obj?.object === 'invoice_payment' && obj?.invoice) {
+      try {
+        invoice = await stripe.invoices.retrieve(String(obj.invoice));
+      } catch {
+        invoice = null;
+      }
+    }
+
+    const subId = invoice?.subscription ? String(invoice.subscription) : null;
+    if (!subId) return;
+    const sub = await stripe.subscriptions.retrieve(subId);
+    await upsertUserFromSubscription(sub);
+  };
+
   switch (event.type) {
     case 'checkout.session.completed': {
       const s = event.data.object as Stripe.Checkout.Session;
@@ -438,6 +463,15 @@ export async function handleStripeWebhook(rawBody: Buffer, sig: string | string[
       if (s.subscription) {
         const sub = await stripe.subscriptions.retrieve(String(s.subscription));
         await upsertUserFromSubscription(sub);
+      } else {
+        // Defensive: if subscription is missing, try to locate the most recent active
+        // subscription for the customer and upsert from it.
+        const custId = s.customer ? String(s.customer) : null;
+        if (custId) {
+          const subs = await stripe.subscriptions.list({ customer: custId, status: 'all', limit: 1 });
+          const maybe = subs.data?.[0];
+          if (maybe) await upsertUserFromSubscription(maybe);
+        }
       }
       break;
     }
@@ -458,6 +492,18 @@ export async function handleStripeWebhook(rawBody: Buffer, sig: string | string[
           [subId],
         );
       }
+      break;
+    }
+
+    // Live mode often emits invoice/invoice_payment events; treat them as a reliable
+    // signal to refresh the user's subscription state.
+    case 'invoice.paid':
+    case 'invoice.payment_succeeded':
+    // Newer event naming seen in Workbench/Event Destinations (snapshot payload)
+    case 'invoice_payment.paid':
+    case 'invoice_payment.succeeded': {
+      const obj: any = event.data.object as any;
+      await upsertUserFromInvoiceLike(obj);
       break;
     }
     default:

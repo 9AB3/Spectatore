@@ -35,6 +35,16 @@ export default function Subscribe() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
+  async function logout() {
+    try {
+      const db = await getDB();
+      await db.delete('session', 'auth');
+    } catch {
+      // ignore
+    }
+    nav('/Home', { replace: true });
+  }
+
   async function fetchStatus() {
     const r: any = await api('/api/billing/status');
     setSt(r || null);
@@ -72,20 +82,6 @@ export default function Subscribe() {
     }
   }
 
-  async function logout() {
-    setErr('');
-    setBusy(true);
-    try {
-      const db = await getDB();
-      await db.delete('session', 'auth');
-    } catch {
-      // ignore
-    } finally {
-      setBusy(false);
-      window.location.href = '/Home';
-    }
-  }
-
   // Initial fetch + redirect if already allowed.
   useEffect(() => {
     let mounted = true;
@@ -94,6 +90,7 @@ export default function Subscribe() {
         const r = await fetchStatus();
         if (!mounted) return;
 
+        // If billing is not enforced, this page is unnecessary.
         if (!r?.enforced) {
           nav('/Main', { replace: true });
           return;
@@ -104,6 +101,7 @@ export default function Subscribe() {
           return;
         }
       } catch {
+        // If status fails, don't dead-end the user – send them to the app.
         nav('/Main', { replace: true });
         return;
       } finally {
@@ -129,10 +127,14 @@ export default function Subscribe() {
         if (r?.allowed) {
           nav('/Main', { replace: true });
         }
-      } catch {}
+      } catch {
+        // ignore transient failures
+      }
     };
 
+    // Poll fast initially.
     const i = setInterval(tick, 2000);
+    // And do an immediate tick.
     tick();
 
     return () => {
@@ -154,6 +156,7 @@ export default function Subscribe() {
     );
   }
 
+  // If user just paid, show unlocking state (even if still not active yet).
   if (cameFromSuccess && st?.enforced && !st?.allowed) {
     return (
       <div className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center p-6">
@@ -167,10 +170,7 @@ export default function Subscribe() {
             Status: <span className="text-neutral-100">{statusLabel}</span>
             {st?.current_period_end ? (
               <div className="mt-1">
-                Paid until:{' '}
-                <span className="text-neutral-100">
-                  {new Date(st.current_period_end).toLocaleString()}
-                </span>
+                Paid until: <span className="text-neutral-100">{new Date(st.current_period_end).toLocaleString()}</span>
               </div>
             ) : null}
           </div>
@@ -203,6 +203,7 @@ export default function Subscribe() {
     );
   }
 
+  // Default paywall state
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center p-6">
       <div className="w-full max-w-md rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 shadow-xl">
@@ -215,10 +216,7 @@ export default function Subscribe() {
           Status: <span className="text-neutral-100">{statusLabel}</span>
           {st?.current_period_end ? (
             <div className="mt-1">
-              Paid until:{' '}
-              <span className="text-neutral-100">
-                {new Date(st.current_period_end).toLocaleString()}
-              </span>
+              Paid until: <span className="text-neutral-100">{new Date(st.current_period_end).toLocaleString()}</span>
             </div>
           ) : null}
         </div>
@@ -238,8 +236,7 @@ export default function Subscribe() {
             onClick={() => startCheckout('year')}
             className="rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-60 px-4 py-3 font-semibold"
           >
-            Yearly — A${YEARLY_AUD.toFixed(2)}/year (≈ A${yearlyPerMonth.toFixed(2)}/month
-            {savingsPct ? `, save ${savingsPct}%` : ''})
+            Yearly — A${YEARLY_AUD.toFixed(2)}/year (≈ A${yearlyPerMonth.toFixed(2)}/month{ savingsPct ? `, save ${savingsPct}%` : '' })
           </button>
           <button
             disabled={busy}
