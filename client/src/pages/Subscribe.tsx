@@ -19,12 +19,70 @@ type BillingStatus = {
 export default function Subscribe() {
   const nav = useNavigate();
   const location = useLocation();
+  type StripePrice = {
+    id?: string;
+    active?: boolean;
+    currency?: string;
+    unit_amount?: number | null;
+    unit_amount_decimal?: string | null;
+    recurring?: { interval?: string | null; interval_count?: number | null } | null;
+    nickname?: string | null;
+    product?: { id?: string; name?: string | null } | null;
+  };
 
-  // UI-only pricing labels (AUD). Stripe price IDs are used server-side.
-  const MONTHLY_AUD = 2.5;
-  const YEARLY_AUD = 20;
-  const yearlyPerMonth = YEARLY_AUD / 12;
-  const savingsPct = Math.max(0, Math.round((1 - yearlyPerMonth / MONTHLY_AUD) * 100));
+  const [prices, setPrices] = useState<{ ok?: boolean; monthly?: StripePrice; yearly?: StripePrice; error?: string } | null>(null);
+
+  const moneyFmt = useMemo(() => {
+    const c = (prices?.monthly?.currency || prices?.yearly?.currency || 'aud').toUpperCase();
+    return {
+      currency: c,
+      fmt: (major: number) => {
+        try {
+          return new Intl.NumberFormat(undefined, { style: 'currency', currency: c, maximumFractionDigits: 2 }).format(major);
+        } catch {
+          // Fallback if an invalid currency code is provided
+          return `${c} ${major.toFixed(2)}`;
+        }
+      },
+    };
+  }, [prices?.monthly?.currency, prices?.yearly?.currency]);
+
+  const monthlyMajor = useMemo(() => {
+    const ua = prices?.monthly?.unit_amount;
+    return typeof ua === 'number' ? ua / 100 : null;
+  }, [prices?.monthly?.unit_amount]);
+
+  const yearlyMajor = useMemo(() => {
+    const ua = prices?.yearly?.unit_amount;
+    return typeof ua === 'number' ? ua / 100 : null;
+  }, [prices?.yearly?.unit_amount]);
+
+  const yearlyPerMonth = useMemo(() => {
+    if (typeof yearlyMajor !== 'number') return null;
+    return yearlyMajor / 12;
+  }, [yearlyMajor]);
+
+  const savingsPct = useMemo(() => {
+    if (typeof monthlyMajor !== 'number' || typeof yearlyPerMonth !== 'number') return 0;
+    return Math.max(0, Math.round((1 - yearlyPerMonth / monthlyMajor) * 100));
+  }, [monthlyMajor, yearlyPerMonth]);
+  const monthlyLabel = useMemo(() => {
+    if (typeof monthlyMajor !== 'number') return 'Monthly';
+    return `Monthly — ${moneyFmt.fmt(monthlyMajor)}/month`;
+  }, [monthlyMajor, moneyFmt]);
+
+  const yearlyLabel = useMemo(() => {
+    if (typeof yearlyMajor !== 'number') return 'Yearly';
+    let s = `Yearly — ${moneyFmt.fmt(yearlyMajor)}/year`;
+    if (typeof yearlyPerMonth === 'number') {
+      s += ` (≈ ${moneyFmt.fmt(yearlyPerMonth)}/month`;
+      if (savingsPct) s += `, save ${savingsPct}%`;
+      s += ')';
+    }
+    return s;
+  }, [yearlyMajor, yearlyPerMonth, savingsPct, moneyFmt]);
+
+
 
   const query = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const result = (query.get('result') || '').toLowerCase(); // success | cancel | ""
@@ -43,6 +101,17 @@ export default function Subscribe() {
       // ignore
     }
     nav('/Home', { replace: true });
+  }
+
+  async function fetchPrices() {
+    try {
+      const r: any = await api('/api/billing/prices');
+      setPrices(r || null);
+      return r;
+    } catch {
+      setPrices({ ok: false, error: 'Could not load pricing' });
+      return null;
+    }
   }
 
   async function fetchStatus() {
@@ -87,6 +156,7 @@ export default function Subscribe() {
     let mounted = true;
     (async () => {
       try {
+        await fetchPrices();
         const r = await fetchStatus();
         if (!mounted) return;
 
@@ -229,14 +299,14 @@ export default function Subscribe() {
             onClick={() => startCheckout('month')}
             className="rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 px-4 py-3 font-semibold"
           >
-            Monthly — A${MONTHLY_AUD.toFixed(2)}/month
+            {monthlyLabel}
           </button>
           <button
             disabled={busy}
             onClick={() => startCheckout('year')}
             className="rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-60 px-4 py-3 font-semibold"
           >
-            Yearly — A${YEARLY_AUD.toFixed(2)}/year (≈ A${yearlyPerMonth.toFixed(2)}/month{ savingsPct ? `, save ${savingsPct}%` : '' })
+            {yearlyLabel}
           </button>
           <button
             disabled={busy}
