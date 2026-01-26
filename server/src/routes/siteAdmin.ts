@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { pool } from '../lib/pg.js';
 import { siteAdminMiddleware } from '../lib/auth.js';
+import { auditLog } from '../lib/audit.js';
 
 async function hasLegacySiteColumn(pool: any) {
   const q = `
@@ -62,6 +63,18 @@ function isManager(req: any) {
   const sites = allowedSites(req);
   if (sites.includes('*')) return true;
   return !!req.site_admin?.can_manage;
+}
+
+function isValidator(req: any) {
+  return !!req.site_admin?.is_validator;
+}
+
+function assertValidator(req: any) {
+  if (!isValidator(req)) {
+    const e: any = new Error('forbidden');
+    e.status = 403;
+    throw e;
+  }
 }
 
 function assertManager(req: any) {
@@ -199,6 +212,12 @@ router.post('/powerbi-tokens/:id/revoke', siteAdminMiddleware, async (req: any, 
     assertSiteAccess(req, String(row.site));
 
     await pool.query('UPDATE powerbi_site_tokens SET revoked_at = now() WHERE id=$1', [id]);
+    await auditLog('site.powerbi_token.revoke', {
+      user_id: Number(req.user_id || 0) || null,
+      ip: req.ip,
+      ua: req.headers?.['user-agent'],
+      meta: { token_id: id, site: String(row.site || '') },
+    });
     return res.json({ ok: true });
   } catch (e: any) {
     const status = e?.status || 500;
@@ -1161,6 +1180,12 @@ router.post('/members/add', siteAdminMiddleware, async (req: any, res) => {
       }
     }
 
+    await auditLog('site.members.add', {
+      user_id: Number(req.user_id || 0) || null,
+      ip: req.ip,
+      ua: req.headers?.['user-agent'],
+      meta: { site, target_user_id: user_id, role },
+    });
     return res.json({ ok: true, user_id });
   } catch (e) {
     return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
@@ -1185,6 +1210,12 @@ router.post('/members/revoke', siteAdminMiddleware, async (req: any, res) => {
         WHERE user_id=$1 AND site_id=(SELECT id FROM admin_sites WHERE name=$2)`,
       [user_id, site],
     );
+    await auditLog('site.members.revoke', {
+      user_id: Number(req.user_id || 0) || null,
+      ip: req.ip,
+      ua: req.headers?.['user-agent'],
+      meta: { site, target_user_id: user_id },
+    });
     return res.json({ ok: true });
   } catch (e) {
     return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
@@ -1230,8 +1261,47 @@ router.post('/members/set-role', siteAdminMiddleware, async (req: any, res) => {
       );
     }
 
+    await auditLog('site.members.set_role', {
+      user_id: Number(req.user_id || 0) || null,
+      ip: req.ip,
+      ua: req.headers?.['user-agent'],
+      meta: { site, admin_site_id: adminSiteId, target_user_id: user_id, role },
+    });
+
     return res.json({ ok: true });
   } catch (e) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
+// Lightweight audit log view for site admins
+router.get('/audit', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const site = String(req.query.site || '').trim() || normalizeSiteParam(req);
+    if (!site || site === '*') return res.status(400).json({ ok: false, error: 'missing site' });
+    assertSiteAccess(req, site);
+
+    const admin_site_id = await resolveAdminSiteId(pool as any, site);
+    if (!admin_site_id) return res.json({ ok: true, rows: [] });
+
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit || 200)));
+    const offset = Math.max(0, Number(req.query.offset || 0));
+
+    const r = await pool.query(
+      `SELECT a.id, a.ts, a.action, a.user_id,
+              COALESCE(u.name,'') AS user_name,
+              COALESCE(u.email,'') AS user_email,
+              a.meta
+         FROM audit_logs a
+         LEFT JOIN users u ON u.id=a.user_id
+        WHERE (a.meta->>'admin_site_id' = $1::text) OR (LOWER(a.meta->>'site') = LOWER($2))
+        ORDER BY a.ts DESC
+        LIMIT $3 OFFSET $4`,
+      [admin_site_id, site, limit, offset],
+    );
+    return res.json({ ok: true, rows: r.rows || [] });
+  } catch (e: any) {
     return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
   }
 });
@@ -1893,6 +1963,11 @@ router.get('/day', siteAdminMiddleware, async (req: any, res) => {
 // --- VALIDATE ---
 // --- UPDATE VALIDATED (edits only; does NOT set validated=1) ---
 router.post('/update-validated', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertValidator(req);
+  } catch (e: any) {
+    return res.status(e?.status || 403).json({ error: e?.message || 'forbidden' });
+  }
   const date = String(req.body.date || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'invalid date' });
 
@@ -1907,9 +1982,48 @@ router.post('/update-validated', siteAdminMiddleware, async (req: any, res) => {
   const edits = Array.isArray(req.body.edits) ? req.body.edits : []; // [{ id, payload_json }]
   if (!edits.length) return res.json({ ok: true });
 
+  const editIds = edits.map((x: any) => Number(x?.id || 0)).filter((x: any) => Number.isFinite(x) && x > 0);
+  if (!editIds.length) return res.json({ ok: true });
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // Validated shifts are immutable. To edit, a validator/admin must first unvalidate the day.
+    // Block edits if any targeted activity belongs to a validated shift.
+    try {
+      const chk = await client.query(
+        `SELECT 1
+           FROM validated_shift_activities vsa
+           JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+          WHERE vsa.id = ANY($1::int[])
+            AND vs.admin_site_id=$2
+            AND vs.date=$3::date
+            AND vs.validated=TRUE
+          LIMIT 1`,
+        [editIds, adminSiteId, date],
+      );
+      if (chk.rows?.length) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        return res.status(409).json({ error: 'validated shifts are immutable; unvalidate the day before editing' });
+      }
+    } catch {
+      // If the DB doesn't support ANY() for some reason, fall back to per-row checks.
+      for (const id of editIds) {
+        const chk2 = await client.query(
+          `SELECT 1
+             FROM validated_shift_activities vsa
+             JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+            WHERE vsa.id=$1 AND vs.admin_site_id=$2 AND vs.date=$3::date AND vs.validated=TRUE
+            LIMIT 1`,
+          [id, adminSiteId, date],
+        );
+        if (chk2.rows?.length) {
+          await client.query('ROLLBACK').catch(() => undefined);
+          return res.status(409).json({ error: 'validated shifts are immutable; unvalidate the day before editing' });
+        }
+      }
+    }
 
     // Apply edits to validated_shift_activities rows (only within this site/date)
     for (const e of edits) {
@@ -1962,6 +2076,14 @@ router.post('/update-validated', siteAdminMiddleware, async (req: any, res) => {
     }
 
     await client.query('COMMIT');
+
+    // Best-effort audit log
+    await auditLog('site.update_validated', {
+      user_id: Number(req.user_id || 0) || null,
+      ip: req.ip,
+      ua: req.headers?.['user-agent'],
+      meta: { site, admin_site_id: adminSiteId, date, edit_count: editIds.length, edit_ids: editIds.slice(0, 50) },
+    });
     return res.json({ ok: true });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);
@@ -2053,6 +2175,11 @@ async function markValidatedDayUnvalidated(client: any, admin_site_id: number, d
 
 // Create an empty validated shift row (used when operator did not upload)
 router.post('/validated/create-shift', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertValidator(req);
+  } catch (e: any) {
+    return res.status(e?.status || 403).json({ ok: false, error: e?.message || 'forbidden' });
+  }
   const client = await pool.connect();
   try {
     const site = String(req.body?.site || '').trim();
@@ -2065,6 +2192,38 @@ router.post('/validated/create-shift', siteAdminMiddleware, async (req: any, res
 
     const admin_site_id = await resolveAdminSiteId(client, site);
     if (!admin_site_id) return res.status(400).json({ ok: false, error: 'unknown site' });
+
+    // Immutable guarantee: if this shift is validated, you must unvalidate first.
+    try {
+      const chk = await client.query(
+        `SELECT validated
+           FROM validated_shifts
+          WHERE admin_site_id=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
+          LIMIT 1`,
+        [admin_site_id, date, dn, user_email],
+      );
+      if (chk.rows?.[0]?.validated) {
+        return res.status(409).json({ ok: false, error: 'validated shifts are immutable; unvalidate the day before editing' });
+      }
+    } catch {
+      // ignore
+    }
+
+    // Immutable guarantee: if this shift row is already validated, it cannot be recreated/overwritten.
+    try {
+      const chk = await client.query(
+        `SELECT validated
+           FROM validated_shifts
+          WHERE admin_site_id=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
+          LIMIT 1`,
+        [admin_site_id, date, dn, user_email],
+      );
+      if (chk.rows?.[0]?.validated) {
+        return res.status(409).json({ ok: false, error: 'validated shifts are immutable; unvalidate the day before editing' });
+      }
+    } catch {
+      // ignore
+    }
 
     // Friendly name (optional)
     let user_name = '';
@@ -2136,6 +2295,12 @@ router.post('/validated/create-shift', siteAdminMiddleware, async (req: any, res
 
     await markValidatedDayUnvalidated(client, admin_site_id, date, 'create-shift');
     await client.query('COMMIT');
+    await auditLog('site.validated.create_shift', {
+      user_id: Number(req.user_id || 0) || null,
+      ip: req.ip,
+      ua: req.headers?.['user-agent'],
+      meta: { site, admin_site_id, date, dn, user_email, shift_key: shiftKey },
+    });
     return res.json({ ok: true });
   } catch (e: any) {
     try { await client.query('ROLLBACK'); } catch {}
@@ -2147,6 +2312,11 @@ router.post('/validated/create-shift', siteAdminMiddleware, async (req: any, res
 
 // Add a validated activity row and recompute totals for that validated shift
 router.post('/validated/add-activity', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertValidator(req);
+  } catch (e: any) {
+    return res.status(e?.status || 403).json({ ok: false, error: e?.message || 'forbidden' });
+  }
   const client = await pool.connect();
   try {
     const site = String(req.body?.site || '').trim();
@@ -2162,6 +2332,22 @@ router.post('/validated/add-activity', siteAdminMiddleware, async (req: any, res
 
     const admin_site_id = await resolveAdminSiteId(client, site);
     if (!admin_site_id) return res.status(400).json({ ok: false, error: 'unknown site' });
+
+    // Immutable guarantee: if this shift is validated, you must unvalidate first.
+    try {
+      const chk = await client.query(
+        `SELECT validated
+           FROM validated_shifts
+          WHERE admin_site_id=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
+          LIMIT 1`,
+        [admin_site_id, date, dn, user_email],
+      );
+      if (chk.rows?.[0]?.validated) {
+        return res.status(409).json({ ok: false, error: 'validated shifts are immutable; unvalidate the day before editing' });
+      }
+    } catch {
+      // ignore
+    }
 
     let user_name = '';
     let user_id: number | null = null;
@@ -2273,6 +2459,12 @@ router.post('/validated/add-activity', siteAdminMiddleware, async (req: any, res
     await markValidatedDayUnvalidated(client, admin_site_id, date, 'add-activity');
     await client.query('COMMIT');
     const inserted_activity_id = Number(insAct.rows?.[0]?.id || 0) || null;
+    await auditLog('site.validated.add_activity', {
+      user_id: Number(req.user_id || 0) || null,
+      ip: req.ip,
+      ua: req.headers?.['user-agent'],
+      meta: { site, admin_site_id, date, dn, user_email, shift_key: shiftKey, inserted_activity_id, activity, sub_activity },
+    });
     return res.json({ ok: true, inserted_activity_id, totals });
   } catch (e: any) {
     try { await client.query('ROLLBACK'); } catch {}
@@ -2284,6 +2476,11 @@ router.post('/validated/add-activity', siteAdminMiddleware, async (req: any, res
 
 // Delete a validated activity row by id
 router.post('/validated/delete-activity', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertValidator(req);
+  } catch (e: any) {
+    return res.status(e?.status || 403).json({ ok: false, error: e?.message || 'forbidden' });
+  }
   const client = await pool.connect();
   try {
     const site = String(req.body?.site || '').trim();
@@ -2328,6 +2525,18 @@ router.post('/validated/delete-activity', siteAdminMiddleware, async (req: any, 
     const dn = String(r.rows[0].dn || '');
     const user_email = String(r.rows[0].user_email || '');
 
+    // Immutable guarantee: if this shift is validated, you must unvalidate first.
+    const vchk = await client.query(
+      `SELECT 1 FROM validated_shifts
+        WHERE admin_site_id=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'') AND validated=TRUE
+        LIMIT 1`,
+      [admin_site_id, date, dn, user_email],
+    );
+    if (vchk.rows?.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, error: 'validated shifts are immutable; unvalidate the day before editing' });
+    }
+
     const del = await client.query(
       `DELETE FROM validated_shift_activities
         WHERE id=$1 AND date=$2::date
@@ -2363,6 +2572,12 @@ router.post('/validated/delete-activity', siteAdminMiddleware, async (req: any, 
     await markValidatedDayUnvalidated(client, admin_site_id, date, 'delete-activity');
 
     await client.query('COMMIT');
+    await auditLog('site.validated.delete_activity', {
+      user_id: Number(req.user_id || 0) || null,
+      ip: req.ip,
+      ua: req.headers?.['user-agent'],
+      meta: { site, admin_site_id, date, dn, user_email, activity_id: id },
+    });
     return res.json({ ok: true, deleted: del.rowCount || 0, totals });
   } catch (e: any) {
     try { await client.query('ROLLBACK'); } catch {}
@@ -2374,6 +2589,11 @@ router.post('/validated/delete-activity', siteAdminMiddleware, async (req: any, 
 
 // Delete an entire validated shift (and all its activities) - only via validation page
 router.post('/validated/delete-shift', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertValidator(req);
+  } catch (e: any) {
+    return res.status(e?.status || 403).json({ ok: false, error: e?.message || 'forbidden' });
+  }
   const client = await pool.connect();
   try {
     const site = String(req.body?.site || '').trim();
@@ -2389,6 +2609,18 @@ router.post('/validated/delete-shift', siteAdminMiddleware, async (req: any, res
 
     const adminSiteId = await resolveAdminSiteId(pool as any, site);
     if (!adminSiteId) return res.status(404).json({ ok: false, error: "site not found" });
+
+    // Immutable guarantee: validated shifts cannot be deleted; unvalidate first.
+    const vchk = await client.query(
+      `SELECT 1 FROM validated_shifts
+        WHERE admin_site_id=$1 AND date=$2::date AND dn=$3 AND COALESCE(user_email,'')=COALESCE($4,'')
+          AND validated=TRUE
+        LIMIT 1`,
+      [adminSiteId, date, dn, user_email],
+    );
+    if (vchk.rows?.length) {
+      return res.status(409).json({ ok: false, error: 'validated shifts are immutable; unvalidate the day before deleting' });
+    }
 
 
     await client.query('BEGIN');
@@ -2406,6 +2638,12 @@ router.post('/validated/delete-shift', siteAdminMiddleware, async (req: any, res
     await markValidatedDayUnvalidated(client, adminSiteId, date, 'delete-shift');
 
     await client.query('COMMIT');
+    await auditLog('site.validated.delete_shift', {
+      user_id: Number(req.user_id || 0) || null,
+      ip: req.ip,
+      ua: req.headers?.['user-agent'],
+      meta: { site, admin_site_id: adminSiteId, date, dn, user_email },
+    });
     return res.json({ ok: true });
   } catch (e: any) {
     console.error('validated/delete-shift failed', {
@@ -2426,6 +2664,11 @@ router.post('/validated/delete-shift', siteAdminMiddleware, async (req: any, res
 
 // --- VALIDATE (flag only) ---
 router.post('/validate', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertValidator(req);
+  } catch (e: any) {
+    return res.status(e?.status || 403).json({ error: e?.message || 'forbidden' });
+  }
   const date = String(req.body.date || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'invalid date' });
 
@@ -2476,11 +2719,60 @@ router.post('/validate', siteAdminMiddleware, async (req: any, res) => {
     }
 
     await client.query('COMMIT');
+
+    await auditLog('site.validate', {
+      user_id: Number(req.user_id || 0) || null,
+      ip: req.ip,
+      ua: req.headers?.['user-agent'],
+      meta: { site, admin_site_id: adminSiteId, date },
+    });
     return res.json({ ok: true, site, date });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);
     console.error('validate failed', err);
     return res.status(500).json({ error: 'validate failed' });
+  } finally {
+    client.release();
+  }
+});
+
+// --- UNVALIDATE (flag only) ---
+// This reopens a day so it can be edited/reconciled, and requires re-validation.
+router.post('/unvalidate', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertValidator(req);
+  } catch (e: any) {
+    return res.status(e?.status || 403).json({ error: e?.message || 'forbidden' });
+  }
+
+  const date = String(req.body.date || '').trim();
+  if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)) return res.status(400).json({ error: 'invalid date' });
+
+  const site = String(req.body.site || '').trim() || '*';
+  assertSiteAccess(req, site);
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+  const adminSiteId = await resolveAdminSiteId(pool as any, site);
+  if (!adminSiteId) return res.json({ ok: true });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`UPDATE validated_shifts SET validated=FALSE WHERE admin_site_id=$1 AND date=$2::date`, [adminSiteId, date]);
+    await markValidatedDayUnvalidated(client, adminSiteId, date, 'unvalidate');
+    await client.query('COMMIT');
+
+    await auditLog('site.unvalidate', {
+      user_id: Number(req.user_id || 0) || null,
+      ip: req.ip,
+      ua: req.headers?.['user-agent'],
+      meta: { site, admin_site_id: adminSiteId, date },
+    });
+    return res.json({ ok: true, site, date });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    console.error('unvalidate failed', err);
+    return res.status(500).json({ error: 'unvalidate failed' });
   } finally {
     client.release();
   }

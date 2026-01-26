@@ -5,16 +5,11 @@ import { pool } from './pg.js';
 // This is intentionally "best effort": it must never block a request.
 // Store small JSON in meta for investigation (avoid large payloads).
 
-export type AuditAction =
-  | 'auth.blocked.subscription_required'
-  | 'billing.status'
-  | 'billing.prices'
-  | 'billing.checkout.create'
-  | 'billing.portal.create'
-  | 'billing.plan_change'
-  | 'billing.webhook.received'
-  | 'billing.webhook.skipped'
-  | 'billing.webhook.processed';
+// Keep this as a wide string type so adding new audit actions doesn't
+// require touching this file every time.
+//
+// Convention: use dotted namespaces like "billing.*", "site.*", "auth.*".
+export type AuditAction = string;
 
 export async function auditLog(
   action: AuditAction,
