@@ -40,6 +40,13 @@ export default function SiteAdminReconciliation() {
   const [bucketAssignments, setBucketAssignments] = useState<Record<string, string>>({});
   const [bucketConfigs, setBucketConfigs] = useState<Record<string, { estimate: string; min: string; max: string; lock?: boolean }>>({});
 
+  // Truck factors modal (mirrors bucket factors)
+  const [showTrucks, setShowTrucks] = useState(false);
+  const [truckLoading, setTruckLoading] = useState(false);
+  const [truckData, setTruckData] = useState<any>(null);
+  const [truckAssignments, setTruckAssignments] = useState<Record<string, string>>({});
+  const [truckConfigs, setTruckConfigs] = useState<Record<string, { estimate: string; min: string; max: string; lock?: boolean }>>({});
+
   const selectedMetric = useMemo(() => metrics.find((m) => m.key === metricKey), [metrics, metricKey]);
 
   // Load scope + metrics
@@ -216,6 +223,61 @@ export default function SiteAdminReconciliation() {
     }
   }
 
+  async function openTruckFactors() {
+    if (!site) return setMsg('Select a site');
+    if (!/^[0-9]{4}-[0-9]{2}$/.test(monthYm)) return setMsg('Invalid month');
+    setShowTrucks(true);
+    setTruckLoading(true);
+    try {
+      const q = new URLSearchParams({ site, month_ym: monthYm });
+      const r: any = await api(`/api/site-admin/truck-factors/month?${q.toString()}`);
+      setTruckData(r);
+
+      const assign: Record<string, string> = {};
+      for (const row of (r?.trucks || [])) {
+        const tid = String(row.truck_id || '').trim();
+        if (!tid) continue;
+        assign[tid] = String(row.config_code || tid);
+      }
+      for (const [k, v] of Object.entries((r?.assignment || {}) as Record<string, any>)) {
+        const tid = String(k || '').trim();
+        if (!tid) continue;
+        assign[tid] = String(v || tid);
+      }
+      setTruckAssignments(assign);
+
+      const cfg: Record<string, { estimate: string; min: string; max: string; lock?: boolean }> = {};
+      for (const row of (r?.configs || [])) {
+        const code = String((row as any)?.config_code || '').trim();
+        if (!code) continue;
+        cfg[code] = {
+          estimate: (row as any)?.estimate_factor == null ? '' : String((row as any).estimate_factor),
+          min: (row as any)?.min_factor == null ? '' : String((row as any).min_factor),
+          max: (row as any)?.max_factor == null ? '' : String((row as any).max_factor),
+          lock: false,
+        };
+      }
+      for (const row of (r?.trucks || [])) {
+        const code = String((row as any)?.config_code || '').trim();
+        if (!code) continue;
+        if (!cfg[code]) {
+          cfg[code] = {
+            estimate: (row as any)?.estimate_factor == null ? '' : String((row as any).estimate_factor),
+            min: (row as any)?.min_factor == null ? '' : String((row as any).min_factor),
+            max: (row as any)?.max_factor == null ? '' : String((row as any).max_factor),
+            lock: false,
+          };
+        }
+      }
+
+      setTruckConfigs(cfg);
+    } catch (e: any) {
+      setMsg(e?.message || 'Failed to load truck factors');
+    } finally {
+      setTruckLoading(false);
+    }
+  }
+
   async function solveBucketFactors(save: boolean) {
     if (!site) return setMsg('Select a site');
     if (!/^[0-9]{4}-[0-9]{2}$/.test(monthYm)) return setMsg('Invalid month');
@@ -256,6 +318,43 @@ export default function SiteAdminReconciliation() {
       setMsg(e?.message || 'Failed to solve bucket factors');
     } finally {
       setBucketLoading(false);
+    }
+  }
+
+  async function solveTruckFactors(save: boolean) {
+    if (!site) return setMsg('Select a site');
+    if (!/^[0-9]{4}-[0-9]{2}$/.test(monthYm)) return setMsg('Invalid month');
+    setTruckLoading(true);
+    try {
+      const cfgOut: any = {};
+      for (const [code, v] of Object.entries(truckConfigs || {})) {
+        const est = v.estimate === '' ? null : parseFloat(v.estimate);
+        const min = v.min === '' ? null : parseFloat(v.min);
+        const max = v.max === '' ? null : parseFloat(v.max);
+        cfgOut[code] = {
+          estimate: Number.isFinite(est as any) ? est : null,
+          min: Number.isFinite(min as any) ? min : null,
+          max: Number.isFinite(max as any) ? max : null,
+          lock: !!v.lock,
+        };
+      }
+
+      const r: any = await api('/api/site-admin/truck-factors/solve', {
+        method: 'POST',
+        body: {
+          site,
+          month_ym: monthYm,
+          save,
+          assignments: truckAssignments,
+          configs: cfgOut,
+        },
+      });
+      setTruckData(r);
+      if (save) setMsg('Truck factors saved');
+    } catch (e: any) {
+      setMsg(e?.message || 'Failed to solve truck factors');
+    } finally {
+      setTruckLoading(false);
     }
   }
 
@@ -395,15 +494,35 @@ export default function SiteAdminReconciliation() {
             )}
             {loading && <div className="text-sm opacity-70 self-center">Working…</div>}
 
-            <button
-              className="px-4 py-2 rounded-xl border bg-[color:var(--card)]"
-              onClick={openBucketFactors}
-              disabled={loading || !site || site === '*'}
-              title="Solve bucket factors for loaders from reconciled ore tonnes and loading buckets"
-            >
-              Bucket factors…
-            </button>
           </div>
+        </div>
+      </div>
+
+      {/* Factors tools */}
+      <div className="mt-4 rounded-2xl border bg-[color:var(--card)]" style={{ borderColor: '#e9d9c3' }}>
+        <div className="p-4 border-b" style={{ borderColor: '#f0e4d4' }}>
+          <div className="text-lg font-semibold">Factors</div>
+          <div className="text-xs opacity-70">
+            Use reconciled ore tonnes (Prod + Dev) to solve unit factors for the month.
+          </div>
+        </div>
+        <div className="p-4 flex flex-wrap gap-2">
+          <button
+            className="px-4 py-2 rounded-xl border bg-[color:var(--card)]"
+            onClick={openBucketFactors}
+            disabled={loading || !site || site === '*'}
+            title="Solve bucket factors (t/bkt) for loaders from reconciled ore tonnes and loading primary buckets"
+          >
+            Bucket factors…
+          </button>
+          <button
+            className="px-4 py-2 rounded-xl border bg-[color:var(--card)]"
+            onClick={openTruckFactors}
+            disabled={loading || !site || site === '*'}
+            title="Solve truck factors (t/truck) for trucks from reconciled ore tonnes and hauling truck counts"
+          >
+            Truck factors…
+          </button>
         </div>
       </div>
 
@@ -623,6 +742,226 @@ export default function SiteAdminReconciliation() {
                       className="px-4 py-2 rounded-xl border bg-[color:var(--card)]"
                       onClick={() => solveBucketFactors(true)}
                       disabled={bucketLoading}
+                      title="Saves bounds + factors to the database for this month"
+                    >
+                      Save factors
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTrucks && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.45)' }}>
+          <div className="w-full max-w-3xl bg-[var(--card)] rounded-2xl shadow-xl border" style={{ borderColor: '#e9d9c3' }}>
+            <div className="p-4 border-b" style={{ borderColor: '#f0e4d4' }}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-lg font-semibold">Truck factors</div>
+                  <div className="text-xs opacity-70">
+                    Model 1 (shared factor per truck config). Uses reconciled ore tonnes hauled (Prod + Dev) and hauling truck counts grouped by config.
+                  </div>
+                </div>
+                <button className="px-3 py-1.5 rounded-xl border bg-[color:var(--card)]" onClick={() => setShowTrucks(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4">
+              {truckLoading ? (
+                <div className="text-sm opacity-70">Working…</div>
+              ) : (
+                <>
+                  <div className="p-3 rounded-xl border bg-[color:var(--card)]" style={{ borderColor: '#f0e4d4' }}>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                      <div>
+                        <div className="text-xs opacity-70">Month</div>
+                        <div className="font-semibold">{monthYm}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs opacity-70">Site</div>
+                        <div className="font-semibold">{site}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs opacity-70">Reconciled Prod tonnes</div>
+                        <div className="font-semibold">{truckData?.reconciled?.prod == null ? '-' : fmt(truckData.reconciled.prod, 2)} t</div>
+                      </div>
+                      <div>
+                        <div className="text-xs opacity-70">Reconciled Dev tonnes</div>
+                        <div className="font-semibold">{truckData?.reconciled?.dev == null ? '-' : fmt(truckData.reconciled.dev, 2)} t</div>
+                      </div>
+                    </div>
+                    {truckData?.solved?.notes?.warning && <div className="mt-2 text-xs text-amber-700">{truckData.solved.notes.warning}</div>}
+                  </div>
+
+                  <div className="mt-3 overflow-auto border rounded-xl" style={{ borderColor: '#f0e4d4' }}>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs opacity-70 border-b" style={{ borderColor: '#f0e4d4' }}>
+                          <th className="text-left p-2">Truck</th>
+                          <th className="text-left p-2">Config</th>
+                          <th className="text-right p-2">Est (t/trk)</th>
+                          <th className="text-center p-2">Lock</th>
+                          <th className="text-right p-2">Prod trucks</th>
+                          <th className="text-right p-2">Dev ore trucks</th>
+                          <th className="text-right p-2">Min (t/trk)</th>
+                          <th className="text-right p-2">Max (t/trk)</th>
+                          <th className="text-right p-2">Factor (t/trk)</th>
+                          <th className="text-right p-2">Prod t (calc)</th>
+                          <th className="text-right p-2">Dev t (calc)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(
+                          Array.isArray(truckData?.solved?.trucks)
+                            ? truckData.solved.trucks
+                            : Array.isArray(truckData?.trucks)
+                              ? truckData.trucks
+                              : Array.isArray(truckData?.saved)
+                                ? truckData.saved
+                                : []
+                        ).map((r: any) => {
+                          const id = String(r.truck_id || '').trim();
+                          const cfgCode = (truckAssignments[id] || String(r.config_code || '').trim() || id).trim() || id;
+                          const cfg = truckConfigs[cfgCode] || { estimate: '', min: '', max: '', lock: false };
+                          const factor = r.factor != null ? Number(r.factor) : (r.config_factor != null ? Number(r.config_factor) : null);
+                          const prodTrk = Number(r.prod_trucks ?? r.prod_trk ?? r.prod ?? 0);
+                          const devTrk = Number(r.dev_trucks ?? r.dev_trk ?? r.dev ?? 0);
+                          return (
+                            <tr key={id} className="border-b" style={{ borderColor: '#f0e4d4' }}>
+                              <td className="p-2 font-semibold">{id}</td>
+                              <td className="p-2">
+                                <input
+                                  className="w-28 p-1 rounded-lg border bg-[color:var(--card)]"
+                                  style={{ borderColor: '#f0e4d4' }}
+                                  value={cfgCode}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    setTruckAssignments((prev: any) => ({ ...(prev || {}), [id]: v }));
+                                    setTruckConfigs((prev: any) => {
+                                      const next = { ...(prev || {}) };
+                                      const key = String(v || '').trim();
+                                      if (key && !next[key]) next[key] = { estimate: '', min: '', max: '', lock: false };
+                                      return next;
+                                    });
+                                  }}
+                                />
+                              </td>
+                              <td className="p-2 text-right">
+                                <input
+                                  className="w-24 p-1 rounded-lg border text-right bg-[color:var(--card)]"
+                                  style={{ borderColor: '#f0e4d4' }}
+                                  value={cfg.estimate}
+                                  onChange={(e) =>
+                                    setTruckConfigs((prev: any) => ({
+                                      ...(prev || {}),
+                                      [cfgCode]: { ...(prev?.[cfgCode] || cfg), estimate: e.target.value },
+                                    }))
+                                  }
+                                />
+                              </td>
+                              <td className="p-2 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={!!cfg.lock}
+                                  onChange={(e) =>
+                                    setTruckConfigs((prev: any) => ({
+                                      ...(prev || {}),
+                                      [cfgCode]: { ...(prev?.[cfgCode] || cfg), lock: e.target.checked },
+                                    }))
+                                  }
+                                />
+                              </td>
+                              <td className="p-2 text-right">{fmt(prodTrk, 2)}</td>
+                              <td className="p-2 text-right">{fmt(devTrk, 2)}</td>
+                              <td className="p-2 text-right">
+                                <input
+                                  className="w-24 p-1 rounded-lg border text-right bg-[color:var(--card)]"
+                                  style={{ borderColor: '#f0e4d4' }}
+                                  value={cfg.min}
+                                  onChange={(e) =>
+                                    setTruckConfigs((prev: any) => ({
+                                      ...(prev || {}),
+                                      [cfgCode]: { ...(prev?.[cfgCode] || cfg), min: e.target.value },
+                                    }))
+                                  }
+                                />
+                              </td>
+                              <td className="p-2 text-right">
+                                <input
+                                  className="w-24 p-1 rounded-lg border text-right bg-[color:var(--card)]"
+                                  style={{ borderColor: '#f0e4d4' }}
+                                  value={cfg.max}
+                                  onChange={(e) =>
+                                    setTruckConfigs((prev: any) => ({
+                                      ...(prev || {}),
+                                      [cfgCode]: { ...(prev?.[cfgCode] || cfg), max: e.target.value },
+                                    }))
+                                  }
+                                />
+                              </td>
+                              <td className="p-2 text-right font-semibold">{factor == null ? '-' : fmt(factor, 4)}</td>
+                              <td className="p-2 text-right">{factor == null ? '-' : fmt(prodTrk * factor, 2)}</td>
+                              <td className="p-2 text-right">{factor == null ? '-' : fmt(devTrk * factor, 2)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="mt-3 p-3 rounded-xl border bg-[color:var(--card)] text-xs" style={{ borderColor: '#f0e4d4' }}>
+                    <div className="opacity-80">
+                      We assign each truck to a <span className="font-semibold">truck config</span>. All trucks in the same config share one factor <span className="font-semibold">f₍config₎</span> (t/truck).
+                      We solve the system:
+                      <div className="mt-1 text-xs opacity-80">
+                        Σ(prodTrucks₍config₎ × f₍config₎) = reconciled production ore tonnes &nbsp; and &nbsp; Σ(devOreTrucks₍config₎ × f₍config₎) = reconciled development ore tonnes.
+                      </div>
+                      <div className="mt-1 text-xs opacity-80">Constraints: f ≥ 0, optional per-config bounds, and optional lock-to-estimate.</div>
+                    </div>
+                    {truckData?.solved?.totals && truckData?.solved?.reconciled && (
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <div className="text-xs opacity-70">Prod predicted vs reconciled</div>
+                          <div className="font-semibold">
+                            {fmt(truckData.solved.totals?.prod_pred ?? 0, 2)} t / {fmt(truckData.solved.reconciled.prod ?? 0, 2)} t
+                          </div>
+                          <div className="text-xs opacity-80">
+                            Residual: {fmt(truckData.solved.residuals?.prod ?? 0, 2)} t
+                            {truckData.solved.reconciled.prod ? ` (${fmt(((truckData.solved.residuals?.prod ?? 0) / truckData.solved.reconciled.prod) * 100, 2)}%)` : ''}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs opacity-70">Dev predicted vs reconciled</div>
+                          <div className="font-semibold">
+                            {fmt(truckData.solved.totals?.dev_pred ?? 0, 2)} t / {fmt(truckData.solved.reconciled.dev ?? 0, 2)} t
+                          </div>
+                          <div className="text-xs opacity-80">
+                            Residual: {fmt(truckData.solved.residuals?.dev ?? 0, 2)} t
+                            {truckData.solved.reconciled.dev ? ` (${fmt(((truckData.solved.residuals?.dev ?? 0) / truckData.solved.reconciled.dev) * 100, 2)}%)` : ''}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      className="px-4 py-2 rounded-xl text-white"
+                      style={{ background: 'var(--brand)' }}
+                      onClick={() => solveTruckFactors(false)}
+                      disabled={truckLoading}
+                    >
+                      Recalculate
+                    </button>
+                    <button
+                      className="px-4 py-2 rounded-xl border bg-[color:var(--card)]"
+                      onClick={() => solveTruckFactors(true)}
+                      disabled={truckLoading}
                       title="Saves bounds + factors to the database for this month"
                     >
                       Save factors

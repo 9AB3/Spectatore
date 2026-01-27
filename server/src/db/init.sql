@@ -786,6 +786,56 @@ ALTER TABLE bucket_factors_monthly ADD COLUMN IF NOT EXISTS config_code TEXT;
 ALTER TABLE bucket_factors_monthly ADD COLUMN IF NOT EXISTS config_factor NUMERIC;
 
 
+-- ---------------------------------------------------------------------------
+-- Truck factors (mirrors bucket factors)
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS truck_factors_monthly (
+  id SERIAL PRIMARY KEY,
+  admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  site TEXT NOT NULL,
+  month_ym TEXT NOT NULL,
+  truck_id TEXT NOT NULL,
+  factor NUMERIC NOT NULL,
+  prod_trucks NUMERIC NOT NULL DEFAULT 0,
+  dev_trucks NUMERIC NOT NULL DEFAULT 0,
+  prod_tonnes NUMERIC NOT NULL DEFAULT 0,
+  dev_tonnes NUMERIC NOT NULL DEFAULT 0,
+  min_factor NUMERIC NULL,
+  max_factor NUMERIC NULL,
+  method TEXT NOT NULL DEFAULT 'projected_gradient',
+  created_by_user_id INT NULL REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(admin_site_id, month_ym, truck_id)
+);
+
+CREATE TABLE IF NOT EXISTS truck_config_defs (
+  admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  site TEXT NOT NULL,
+  config_code TEXT NOT NULL,
+  estimate_factor NUMERIC NULL, -- t/truck estimate (prior)
+  min_factor NUMERIC NULL,
+  max_factor NUMERIC NULL,
+  updated_by_user_id INT NULL REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (admin_site_id, config_code)
+);
+
+CREATE TABLE IF NOT EXISTS truck_truck_config_month (
+  admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  site TEXT NOT NULL,
+  month_ym TEXT NOT NULL,
+  truck_id TEXT NOT NULL,
+  config_code TEXT NOT NULL,
+  updated_by_user_id INT NULL REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (admin_site_id, month_ym, truck_id)
+);
+
+ALTER TABLE truck_factors_monthly ADD COLUMN IF NOT EXISTS config_code TEXT;
+ALTER TABLE truck_factors_monthly ADD COLUMN IF NOT EXISTS config_factor NUMERIC;
+
+
 -- Ensure reconciliation columns exist on older DBs (idempotent upgrades)
 ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS month_ym TEXT;
 ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS metric_key TEXT;
