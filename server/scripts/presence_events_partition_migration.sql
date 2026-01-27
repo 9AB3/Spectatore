@@ -55,26 +55,27 @@ BEGIN
 END $$;
 
 -- 4) Backfill legacy data (minute truncate ts)
--- Note: legacy table used UNIQUE(user_id, bucket) so this should not create duplicates.
+-- We avoid ON CONFLICT during migration because Postgres may not infer the partitioned
+-- unique arbiter in some setups. Instead we dedupe in the SELECT (keep latest within each minute).
 INSERT INTO public.presence_events (user_id, site_id, bucket, ts, meta, country_code, region_code, user_agent, created_at)
-SELECT
+SELECT DISTINCT ON (user_id, date_trunc('minute', COALESCE(ts, created_at, now())))
   user_id,
   site_id,
-  COALESCE(bucket, to_char(date_trunc('minute', COALESCE(ts, created_at, now())) at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI"Z"')),
-  date_trunc('minute', COALESCE(ts, created_at, now())),
-  COALESCE(meta, '{}'::jsonb),
+  COALESCE(
+    bucket,
+    to_char(date_trunc('minute', COALESCE(ts, created_at, now())) at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI"Z"')
+  ) AS bucket,
+  date_trunc('minute', COALESCE(ts, created_at, now())) AS ts,
+  COALESCE(meta, '{}'::jsonb) AS meta,
   country_code,
   region_code,
   user_agent,
-  COALESCE(created_at, now())
+  COALESCE(created_at, now()) AS created_at
 FROM public.presence_events_legacy
-ON CONFLICT (user_id, ts) DO UPDATE
-  SET ts = EXCLUDED.ts,
-      bucket = EXCLUDED.bucket,
-      site_id = COALESCE(EXCLUDED.site_id, public.presence_events.site_id),
-      country_code = COALESCE(EXCLUDED.country_code, public.presence_events.country_code),
-      region_code = COALESCE(EXCLUDED.region_code, public.presence_events.region_code),
-      user_agent = COALESCE(EXCLUDED.user_agent, public.presence_events.user_agent);
+ORDER BY
+  user_id,
+  date_trunc('minute', COALESCE(ts, created_at, now())),
+  COALESCE(ts, created_at, now()) DESC;
 
 COMMIT;
 
