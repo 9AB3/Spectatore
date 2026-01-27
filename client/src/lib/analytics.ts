@@ -14,7 +14,7 @@ declare global {
   }
 }
 
-const DEFAULT_MEASUREMENT_ID = 'G-Z7X38HRNDZ';
+const DEFAULT_MEASUREMENT_ID = 'G-K3B0KNBQ6T';
 const ATTR_KEY = 'spectatore_attribution_v1';
 
 let _inited = false;
