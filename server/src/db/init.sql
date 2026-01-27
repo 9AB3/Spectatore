@@ -872,11 +872,19 @@ BEGIN
         UNIQUE (admin_site_id, type, name);
     END IF;
 
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'admin_equipment_site_name_unique'
+    -- admin_equipment schema has evolved across versions.
+    -- Newer DBs use equipment_id; older DBs used name. Some DBs may already have
+    -- a UNIQUE constraint created implicitly via CREATE TABLE. Use IF NOT EXISTS
+    -- unique indexes, and guard by column existence to avoid boot-time failures.
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='admin_equipment' AND column_name='equipment_id'
     ) THEN
-        ALTER TABLE admin_equipment
-        ADD CONSTRAINT admin_equipment_site_name_unique
-        UNIQUE (admin_site_id, name);
+        EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS uq_admin_equipment_site_equipment_id ON admin_equipment(admin_site_id, equipment_id)';
+    ELSIF EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema='public' AND table_name='admin_equipment' AND column_name='name'
+    ) THEN
+        EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS uq_admin_equipment_site_name ON admin_equipment(admin_site_id, name)';
     END IF;
 END $$;
