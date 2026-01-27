@@ -265,7 +265,11 @@ router.get('/engagement', siteAdminMiddleware, async (req: any, res) => {
 
     const onlineQ = await pool.query(
       `
-      SELECT pc.user_id, pc.site_id, pc.last_seen,
+      SELECT pc.user_id,
+             COALESCE(pc.admin_site_id, pc.work_site_id) AS site_id,
+             pc.admin_site_id,
+             pc.work_site_id,
+             pc.last_seen,
              u.name,
              COALESCE(NULLIF(u.name,''), split_part(u.email,'@',1), u.email) AS display_name,
              u.email,
@@ -276,8 +280,8 @@ router.get('/engagement', siteAdminMiddleware, async (req: any, res) => {
       WHERE pc.last_seen >= now() - ($1::text || ' minutes')::interval
         AND (
           $2::int IS NULL OR
-          ($2::int = 0 AND pc.site_id < 0) OR
-          pc.site_id = $2::int
+          ($2::int = 0 AND pc.work_site_id IS NOT NULL) OR
+          pc.admin_site_id = $2::int
         )
       ORDER BY pc.last_seen DESC
       `,

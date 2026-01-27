@@ -117,16 +117,52 @@ async function ensureDbColumns() {
     // Realtime presence + sessions (best-effort for existing DBs)
     await pool.query(
       `CREATE TABLE IF NOT EXISTS presence_current (
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        site_id INTEGER NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        admin_site_id INTEGER NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+        work_site_id INTEGER NULL REFERENCES work_sites(id) ON DELETE CASCADE,
         last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
         country_code TEXT NULL,
         region_code TEXT NULL,
-        user_agent TEXT NULL,
-        PRIMARY KEY (user_id, site_id)
-      )`,
+        user_agent TEXT NULL
+      );
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_admin_site ON presence_current(admin_site_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_work_site ON presence_current(work_site_id)`);
+
+    // --- presence_current migration (legacy schema had site_id NOT NULL FK to admin_sites and PK (user_id, site_id)) ---
+    // New schema: one row per user, admin_site_id/work_site_id nullable.
+    const pcCols = await pool.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='presence_current'`
     );
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_site_last_seen ON presence_current(site_id, last_seen)`);
+    const pcColSet = new Set(pcCols.rows.map((r: any) => String(r.column_name)));
+    if (pcColSet.has('site_id') && !pcColSet.has('admin_site_id')) {
+      // 1) Rename site_id -> admin_site_id, allow NULL
+      await pool.query(`ALTER TABLE presence_current RENAME COLUMN site_id TO admin_site_id`);
+      await pool.query(`ALTER TABLE presence_current ALTER COLUMN admin_site_id DROP NOT NULL`);
+      // 2) Add work_site_id
+      await pool.query(`ALTER TABLE presence_current ADD COLUMN IF NOT EXISTS work_site_id INTEGER NULL`);
+      // 3) Drop old constraints if present
+      await pool.query(`ALTER TABLE presence_current DROP CONSTRAINT IF EXISTS presence_current_site_id_fkey`);
+      await pool.query(`ALTER TABLE presence_current DROP CONSTRAINT IF EXISTS presence_current_pkey`);
+      // 4) Dedupe to one row per user (keep most recent)
+      await pool.query(`
+        DELETE FROM presence_current a
+        USING presence_current b
+        WHERE a.user_id = b.user_id
+          AND a.last_seen < b.last_seen
+      `);
+      // 5) Recreate PK + FKs
+      await pool.query(`ALTER TABLE presence_current ADD CONSTRAINT presence_current_pkey PRIMARY KEY (user_id)`);
+      await pool.query(
+        `ALTER TABLE presence_current ADD CONSTRAINT presence_current_admin_site_id_fkey FOREIGN KEY (admin_site_id) REFERENCES admin_sites(id) ON DELETE CASCADE`
+      );
+      await pool.query(
+        `ALTER TABLE presence_current ADD CONSTRAINT presence_current_work_site_id_fkey FOREIGN KEY (work_site_id) REFERENCES work_sites(id) ON DELETE CASCADE`
+      );
+    }
+
+
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_admin_last_seen ON presence_current(admin_site_id, last_seen);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_work_last_seen ON presence_current(work_site_id, last_seen)`)`);
 
     await pool.query(
       `CREATE TABLE IF NOT EXISTS presence_sessions (
@@ -170,7 +206,7 @@ async function ensureDbColumns() {
     // presence_events schema hardening (after DB resets/migrations):
     // - bucket should be TEXT (we store minute-bucket as ISO string)
     // - ts/meta columns may be missing on older schemas
-    // - ensure a unique constraint on (user_id, ts) where ts is minute-truncated
+    // - ensure a unique constraint on (user_id, bucket)
     try {
       // If bucket was previously TIMESTAMPTZ and part of a PK, drop that constraint first.
       await pool.query(`ALTER TABLE IF EXISTS presence_events DROP CONSTRAINT IF EXISTS presence_events_pkey`);
@@ -180,11 +216,11 @@ async function ensureDbColumns() {
     }
     await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS ts TIMESTAMPTZ DEFAULT now()`);
     await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}'::jsonb`);
-    await pool.query(`DROP INDEX IF EXISTS uq_presence_events_user_bucket`);
     await pool.query(
-      `CREATE UNIQUE INDEX IF NOT EXISTS uq_presence_events_user_ts ON presence_events(user_id, ts)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_presence_events_user_bucket ON presence_events(user_id, bucket)`,
     );
-// Onboarding checklist
+
+    // Onboarding checklist
     await pool.query(`
       CREATE TABLE IF NOT EXISTS user_onboarding_steps (
         user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,

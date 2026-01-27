@@ -12,9 +12,7 @@
     "seed:data": "tsx src/tools/seedDataCli.ts",
     "db:up": "docker compose -f ../docker-compose.yml up -d",
     "db:down": "docker compose -f ../docker-compose.yml down",
-    "db:logs": "docker compose -f ../docker-compose.yml logs -f postgres",
-    "db:presence:migrate": "node scripts/migrate_presence_events_partitioned.mjs",
-    "db:presence:maintain": "node scripts/presence_partitions_maintenance.mjs"
+    "db:logs": "docker compose -f ../docker-compose.yml logs -f postgres"
   },
   "dependencies": {
     "@sendgrid/mail": "^8.1.6",

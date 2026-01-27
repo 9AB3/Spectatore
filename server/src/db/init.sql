@@ -766,25 +766,27 @@ CREATE TABLE IF NOT EXISTS presence_events (
   region_code TEXT NULL,
   user_agent TEXT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (user_id, ts)
+  PRIMARY KEY (user_id, bucket)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_presence_events_user_ts ON presence_events(user_id, ts);
-CREATE INDEX IF NOT EXISTS idx_presence_events_user_bucket ON presence_events(user_id, bucket);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_presence_events_user_bucket ON presence_events(user_id, bucket);
 CREATE INDEX IF NOT EXISTS idx_presence_events_ts ON presence_events(ts);
 CREATE INDEX IF NOT EXISTS idx_presence_events_country_ts ON presence_events(country_code, ts);
 CREATE INDEX IF NOT EXISTS idx_presence_events_region_ts ON presence_events(region_code, ts);
 
 -- Realtime & engagement tables (Site Admin only)
 CREATE TABLE IF NOT EXISTS presence_current (
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  site_id INTEGER NOT NULL,
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  admin_site_id INTEGER NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  work_site_id INTEGER NULL REFERENCES work_sites(id) ON DELETE CASCADE,
   last_seen TIMESTAMPTZ NOT NULL,
   country_code TEXT NULL,
   region_code TEXT NULL,
-  user_agent TEXT NULL,
-  PRIMARY KEY (user_id, site_id)
+  user_agent TEXT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_presence_current_admin_site ON presence_current(admin_site_id);
+CREATE INDEX IF NOT EXISTS idx_presence_current_work_site ON presence_current(work_site_id);
 
 CREATE INDEX IF NOT EXISTS idx_presence_current_site_last_seen ON presence_current(site_id, last_seen DESC);
 

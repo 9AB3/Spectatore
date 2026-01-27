@@ -17,9 +17,17 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
     // Optional site context (used for Site Admin engagement only).
     // Community stats remain country-level, but we store site_id so admins can see
     // engagement for their sites.
-    const siteIdRaw = (req.body && (req.body.site_id ?? req.body.siteId)) as any;
-    const siteId = siteIdRaw === null || siteIdRaw === undefined || siteIdRaw === '' ? null : Number(siteIdRaw);
-    const site_id: number | null = siteId && Number.isFinite(siteId) ? siteId : null;
+    const adminSiteIdRaw = (req.body && (req.body.admin_site_id ?? req.body.adminSiteId ?? req.body.site_id ?? req.body.siteId)) as any;
+    const workSiteIdRaw = (req.body && (req.body.work_site_id ?? req.body.workSiteId ?? req.body.workSiteId ?? req.body.work_site_id)) as any;
+
+    const adminSiteIdNum = adminSiteIdRaw === null || adminSiteIdRaw === undefined || adminSiteIdRaw === '' ? null : Number(adminSiteIdRaw);
+    const workSiteIdNum = workSiteIdRaw === null || workSiteIdRaw === undefined || workSiteIdRaw === '' ? null : Number(workSiteIdRaw);
+
+    const admin_site_id: number | null = adminSiteIdNum && Number.isFinite(adminSiteIdNum) ? adminSiteIdNum : null;
+    const work_site_id: number | null = workSiteIdNum && Number.isFinite(workSiteIdNum) ? workSiteIdNum : null;
+
+    // Backwards-compat: presence_sessions/presence_events are still keyed on admin site_id.
+    const site_id: number | null = admin_site_id;
 
     // Country is derived from trusted edge headers where available (Cloudflare/Vercel/etc).
     // We intentionally do NOT store raw IPs. If no country header is present we store NULL.
@@ -71,43 +79,11 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
       await pool.query(
         `
       INSERT INTO presence_events (user_id, site_id, bucket, ts, meta, country_code, region_code, user_agent)
-VALUES (
-  $1,
-  $2,
-  to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'),
-  date_trunc('minute', now()), -- IMPORTANT: minute-granularity ts enables (user_id, ts) uniqueness + partition pruning
-  '{}'::jsonb,
-  $3,
-  $4,
-  $5
-)
-ON CONFLICT (user_id, ts) DO UPDATE
-  SET ts = EXCLUDED.ts,
-      bucket = EXCLUDED.bucket,
-      site_id = COALESCE(EXCLUDED.site_id, presence_events.site_id),
-      country_code = COALESCE(EXCLUDED.country_code, presence_events.country_code),
-      region_code = COALESCE(EXCLUDED.region_code, presence_events.region_code),
-      user_agent = COALESCE(EXCLUDED.user_agent, presence_events.user_agent)
-      `,
-        [userId, site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
-      );
-    
-} catch (e: any) {
-  // Back-compat:
-  // - Old DBs used UNIQUE (user_id, bucket)
-  // - New DBs use UNIQUE (user_id, ts) where ts is truncated to minute
-  const msg = String(e?.message || '');
-
-  // 1) Try the legacy conflict target (user_id, bucket)
-  try {
-    await pool.query(
-      `
-      INSERT INTO presence_events (user_id, site_id, bucket, ts, meta, country_code, region_code, user_agent)
       VALUES (
         $1,
         $2,
         to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'),
-        date_trunc('minute', now()),
+        now(),
         '{}'::jsonb,
         $3,
         $4,
@@ -120,49 +96,51 @@ ON CONFLICT (user_id, ts) DO UPDATE
             region_code = COALESCE(EXCLUDED.region_code, presence_events.region_code),
             user_agent = COALESCE(EXCLUDED.user_agent, presence_events.user_agent)
       `,
-      [userId, site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
-    );
-  } catch (e2: any) {
-    // 2) If the DB has neither unique constraint, fall back to idempotent insert.
-    // This keeps volume low and avoids hard failures on older schemas.
-    if (msg.includes('no unique or exclusion constraint') || msg.includes('ON CONFLICT')) {
-      await pool.query(
-        `
-        INSERT INTO presence_events (user_id, site_id, bucket, ts, meta, country_code, region_code, user_agent)
-        SELECT $1, $2,
-               to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'),
-               date_trunc('minute', now()),
-               '{}'::jsonb,
-               $3, $4, $5
-        WHERE NOT EXISTS (
-          SELECT 1 FROM presence_events
-          WHERE user_id=$1 AND ts=date_trunc('minute', now())
-        )
-        `,
-        [userId, site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
+        [userId, admin_site_id, work_site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
       );
-    } else {
-      throw e2;
+    } catch (e: any) {
+      // If the table exists without the expected unique constraint/index (older DBs),
+      // fall back to an idempotent insert without ON CONFLICT.
+      const msg = String(e?.message || '');
+      if (msg.includes('no unique or exclusion constraint') || msg.includes('ON CONFLICT')) {
+        await pool.query(
+          `
+          INSERT INTO presence_events (user_id, site_id, bucket, ts, meta, country_code, region_code, user_agent)
+          SELECT $1, $2,
+                 to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'),
+                 now(),
+                 '{}'::jsonb,
+                 $3, $4, $5
+          WHERE NOT EXISTS (
+            SELECT 1 FROM presence_events
+            WHERE user_id=$1 AND bucket=to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"')
+          )
+          `,
+          [userId, admin_site_id, work_site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
+        );
+      } else {
+        throw e;
+      }
     }
-  }
-}
 
-// 2) If we have a site context, also upsert realtime tables for Site Admin engagement.
-    if (site_id) {
+    // 2) Upsert presence_current for realtime views (admin_site_id/work_site_id may be NULL)
       // presence_current = last heartbeat per user+site
       await pool.query(
         `
-        INSERT INTO presence_current (user_id, site_id, last_seen, country_code, region_code, user_agent)
-        VALUES ($1, $2, now(), $3, $4, $5)
-        ON CONFLICT (user_id, site_id) DO UPDATE
+        INSERT INTO presence_current (user_id, admin_site_id, work_site_id, last_seen, country_code, region_code, user_agent)
+        VALUES ($1, $2, $3, now(), $4, $5, $6)
+        ON CONFLICT (user_id) DO UPDATE
           SET last_seen = EXCLUDED.last_seen,
               country_code = COALESCE(EXCLUDED.country_code, presence_current.country_code),
               region_code = COALESCE(EXCLUDED.region_code, presence_current.region_code),
               user_agent = COALESCE(EXCLUDED.user_agent, presence_current.user_agent)
         `,
-        [userId, site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
+        [userId, admin_site_id, work_site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
       );
 
+
+    // 3) If we have an admin site context, also upsert per-site session tables.
+    if (site_id) {
       // presence_sessions = one open session per user+site (update last_seen)
       await pool.query(
         `
