@@ -3168,12 +3168,13 @@ async function upsertReconciliationAndCompute(opts: {
     if (is_locked) throw Object.assign(new Error('reconciliation is locked'), { status: 400 });
 
     // Replace day allocations
+    // NOTE: live DB has `validated_reconciliation_days.site` as NOT NULL (PowerBI export depends on it)
     await client.query(`DELETE FROM validated_reconciliation_days WHERE reconciliation_id=$1`, [reconId]);
     for (const a of allocations) {
       await client.query(
-        `INSERT INTO validated_reconciliation_days (reconciliation_id, admin_site_id, month_ym, metric_key, date, allocated_value)
-         VALUES ($1,$2,$3,$4,$5::date,$6)`,
-        [reconId, adminSiteId, month_ym, metric_key, a.date, a.allocated_value],
+        `INSERT INTO validated_reconciliation_days (reconciliation_id, admin_site_id, site, month_ym, metric_key, date, allocated_value)
+         VALUES ($1,$2,$3,$4,$5,$6::date,$7)`,
+        [reconId, adminSiteId, site, month_ym, metric_key, a.date, a.allocated_value],
       );
     }
 

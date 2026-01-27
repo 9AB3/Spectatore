@@ -669,6 +669,8 @@ CREATE TABLE IF NOT EXISTS validated_reconciliation_days (
   id SERIAL PRIMARY KEY,
   reconciliation_id INT NOT NULL REFERENCES validated_reconciliations(id) ON DELETE CASCADE,
   admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  -- Site name (Power BI export depends on this)
+  site TEXT NOT NULL,
   month_ym TEXT NOT NULL,
   metric_key TEXT NOT NULL,
   date DATE NOT NULL,
@@ -698,14 +700,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_validated_reconciliations_key
   ON validated_reconciliations(admin_site_id, month_ym, metric_key);
 
 ALTER TABLE validated_reconciliation_days ADD COLUMN IF NOT EXISTS admin_site_id INT;
+ALTER TABLE validated_reconciliation_days ADD COLUMN IF NOT EXISTS site TEXT;
 ALTER TABLE validated_reconciliation_days ADD COLUMN IF NOT EXISTS month_ym TEXT;
 ALTER TABLE validated_reconciliation_days ADD COLUMN IF NOT EXISTS metric_key TEXT;
 ALTER TABLE validated_reconciliation_days ADD COLUMN IF NOT EXISTS allocated_value NUMERIC;
+
+-- Backfill site where possible (safe if columns exist)
+UPDATE validated_reconciliation_days d
+   SET site = a.site
+  FROM admin_sites a
+ WHERE d.site IS NULL
+   AND d.admin_site_id = a.id;
 
 ALTER TABLE validated_reconciliation_days ADD COLUMN IF NOT EXISTS admin_site_id INT;
 
 CREATE INDEX IF NOT EXISTS ix_validated_reconciliation_days_admin_site_month_metric
   ON validated_reconciliation_days(admin_site_id, month_ym, metric_key);
+
+-- Backfill site on older rows (if column existed but was nullable)
+UPDATE validated_reconciliation_days d
+   SET site = a.site
+  FROM admin_sites a
+ WHERE d.site IS NULL
+   AND d.admin_site_id = a.id;
 
 
 
