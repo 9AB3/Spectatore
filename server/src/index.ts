@@ -255,7 +255,7 @@ await pool.query(
     await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS ts TIMESTAMPTZ DEFAULT now()`);
     await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}'::jsonb`);
     await pool.query(
-      `CREATE UNIQUE INDEX IF NOT EXISTS uq_presence_events_user_bucket ON presence_events(user_id, bucket)`,
+      `CREATE INDEX IF NOT EXISTS idx_presence_events_user_bucket ON presence_events(user_id, bucket)`,
     );
 
     // Onboarding checklist

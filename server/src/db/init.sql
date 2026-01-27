@@ -791,7 +791,8 @@ CREATE TABLE IF NOT EXISTS presence_current (
 CREATE INDEX IF NOT EXISTS idx_presence_current_admin_site ON presence_current(admin_site_id);
 CREATE INDEX IF NOT EXISTS idx_presence_current_work_site ON presence_current(work_site_id);
 
-CREATE INDEX IF NOT EXISTS idx_presence_current_site_last_seen ON presence_current(site_id, last_seen DESC);
+CREATE INDEX IF NOT EXISTS idx_presence_current_admin_last_seen_desc ON presence_current(admin_site_id, last_seen DESC);
+CREATE INDEX IF NOT EXISTS idx_presence_current_work_last_seen_desc ON presence_current(work_site_id, last_seen DESC);
 
 CREATE TABLE IF NOT EXISTS presence_sessions (
   id BIGSERIAL PRIMARY KEY,
