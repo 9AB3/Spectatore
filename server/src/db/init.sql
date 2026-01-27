@@ -707,7 +707,7 @@ ALTER TABLE validated_reconciliation_days ADD COLUMN IF NOT EXISTS allocated_val
 
 -- Backfill site where possible (safe if columns exist)
 UPDATE validated_reconciliation_days d
-   SET site = a.site
+   SET site = d.site
   FROM admin_sites a
  WHERE d.site IS NULL
    AND d.admin_site_id = a.id;
@@ -719,7 +719,7 @@ CREATE INDEX IF NOT EXISTS ix_validated_reconciliation_days_admin_site_month_met
 
 -- Backfill site on older rows (if column existed but was nullable)
 UPDATE validated_reconciliation_days d
-   SET site = a.site
+   SET site = d.site
   FROM admin_sites a
  WHERE d.site IS NULL
    AND d.admin_site_id = a.id;
