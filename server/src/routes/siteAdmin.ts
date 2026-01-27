@@ -2807,6 +2807,16 @@ const RECON_METRICS: ReconMetric[] = [
     unit: 't',
   },
   {
+    key: 'hauling|production_ore_tonnes_hauled',
+    label: 'Hauling → Production Ore Tonnes Hauled',
+    unit: 't',
+  },
+  {
+    key: 'hauling|development_ore_tonnes_hauled',
+    label: 'Hauling → Development Ore Tonnes Hauled',
+    unit: 't',
+  },
+  {
     key: 'hoisting|ore_tonnes_hoisted',
     label: 'Hoisting → Ore Tonnes Hoisted',
     unit: 't',
@@ -2914,6 +2924,38 @@ async function computeActualForMetric(opts: {
        FROM base
        ${basisWhere}`,
       [siteId, fromYmd, toYmd, basis],
+    );
+
+    const total = Number(r.rows?.[0]?.total ?? 0);
+    return Number.isFinite(total) ? total : 0;
+  }
+
+  // Split hauling ore tonnes into Production vs Development.
+  // Client ensures Production hauling always sets Material='Ore' even though the dropdown isn't shown.
+  if (metric_key === 'hauling|production_ore_tonnes_hauled' || metric_key === 'hauling|development_ore_tonnes_hauled') {
+    const sub = metric_key === 'hauling|production_ore_tonnes_hauled' ? 'Production' : 'Development';
+    const r = await pool.query(
+      `WITH base AS (
+         SELECT
+           vsa.payload_json,
+           vs.validated AS v_validated
+         FROM validated_shift_activities vsa
+         LEFT JOIN validated_shifts vs
+           ON vs.id = vsa.validated_shift_id
+         WHERE vsa.admin_site_id = $1
+           AND vsa.date >= $2::date
+           AND vsa.date <  $3::date
+           AND vsa.activity = 'Hauling'
+           AND vsa.sub_activity = $5
+           AND COALESCE(NULLIF(TRIM(vsa.payload_json->'values'->>'Material'), ''), '') ILIKE '%ore%'
+       )
+       SELECT
+         COALESCE(SUM(
+           NULLIF(regexp_replace(COALESCE(payload_json->'values'->>'Tonnes Hauled',''), '[^0-9.\-]', '', 'g'), '')::numeric
+         ), 0) AS total
+       FROM base
+       ${basisWhere}`,
+      [siteId, fromYmd, toYmd, basis, sub],
     );
 
     const total = Number(r.rows?.[0]?.total ?? 0);
