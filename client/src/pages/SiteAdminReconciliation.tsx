@@ -584,25 +584,28 @@ export default function SiteAdminReconciliation() {
                       </div>
                       <div className="mt-1 text-xs opacity-80">Constraints: f ≥ 0, optional per-config bounds, and optional lock-to-estimate. and optional per-loader bounds you enter above.</div>
                     </div>
-                    {bucketData?.solved?.predicted && bucketData?.solved?.reconciled && (
+                    {bucketData?.solved?.totals && bucketData?.solved?.reconciled && (
                       <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                         <div>
                           <div className="text-xs opacity-70">Prod predicted vs reconciled</div>
                           <div className="font-semibold">
-                            {fmt(bucketData.solved.totals?.prod_pred ?? 0, 2)} t / {fmt(bucketData.solved.reconciled.prod, 2)} t
+                            {fmt(bucketData.solved.totals?.prod_pred ?? 0, 2)} t / {fmt(bucketData.solved.reconciled.prod ?? 0, 2)} t
+                          </div>
+                          <div className="text-xs opacity-80">
+                            Residual: {fmt(bucketData.solved.residuals?.prod ?? 0, 2)} t
+                            {bucketData.solved.reconciled.prod ? ` (${fmt(((bucketData.solved.residuals?.prod ?? 0) / bucketData.solved.reconciled.prod) * 100, 2)}%)` : ''}
                           </div>
                         </div>
                         <div>
                           <div className="text-xs opacity-70">Dev predicted vs reconciled</div>
                           <div className="font-semibold">
-                            {fmt(bucketData.solved.totals?.dev_pred ?? 0, 2)} t / {fmt(bucketData.solved.reconciled.dev, 2)} t
+                            {fmt(bucketData.solved.totals?.dev_pred ?? 0, 2)} t / {fmt(bucketData.solved.reconciled.dev ?? 0, 2)} t
+                          </div>
+                          <div className="text-xs opacity-80">
+                            Residual: {fmt(bucketData.solved.residuals?.dev ?? 0, 2)} t
+                            {bucketData.solved.reconciled.dev ? ` (${fmt(((bucketData.solved.residuals?.dev ?? 0) / bucketData.solved.reconciled.dev) * 100, 2)}%)` : ''}
                           </div>
                         </div>
-                      </div>
-                    )}
-                    {bucketData?.solved?.residual && (
-                      <div className="mt-2 text-xs opacity-80">
-                        Residuals: Prod {fmt(bucketData.solved.residual.prod, 2)} t, Dev {fmt(bucketData.solved.residual.dev, 2)} t
                       </div>
                     )}
                   </div>
