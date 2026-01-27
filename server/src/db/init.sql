@@ -766,10 +766,11 @@ CREATE TABLE IF NOT EXISTS presence_events (
   region_code TEXT NULL,
   user_agent TEXT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (user_id, bucket)
+  PRIMARY KEY (user_id, ts)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_presence_events_user_bucket ON presence_events(user_id, bucket);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_presence_events_user_ts ON presence_events(user_id, ts);
+CREATE INDEX IF NOT EXISTS idx_presence_events_user_bucket ON presence_events(user_id, bucket);
 CREATE INDEX IF NOT EXISTS idx_presence_events_ts ON presence_events(ts);
 CREATE INDEX IF NOT EXISTS idx_presence_events_country_ts ON presence_events(country_code, ts);
 CREATE INDEX IF NOT EXISTS idx_presence_events_region_ts ON presence_events(region_code, ts);
