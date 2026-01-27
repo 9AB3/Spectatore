@@ -9,7 +9,7 @@ declare global {
   }
 }
 
-const DEFAULT_MEASUREMENT_ID = 'G-K3B0KNBQ6T';
+const DEFAULT_MEASUREMENT_ID = 'G-Z7X38HRNDZ';
 
 let _inited = false;
 let _mid = '';
@@ -59,15 +59,55 @@ export function gaPageView(pathnameWithQuery?: string) {
   });
 }
 
-function gaEvent(name: string, params?: Record<string, any>) {
-  if (!_inited || !window.gtag) return;
-  window.gtag('event', name, params || {});
+function safeNavigate(href: string) {
+  try {
+    window.location.assign(href);
+  } catch {
+    // Fallback
+    (window.location as any).href = href;
+  }
+}
+
+function gaEvent(
+  name: string,
+  params?: Record<string, any>,
+  opts?: { callback?: () => void; timeoutMs?: number },
+) {
+  if (!_inited || !window.gtag) {
+    // If analytics isn't ready but a callback is requested, still proceed.
+    if (opts?.callback) opts.callback();
+    return;
+  }
+
+  const callback = opts?.callback;
+  const timeoutMs = typeof opts?.timeoutMs === 'number' ? opts!.timeoutMs : 800;
+
+  if (callback) {
+    // GA4 supports event_callback + event_timeout to improve reliability for outbound links.
+    window.gtag('event', name, {
+      ...(params || {}),
+      event_callback: callback,
+      event_timeout: timeoutMs,
+    });
+  } else {
+    window.gtag('event', name, params || {});
+  }
 }
 
 export const track = {
   // Funnel
   signupStart(source?: string) {
     gaEvent('sign_up_start', { source: source || 'unknown' });
+  },
+  signupStartNavigate(source: string | undefined, href: string) {
+    let done = false;
+    const go = () => {
+      if (done) return;
+      done = true;
+      safeNavigate(href);
+    };
+    gaEvent('sign_up_start', { source: source || 'unknown' }, { callback: go, timeoutMs: 800 });
+    window.setTimeout(go, 900);
   },
   signupComplete(method?: string) {
     // GA4 has a recommended event name "sign_up"
@@ -107,6 +147,17 @@ export const track = {
 
   click(name: string, extra?: Record<string, any>) {
     gaEvent('ui_click', { name, ...(extra || {}) });
+  },
+  clickNavigate(name: string, href: string, extra?: Record<string, any>) {
+    let done = false;
+    const go = () => {
+      if (done) return;
+      done = true;
+      safeNavigate(href);
+    };
+    // Fire event and navigate once GA confirms, with a hard fallback timeout.
+    gaEvent('ui_click', { name, ...(extra || {}) }, { callback: go, timeoutMs: 800 });
+    window.setTimeout(go, 900);
   },
   videoPlay(name: string, extra?: Record<string, any>) {
     gaEvent('video_play', { name, ...(extra || {}) });
