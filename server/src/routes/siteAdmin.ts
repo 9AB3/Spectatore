@@ -2801,6 +2801,21 @@ const RECON_METRICS: ReconMetric[] = [
     label: 'Firing → Development → Cut Length',
     unit: 'm',
   },
+  {
+    key: 'hauling|ore_tonnes_hauled',
+    label: 'Hauling → Ore Tonnes Hauled (Dev + Prod)',
+    unit: 't',
+  },
+  {
+    key: 'hoisting|ore_tonnes_hoisted',
+    label: 'Hoisting → Ore Tonnes Hoisted',
+    unit: 't',
+  },
+  {
+    key: 'hoisting|waste_tonnes_hoisted',
+    label: 'Hoisting → Waste Tonnes Hoisted',
+    unit: 't',
+  },
 ];
 
 function isYm(s: string) {
@@ -2834,47 +2849,134 @@ async function computeActualForMetric(opts: {
   const { site, month_ym, metric_key, basis } = opts;
   const { fromYmd, toYmd } = monthBounds(month_ym);
 
-  if (metric_key !== 'firing|development|cut_length') {
-    throw Object.assign(new Error('unsupported metric_key'), { status: 400 });
-  }
-
-  // Actual = sum(Cut Length) for validated_shift_activities where activity='Firing' and sub_activity='Development'.
-  // If basis=validated_only, include only rows tied to validated_shifts.validated=1.
   const siteId = await resolveAdminSiteId(pool as any, site);
   if (!siteId) return 0;
 
-  const r = await pool.query(
-    `WITH base AS (
-        SELECT
-          vsa.date,
-          vsa.dn,
-          COALESCE(vsa.user_email,'') AS user_email,
-          vsa.payload_json,
-          vs.validated AS v_validated
-        FROM validated_shift_activities vsa
-        LEFT JOIN validated_shifts vs
-          ON vs.id = vsa.validated_shift_id
-        WHERE vsa.admin_site_id = $1
-          AND vsa.date >= $2::date
-          AND vsa.date <  $3::date
-          AND vsa.activity = 'Firing'
-          AND vsa.sub_activity = 'Development'
-      )
-      SELECT
-        COALESCE(SUM(
-          NULLIF((payload_json->'values'->>'Cut Length')::text, '')::numeric
-        ), 0) AS total
-      FROM base
-      WHERE (
-        $4::text = 'captured_all'
-        OR COALESCE(v_validated, false) = true
-      )`,
-    [siteId, fromYmd, toYmd, basis],
-  );
+  // Helper: include all captured rows, or only those tied to a validated shift
+  const basisWhere = `
+    WHERE (
+      $4::text = 'captured_all'
+      OR COALESCE(v_validated, false) = true
+    )
+  `;
 
-  const total = Number(r.rows?.[0]?.total ?? 0);
-  return Number.isFinite(total) ? total : 0;
+  // NOTE: We parse numbers defensively to handle strings like "1,234" etc.
+  // NULLIF(regexp_replace(txt,'[^0-9.\-]','','g'),'')::numeric
+
+  if (metric_key === 'firing|development|cut_length') {
+    const r = await pool.query(
+      `WITH base AS (
+         SELECT
+           vsa.payload_json,
+           vs.validated AS v_validated
+         FROM validated_shift_activities vsa
+         LEFT JOIN validated_shifts vs
+           ON vs.id = vsa.validated_shift_id
+         WHERE vsa.admin_site_id = $1
+           AND vsa.date >= $2::date
+           AND vsa.date <  $3::date
+           AND vsa.activity = 'Firing'
+           AND vsa.sub_activity = 'Development'
+       )
+       SELECT
+         COALESCE(SUM(
+           NULLIF(regexp_replace(COALESCE(payload_json->'values'->>'Cut Length',''), '[^0-9.\-]', '', 'g'), '')::numeric
+         ), 0) AS total
+       FROM base
+       ${basisWhere}`,
+      [siteId, fromYmd, toYmd, basis],
+    );
+
+    const total = Number(r.rows?.[0]?.total ?? 0);
+    return Number.isFinite(total) ? total : 0;
+  }
+
+  if (metric_key === 'hauling|ore_tonnes_hauled') {
+    const r = await pool.query(
+      `WITH base AS (
+         SELECT
+           vsa.payload_json,
+           vs.validated AS v_validated
+         FROM validated_shift_activities vsa
+         LEFT JOIN validated_shifts vs
+           ON vs.id = vsa.validated_shift_id
+         WHERE vsa.admin_site_id = $1
+           AND vsa.date >= $2::date
+           AND vsa.date <  $3::date
+           AND vsa.activity = 'Hauling'
+           AND vsa.sub_activity IN ('Development','Production')
+           AND COALESCE(NULLIF(TRIM(vsa.payload_json->'values'->>'Material'), ''), '') ILIKE '%ore%'
+       )
+       SELECT
+         COALESCE(SUM(
+           NULLIF(regexp_replace(COALESCE(payload_json->'values'->>'Tonnes Hauled',''), '[^0-9.\-]', '', 'g'), '')::numeric
+         ), 0) AS total
+       FROM base
+       ${basisWhere}`,
+      [siteId, fromYmd, toYmd, basis],
+    );
+
+    const total = Number(r.rows?.[0]?.total ?? 0);
+    return Number.isFinite(total) ? total : 0;
+  }
+
+  if (metric_key === 'hoisting|ore_tonnes_hoisted') {
+    const r = await pool.query(
+      `WITH base AS (
+         SELECT
+           vsa.payload_json,
+           vs.validated AS v_validated
+         FROM validated_shift_activities vsa
+         LEFT JOIN validated_shifts vs
+           ON vs.id = vsa.validated_shift_id
+         WHERE vsa.admin_site_id = $1
+           AND vsa.date >= $2::date
+           AND vsa.date <  $3::date
+           AND vsa.activity = 'Hoisting'
+       )
+       SELECT
+         COALESCE(SUM(
+           NULLIF(regexp_replace(COALESCE(payload_json->'values'->>'Ore Tonnes',''), '[^0-9.\-]', '', 'g'), '')::numeric
+         ), 0) AS total
+       FROM base
+       ${basisWhere}`,
+      [siteId, fromYmd, toYmd, basis],
+    );
+
+    const total = Number(r.rows?.[0]?.total ?? 0);
+    return Number.isFinite(total) ? total : 0;
+  }
+
+  if (metric_key === 'hoisting|waste_tonnes_hoisted') {
+    const r = await pool.query(
+      `WITH base AS (
+         SELECT
+           vsa.payload_json,
+           vs.validated AS v_validated
+         FROM validated_shift_activities vsa
+         LEFT JOIN validated_shifts vs
+           ON vs.id = vsa.validated_shift_id
+         WHERE vsa.admin_site_id = $1
+           AND vsa.date >= $2::date
+           AND vsa.date <  $3::date
+           AND vsa.activity = 'Hoisting'
+       )
+       SELECT
+         COALESCE(SUM(
+           NULLIF(regexp_replace(COALESCE(payload_json->'values'->>'Waste Tonnes',''), '[^0-9.\-]', '', 'g'), '')::numeric
+         ), 0) AS total
+       FROM base
+       ${basisWhere}`,
+      [siteId, fromYmd, toYmd, basis],
+    );
+
+    const total = Number(r.rows?.[0]?.total ?? 0);
+    return Number.isFinite(total) ? total : 0;
+  }
+
+  throw Object.assign(new Error('unsupported metric_key'), { status: 400 });
 }
+
 
 // List supported metrics
 router.get('/reconciliation/metrics', siteAdminMiddleware, async (req: any, res) => {
@@ -3040,12 +3142,13 @@ async function upsertReconciliationAndCompute(opts: {
 
     const up = await client.query(
       `INSERT INTO validated_reconciliations (
-          admin_site_id, month_ym, metric_key, reconciled_total, basis, method, notes,
+          admin_site_id, site, month_ym, metric_key, reconciled_total, basis, method, notes,
           created_by_user_id, actual_total_snapshot, delta_snapshot, computed_at, updated_at
        )
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),now())
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now(),now())
        ON CONFLICT (admin_site_id, month_ym, metric_key)
        DO UPDATE SET
+         site=EXCLUDED.site,
          reconciled_total=EXCLUDED.reconciled_total,
          basis=EXCLUDED.basis,
          method=EXCLUDED.method,
@@ -3056,7 +3159,7 @@ async function upsertReconciliationAndCompute(opts: {
          computed_at=now(),
          updated_at=now()
        RETURNING id, is_locked`,
-      [adminSiteId, month_ym, metric_key, reconciled_total, basis, method, notes || null, created_by_user_id || null, actual_total, delta],
+      [adminSiteId, site, month_ym, metric_key, reconciled_total, basis, method, notes || null, created_by_user_id || null, actual_total, delta],
     );
 
     const reconId = Number(up.rows?.[0]?.id);
