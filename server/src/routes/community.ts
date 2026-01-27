@@ -83,20 +83,19 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
         $1,
         $2,
         to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'),
-        now(),
+        date_trunc('minute', now() at time zone 'utc'),
         '{}'::jsonb,
         $3,
         $4,
         $5
       )
-      ON CONFLICT (user_id, bucket) DO UPDATE
-        SET ts = EXCLUDED.ts,
-            site_id = COALESCE(EXCLUDED.site_id, presence_events.site_id),
+      ON CONFLICT (user_id, ts) DO UPDATE
+        SET site_id = COALESCE(EXCLUDED.site_id, presence_events.site_id),
             country_code = COALESCE(EXCLUDED.country_code, presence_events.country_code),
             region_code = COALESCE(EXCLUDED.region_code, presence_events.region_code),
             user_agent = COALESCE(EXCLUDED.user_agent, presence_events.user_agent)
       `,
-        [userId, admin_site_id, work_site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
+        [userId, site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
       );
     } catch (e: any) {
       // If the table exists without the expected unique constraint/index (older DBs),
@@ -116,7 +115,7 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
             WHERE user_id=$1 AND bucket=to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"')
           )
           `,
-          [userId, admin_site_id, work_site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
+          [userId, site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
         );
       } else {
         throw e;
