@@ -170,7 +170,7 @@ async function ensureDbColumns() {
     // presence_events schema hardening (after DB resets/migrations):
     // - bucket should be TEXT (we store minute-bucket as ISO string)
     // - ts/meta columns may be missing on older schemas
-    // - ensure a unique constraint on (user_id, bucket)
+    // - ensure a unique constraint on (user_id, ts) where ts is minute-truncated
     try {
       // If bucket was previously TIMESTAMPTZ and part of a PK, drop that constraint first.
       await pool.query(`ALTER TABLE IF EXISTS presence_events DROP CONSTRAINT IF EXISTS presence_events_pkey`);
@@ -180,11 +180,11 @@ async function ensureDbColumns() {
     }
     await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS ts TIMESTAMPTZ DEFAULT now()`);
     await pool.query(`ALTER TABLE IF EXISTS presence_events ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}'::jsonb`);
+    await pool.query(`DROP INDEX IF EXISTS uq_presence_events_user_bucket`);
     await pool.query(
-      `CREATE UNIQUE INDEX IF NOT EXISTS uq_presence_events_user_bucket ON presence_events(user_id, bucket)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_presence_events_user_ts ON presence_events(user_id, ts)`,
     );
-
-    // Onboarding checklist
+// Onboarding checklist
     await pool.query(`
       CREATE TABLE IF NOT EXISTS user_onboarding_steps (
         user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,

@@ -71,11 +71,43 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
       await pool.query(
         `
       INSERT INTO presence_events (user_id, site_id, bucket, ts, meta, country_code, region_code, user_agent)
+VALUES (
+  $1,
+  $2,
+  to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'),
+  date_trunc('minute', now()), -- IMPORTANT: minute-granularity ts enables (user_id, ts) uniqueness + partition pruning
+  '{}'::jsonb,
+  $3,
+  $4,
+  $5
+)
+ON CONFLICT (user_id, ts) DO UPDATE
+  SET ts = EXCLUDED.ts,
+      bucket = EXCLUDED.bucket,
+      site_id = COALESCE(EXCLUDED.site_id, presence_events.site_id),
+      country_code = COALESCE(EXCLUDED.country_code, presence_events.country_code),
+      region_code = COALESCE(EXCLUDED.region_code, presence_events.region_code),
+      user_agent = COALESCE(EXCLUDED.user_agent, presence_events.user_agent)
+      `,
+        [userId, site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
+      );
+    
+} catch (e: any) {
+  // Back-compat:
+  // - Old DBs used UNIQUE (user_id, bucket)
+  // - New DBs use UNIQUE (user_id, ts) where ts is truncated to minute
+  const msg = String(e?.message || '');
+
+  // 1) Try the legacy conflict target (user_id, bucket)
+  try {
+    await pool.query(
+      `
+      INSERT INTO presence_events (user_id, site_id, bucket, ts, meta, country_code, region_code, user_agent)
       VALUES (
         $1,
         $2,
         to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'),
-        now(),
+        date_trunc('minute', now()),
         '{}'::jsonb,
         $3,
         $4,
@@ -88,34 +120,34 @@ router.post('/heartbeat', authMiddleware, async (req: any, res) => {
             region_code = COALESCE(EXCLUDED.region_code, presence_events.region_code),
             user_agent = COALESCE(EXCLUDED.user_agent, presence_events.user_agent)
       `,
+      [userId, site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
+    );
+  } catch (e2: any) {
+    // 2) If the DB has neither unique constraint, fall back to idempotent insert.
+    // This keeps volume low and avoids hard failures on older schemas.
+    if (msg.includes('no unique or exclusion constraint') || msg.includes('ON CONFLICT')) {
+      await pool.query(
+        `
+        INSERT INTO presence_events (user_id, site_id, bucket, ts, meta, country_code, region_code, user_agent)
+        SELECT $1, $2,
+               to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'),
+               date_trunc('minute', now()),
+               '{}'::jsonb,
+               $3, $4, $5
+        WHERE NOT EXISTS (
+          SELECT 1 FROM presence_events
+          WHERE user_id=$1 AND ts=date_trunc('minute', now())
+        )
+        `,
         [userId, site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
       );
-    } catch (e: any) {
-      // If the table exists without the expected unique constraint/index (older DBs),
-      // fall back to an idempotent insert without ON CONFLICT.
-      const msg = String(e?.message || '');
-      if (msg.includes('no unique or exclusion constraint') || msg.includes('ON CONFLICT')) {
-        await pool.query(
-          `
-          INSERT INTO presence_events (user_id, site_id, bucket, ts, meta, country_code, region_code, user_agent)
-          SELECT $1, $2,
-                 to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"'),
-                 now(),
-                 '{}'::jsonb,
-                 $3, $4, $5
-          WHERE NOT EXISTS (
-            SELECT 1 FROM presence_events
-            WHERE user_id=$1 AND bucket=to_char(date_trunc('minute', now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI"Z"')
-          )
-          `,
-          [userId, site_id, country, finalRegionCode, String(req.headers['user-agent'] || '').slice(0, 300)],
-        );
-      } else {
-        throw e;
-      }
+    } else {
+      throw e2;
     }
+  }
+}
 
-    // 2) If we have a site context, also upsert realtime tables for Site Admin engagement.
+// 2) If we have a site context, also upsert realtime tables for Site Admin engagement.
     if (site_id) {
       // presence_current = last heartbeat per user+site
       await pool.query(
