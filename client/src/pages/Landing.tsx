@@ -186,6 +186,7 @@ useEffect(() => {
       </div>
 
       <div className="flex items-center gap-2">
+        <a className="tv-pill" href="/how-to" onClick={() => track.click('landing_howto')}>How-to</a>
         <a
           className="tv-pill"
           href={`${appUrl}/Register`}
@@ -361,6 +362,7 @@ useEffect(() => {
                           ].map(([rank, who, val]) => (
                             <div key={rank} className="flex items-center justify-between text-xs">
                               <div className="flex items-center gap-2">
+        <a className="tv-pill" href="/how-to" onClick={() => track.click('landing_howto')}>How-to</a>
                                 <div className="w-5 tv-muted">{rank}</div>
                                 <div className={who === 'You' ? 'font-semibold text-slate-900' : 'tv-muted'}>{who}</div>
                               </div>
@@ -427,6 +429,7 @@ useEffect(() => {
 
                   <div className="mt-3 flex items-center justify-between">
                     <div className="flex items-center gap-2">
+        <a className="tv-pill" href="/how-to" onClick={() => track.click('landing_howto')}>How-to</a>
                       {[
                         ['you', 'You vs You'],
                         ['network', 'You vs Crew'],

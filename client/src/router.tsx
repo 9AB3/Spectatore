@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { gaPageView } from './lib/analytics';
 import Landing from './pages/Landing';
+import HowTo from './pages/HowTo';
 import Home from './pages/Home';
 import Main from './pages/Main';
 import Shift from './pages/Shift';
@@ -154,6 +155,8 @@ export default function App() {
       {/* Marketing landing page (always accessible, even on localhost) */}
       <Route path="/landing" element={<Landing />} />
       <Route path="/Landing" element={<Navigate to="/landing" replace />} />
+      <Route path="/how-to" element={<HowTo />} />
+      <Route path="/howto" element={<Navigate to="/how-to" replace />} />
       <Route path="/SiteAdminLogin" element={<SiteAdminLogin />} />
       <Route path="/Register" element={<Register />} />
       <Route path="/ConfirmEmail" element={<ConfirmEmail />} />

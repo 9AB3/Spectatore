@@ -104,4 +104,11 @@ export const track = {
   openCommunity() {
     gaEvent('open_community');
   },
+
+  click(name: string, extra?: Record<string, any>) {
+    gaEvent('ui_click', { name, ...(extra || {}) });
+  },
+  videoPlay(name: string, extra?: Record<string, any>) {
+    gaEvent('video_play', { name, ...(extra || {}) });
+  },
 };
