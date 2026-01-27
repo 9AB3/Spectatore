@@ -37,7 +37,8 @@ export default function SiteAdminReconciliation() {
   const [showBuckets, setShowBuckets] = useState(false);
   const [bucketLoading, setBucketLoading] = useState(false);
   const [bucketData, setBucketData] = useState<any>(null);
-  const [bucketBounds, setBucketBounds] = useState<Record<string, { min: string; max: string }>>({});
+  const [bucketAssignments, setBucketAssignments] = useState<Record<string, string>>({});
+  const [bucketConfigs, setBucketConfigs] = useState<Record<string, { estimate: string; min: string; max: string; lock?: boolean }>>({});
 
   const selectedMetric = useMemo(() => metrics.find((m) => m.key === metricKey), [metrics, metricKey]);
 
@@ -164,25 +165,50 @@ export default function SiteAdminReconciliation() {
       const q = new URLSearchParams({ site, month_ym: monthYm });
       const r: any = await api(`/api/site-admin/bucket-factors/month?${q.toString()}`);
       setBucketData(r);
-      // seed bounds inputs
-      const b: Record<string, { min: string; max: string }> = {};
-      for (const row of (r?.bounds || [])) {
-        const id = String(row.loader_id || '');
-        if (!id) continue;
-        b[id] = { min: row.min_factor == null ? '' : String(row.min_factor), max: row.max_factor == null ? '' : String(row.max_factor) };
+      // seed assignments + config inputs
+      const assign: Record<string, string> = {};
+      for (const row of (r?.loaders || [])) {
+        const lid = String(row.loader_id || '').trim();
+        if (!lid) continue;
+        assign[lid] = String(row.config_code || lid);
       }
-      // if already solved this month, prefer those bounds
-      for (const row of (r?.saved || [])) {
-        const id = String(row.loader_id || '');
-        if (!id) continue;
-        b[id] = { min: row.min_factor == null ? (b[id]?.min || '') : String(row.min_factor), max: row.max_factor == null ? (b[id]?.max || '') : String(row.max_factor) };
+      // server may also return explicit assignment map
+      for (const [k, v] of Object.entries((r?.assignment || {}) as Record<string, any>)) {
+        const lid = String(k || '').trim();
+        if (!lid) continue;
+        assign[lid] = String(v || lid);
       }
-      setBucketBounds(b);
-    } catch (e: any) {
-      setBucketData(null);
-      setMsg(e?.message || 'Failed to load bucket factor inputs');
-    } finally {
-      setBucketLoading(false);
+      setBucketAssignments(assign);
+
+      const cfg: Record<string, { estimate: string; min: string; max: string; lock?: boolean }> = {};
+
+      // bring in saved config defs
+      for (const row of (r?.configs || [])) {
+        const code = String((row as any)?.config_code || '').trim();
+        if (!code) continue;
+        cfg[code] = {
+          estimate: (row as any)?.estimate_factor == null ? '' : String((row as any).estimate_factor),
+          min: (row as any)?.min_factor == null ? '' : String((row as any).min_factor),
+          max: (row as any)?.max_factor == null ? '' : String((row as any).max_factor),
+          lock: false,
+        };
+      }
+
+      // ensure any configs currently used exist (seed from loader row if present)
+      for (const row of (r?.loaders || [])) {
+        const code = String((row as any)?.config_code || '').trim();
+        if (!code) continue;
+        if (!cfg[code]) {
+          cfg[code] = {
+            estimate: (row as any)?.estimate_factor == null ? '' : String((row as any).estimate_factor),
+            min: (row as any)?.min_factor == null ? '' : String((row as any).min_factor),
+            max: (row as any)?.max_factor == null ? '' : String((row as any).max_factor),
+            lock: false,
+          };
+        }
+      }
+
+      setBucketConfigs(cfg);      setBucketLoading(false);
     }
   }
 
@@ -191,19 +217,34 @@ export default function SiteAdminReconciliation() {
     if (!/^[0-9]{4}-[0-9]{2}$/.test(monthYm)) return setMsg('Invalid month');
     setBucketLoading(true);
     try {
-      const bounds: Record<string, { min?: number; max?: number }> = {};
-      for (const [id, v] of Object.entries(bucketBounds || {})) {
-        const min = v.min.trim() === '' ? undefined : Number(v.min);
-        const max = v.max.trim() === '' ? undefined : Number(v.max);
-        bounds[id] = {
+      const assignments: Record<string, string> = {};
+      for (const [lid, code] of Object.entries(bucketAssignments || {})) {
+        const k = String(lid || '').trim();
+        if (!k) continue;
+        const v = String(code || '').trim();
+        assignments[k] = v || k;
+      }
+
+      const configs: Record<string, { estimate?: number; min?: number; max?: number; lock?: boolean }> = {};
+      for (const [code, v] of Object.entries(bucketConfigs || {})) {
+        const c = String(code || '').trim();
+        if (!c) continue;
+        const est = v.estimate?.trim?.() === '' ? undefined : Number(v.estimate);
+        const min = v.min?.trim?.() === '' ? undefined : Number(v.min);
+        const max = v.max?.trim?.() === '' ? undefined : Number(v.max);
+        configs[c] = {
+          ...(Number.isFinite(est as any) ? { estimate: est } : {}),
           ...(Number.isFinite(min as any) ? { min } : {}),
           ...(Number.isFinite(max as any) ? { max } : {}),
+          ...(v.lock ? { lock: true } : {}),
         };
       }
+
       const r: any = await api('/api/site-admin/bucket-factors/solve', {
         method: 'POST',
-        body: { site, month_ym: monthYm, bounds, save },
+        body: { site, month_ym: monthYm, assignments, configs, save },
       });
+
       // merge result into bucketData
       setBucketData((prev: any) => ({ ...(prev || {}), solved: r }));
       if (save) setMsg('Bucket factors saved');
@@ -370,7 +411,7 @@ export default function SiteAdminReconciliation() {
                 <div>
                   <div className="text-lg font-semibold">Bucket factors</div>
                   <div className="text-xs opacity-70">
-                    Model 1 (shared factor per loader). Uses reconciled ore tonnes hauled (Prod + Dev) and loading primary buckets per loader.
+                    Model 1 (shared factor per bucket config). Uses reconciled ore tonnes hauled (Prod + Dev) and loading primary buckets grouped by config.
                   </div>
                 </div>
                 <button className="px-3 py-1.5 rounded-xl border bg-[color:var(--card)]" onClick={() => setShowBuckets(false)}>
@@ -413,6 +454,9 @@ export default function SiteAdminReconciliation() {
                       <thead>
                         <tr className="text-xs opacity-70 border-b" style={{ borderColor: '#f0e4d4' }}>
                           <th className="text-left p-2">Loader</th>
+                          <th className="text-left p-2">Config</th>
+                          <th className="text-right p-2">Est (t/bkt)</th>
+                          <th className="text-center p-2">Lock</th>
                           <th className="text-right p-2">Prod buckets</th>
                           <th className="text-right p-2">Dev buckets</th>
                           <th className="text-right p-2">Min (t/bkt)</th>
@@ -433,60 +477,121 @@ export default function SiteAdminReconciliation() {
                                 : []
                         ).map((r: any) => {
                           const id = String(r.loader_id || '').trim();
-                          const b = bucketBounds[id] || { min: '', max: '' };
+                          const cfgCode = (bucketAssignments[id] || String(r.config_code || '').trim() || id).trim() || id;
+                          const cfg = bucketConfigs[cfgCode] || { estimate: '', min: '', max: '', lock: false };
+                          const factor = r.factor != null ? Number(r.factor) : (r.config_factor != null ? Number(r.config_factor) : null);
                           return (
                             <tr key={id} className="border-b" style={{ borderColor: '#f0e4d4' }}>
                               <td className="p-2 font-semibold">{id}</td>
-                              <td className="p-2 text-right">{fmt(r.prod_buckets ?? 0, 0)}</td>
-                              <td className="p-2 text-right">{fmt(r.dev_buckets ?? 0, 0)}</td>
-                              <td className="p-2 text-right">
+
+                              <td className="p-2">
                                 <input
-                                  className="w-24 p-1 rounded-lg border text-right bg-[color:var(--card)]"
-                                  value={b.min}
-                                  onChange={(e) => setBucketBounds((prev) => ({ ...prev, [id]: { ...prev[id], min: e.target.value } }))}
-                                  placeholder="0"
+                                  className="w-28 p-1 rounded-lg border bg-[color:var(--card)]"
+                                  style={{ borderColor: '#f0e4d4' }}
+                                  value={cfgCode}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    setBucketAssignments((prev: any) => ({ ...(prev || {}), [id]: v }));
+                                    setBucketConfigs((prev: any) => {
+                                      const next = { ...(prev || {}) };
+                                      const key = String(v || '').trim();
+                                      if (key && !next[key]) next[key] = { estimate: '', min: '', max: '', lock: false };
+                                      return next;
+                                    });
+                                  }}
                                 />
                               </td>
+
                               <td className="p-2 text-right">
                                 <input
                                   className="w-24 p-1 rounded-lg border text-right bg-[color:var(--card)]"
-                                  value={b.max}
-                                  onChange={(e) => setBucketBounds((prev) => ({ ...prev, [id]: { ...prev[id], max: e.target.value } }))}
+                                  style={{ borderColor: '#f0e4d4' }}
+                                  value={cfg.estimate}
+                                  onChange={(e) =>
+                                    setBucketConfigs((prev: any) => ({
+                                      ...(prev || {}),
+                                      [cfgCode]: { ...(prev?.[cfgCode] || cfg), estimate: e.target.value },
+                                    }))
+                                  }
                                   placeholder=""
                                 />
                               </td>
-                              <td className="p-2 text-right font-semibold">{r.factor == null ? '-' : fmt(r.factor, 4)}</td>
-                              <td className="p-2 text-right">{r.prod_tonnes_pred == null ? '-' : fmt(r.prod_tonnes_pred, 2)}</td>
-                              <td className="p-2 text-right">{r.dev_tonnes_pred == null ? '-' : fmt(r.dev_tonnes_pred, 2)}</td>
+
+                              <td className="p-2 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={!!cfg.lock}
+                                  onChange={(e) =>
+                                    setBucketConfigs((prev: any) => ({
+                                      ...(prev || {}),
+                                      [cfgCode]: { ...(prev?.[cfgCode] || cfg), lock: e.target.checked },
+                                    }))
+                                  }
+                                />
+                              </td>
+
+                              <td className="p-2 text-right">{fmt(r.prod_buckets ?? 0, 0)}</td>
+                              <td className="p-2 text-right">{fmt(r.dev_buckets ?? 0, 0)}</td>
+
+                              <td className="p-2 text-right">
+                                <input
+                                  className="w-24 p-1 rounded-lg border text-right bg-[color:var(--card)]"
+                                  style={{ borderColor: '#f0e4d4' }}
+                                  value={cfg.min}
+                                  onChange={(e) =>
+                                    setBucketConfigs((prev: any) => ({
+                                      ...(prev || {}),
+                                      [cfgCode]: { ...(prev?.[cfgCode] || cfg), min: e.target.value },
+                                    }))
+                                  }
+                                />
+                              </td>
+
+                              <td className="p-2 text-right">
+                                <input
+                                  className="w-24 p-1 rounded-lg border text-right bg-[color:var(--card)]"
+                                  style={{ borderColor: '#f0e4d4' }}
+                                  value={cfg.max}
+                                  onChange={(e) =>
+                                    setBucketConfigs((prev: any) => ({
+                                      ...(prev || {}),
+                                      [cfgCode]: { ...(prev?.[cfgCode] || cfg), max: e.target.value },
+                                    }))
+                                  }
+                                />
+                              </td>
+
+                              <td className="p-2 text-right">{factor == null ? '' : fmt(factor, 4)}</td>
+                              <td className="p-2 text-right">{fmt(r.prod_tonnes_pred ?? r.prod_tonnes ?? 0, 2)}</td>
+                              <td className="p-2 text-right">{fmt(r.dev_tonnes_pred ?? r.dev_tonnes ?? 0, 2)}</td>
                             </tr>
                           );
-                        })}
-                      </tbody>
+                        })}                      </tbody>
                     </table>
                   </div>
 
                   <div className="mt-3 p-3 rounded-xl border bg-[color:var(--card)]" style={{ borderColor: '#f0e4d4' }}>
                     <div className="text-xs opacity-70 mb-1">How it’s calculated</div>
                     <div className="text-sm">
-                      For each loader <span className="font-semibold">i</span>, the bucket factor is <span className="font-semibold">fᵢ</span> (t/bucket).
+                      We assign each loader to a <span className="font-semibold">bucket config</span>. All loaders in the same config share one factor <span className="font-semibold">f₍config₎</span> (t/bucket).
                       We solve the system:
                       <div className="mt-1 text-xs opacity-80">
-                        Σ(prodBucketsᵢ × fᵢ) = reconciled production ore tonnes &nbsp; and &nbsp; Σ(devBucketsᵢ × fᵢ) = reconciled development ore tonnes.
+                        Σ(prodBuckets₍config₎ × f₍config₎) = reconciled production ore tonnes &nbsp; and &nbsp; Σ(devBuckets₍config₎ × f₍config₎) = reconciled development ore tonnes.
                       </div>
-                      <div className="mt-1 text-xs opacity-80">Constraints: fᵢ ≥ 0 and optional per-loader bounds you enter above.</div>
+                      <div className="mt-1 text-xs opacity-80">Constraints: f ≥ 0, optional per-config bounds, and optional lock-to-estimate. and optional per-loader bounds you enter above.</div>
                     </div>
                     {bucketData?.solved?.predicted && bucketData?.solved?.reconciled && (
                       <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                         <div>
                           <div className="text-xs opacity-70">Prod predicted vs reconciled</div>
                           <div className="font-semibold">
-                            {fmt(bucketData.solved.predicted.prod, 2)} t / {fmt(bucketData.solved.reconciled.prod, 2)} t
+                            {fmt(bucketData.solved.totals?.prod_pred ?? 0, 2)} t / {fmt(bucketData.solved.reconciled.prod, 2)} t
                           </div>
                         </div>
                         <div>
                           <div className="text-xs opacity-70">Dev predicted vs reconciled</div>
                           <div className="font-semibold">
-                            {fmt(bucketData.solved.predicted.dev, 2)} t / {fmt(bucketData.solved.reconciled.dev, 2)} t
+                            {fmt(bucketData.solved.totals?.dev_pred ?? 0, 2)} t / {fmt(bucketData.solved.reconciled.dev, 2)} t
                           </div>
                         </div>
                       </div>

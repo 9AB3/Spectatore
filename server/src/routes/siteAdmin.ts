@@ -3471,11 +3471,16 @@ function valObj(payload_json: any) {
 }
 
 // GET /api/site-admin/bucket-factors/month?site=...&month_ym=YYYY-MM
+
+// GET /api/site-admin/bucket-factors/month?site=...&month_ym=YYYY-MM
+// Returns per-loader bucket totals (prod/dev), reconciled tonnes (prod/dev), and saved monthly factors.
+// Supports per-loader per-month bucket config assignment (groups unknowns by config).
 router.get('/bucket-factors/month', siteAdminMiddleware, async (req: any, res) => {
   try {
     const site = String(req.query?.site || '').trim() || normalizeSiteParam(req);
     assertSiteAccess(req, site);
     if (site === '*') return res.status(400).json({ ok: false, error: 'site required' });
+
     const month_ym = String(req.query?.month_ym || '').trim();
     if (!isYm(month_ym)) return res.status(400).json({ ok: false, error: 'invalid month_ym' });
 
@@ -3486,7 +3491,37 @@ router.get('/bucket-factors/month', siteAdminMiddleware, async (req: any, res) =
 
       const recon = await getReconTonnes(client as any, adminSiteId, month_ym);
 
-      // Loader bucket totals for this month (same definition as solver)
+      // Pull config defs (site-wide defaults)
+      const cfgDefsQ = await client.query(
+        `SELECT config_code, estimate_factor, min_factor, max_factor
+           FROM bucket_config_defs
+          WHERE admin_site_id=$1
+          ORDER BY config_code ASC`,
+        [adminSiteId],
+      );
+      const cfgDefs: Record<string, any> = {};
+      for (const r of cfgDefsQ.rows || []) {
+        const code = String(r.config_code);
+        cfgDefs[code] = {
+          config_code: code,
+          estimate_factor: r.estimate_factor == null ? null : Number(r.estimate_factor),
+          min_factor: r.min_factor == null ? null : Number(r.min_factor),
+          max_factor: r.max_factor == null ? null : Number(r.max_factor),
+        };
+      }
+
+      // Monthly assignments (supports bucket swaps)
+      const assignQ = await client.query(
+        `SELECT loader_id, config_code
+           FROM bucket_loader_config_month
+          WHERE admin_site_id=$1 AND month_ym=$2
+          ORDER BY loader_id ASC`,
+        [adminSiteId, month_ym],
+      );
+      const assignment: Record<string, string> = {};
+      for (const r of assignQ.rows || []) assignment[String(r.loader_id)] = String(r.config_code);
+
+      // Loader bucket totals for this month
       const { fromYmd, toYmd } = monthBounds(month_ym);
       const load = await client.query(
         `SELECT payload_json, sub_activity
@@ -3496,11 +3531,13 @@ router.get('/bucket-factors/month', siteAdminMiddleware, async (req: any, res) =
             AND activity='Loading'`,
         [adminSiteId, fromYmd, toYmd],
       );
+
       const agg: Record<string, { prod: number; dev: number }> = {};
       for (const row of load.rows || []) {
         const v = valObj(row.payload_json);
         const loaderId = String(v.Equipment || v.equipment || '').trim();
         if (!loaderId) continue;
+
         const sub = String(row.sub_activity || '').trim();
         const mat = String(v.Material || v.material || '').trim();
         if (mat && mat.toLowerCase() !== 'ore') continue;
@@ -3512,67 +3549,97 @@ router.get('/bucket-factors/month', siteAdminMiddleware, async (req: any, res) =
         const stopeToSP = nNum(v['Stope to SP']);
         const headingToTruck = nNum(v['Heading to Truck']);
         const headingToSP = nNum(v['Heading to SP']);
+
         if (!agg[loaderId]) agg[loaderId] = { prod: 0, dev: 0 };
         if (sub.toLowerCase().startsWith('production')) agg[loaderId].prod += stopeToTruck + stopeToSP;
         else if (sub.toLowerCase().startsWith('development')) agg[loaderId].dev += headingToTruck + headingToSP;
       }
-      const loaders = Object.keys(agg)
+
+      const loadersBase = Object.keys(agg)
         .filter((k) => (agg[k].prod || 0) > 0 || (agg[k].dev || 0) > 0)
         .sort()
-        .map((k) => ({ loader_id: k, prod_buckets: agg[k].prod || 0, dev_buckets: agg[k].dev || 0 }));
+        .map((k) => ({
+          loader_id: k,
+          prod_buckets: agg[k].prod || 0,
+          dev_buckets: agg[k].dev || 0,
+          config_code: assignment[k] || k, // default each loader to its own config
+        }));
 
-      const bounds = await client.query(
-        `SELECT loader_id, min_factor, max_factor
-           FROM bucket_factor_bounds
-          WHERE admin_site_id=$1
-          ORDER BY loader_id ASC`,
-        [adminSiteId],
-      );
+      // Saved monthly factors (per loader)
       const saved = await client.query(
-        `SELECT loader_id, factor, prod_buckets, dev_buckets, prod_tonnes, dev_tonnes, min_factor, max_factor, created_at
+        `SELECT loader_id, factor, prod_buckets, dev_buckets, prod_tonnes, dev_tonnes, min_factor, max_factor, config_code, config_factor, created_at
            FROM bucket_factors_monthly
           WHERE admin_site_id=$1 AND month_ym=$2
           ORDER BY loader_id ASC`,
         [adminSiteId, month_ym],
       );
-
-      // If solved factors exist for this month, merge into loaders list for convenience
       const savedBy: Record<string, any> = {};
       for (const r of saved.rows || []) savedBy[String(r.loader_id)] = r;
-      const mergedLoaders = loaders.map((r) => {
+
+      const loaders = loadersBase.map((r) => {
         const s = savedBy[String(r.loader_id)] || null;
+        const cfg = cfgDefs[r.config_code] || null;
+        const estimate = cfg?.estimate_factor ?? null;
+        const min_factor = cfg?.min_factor ?? null;
+        const max_factor = cfg?.max_factor ?? null;
         return s
           ? {
               ...r,
-              factor: s.factor,
-              min_factor: s.min_factor,
-              max_factor: s.max_factor,
+              factor: Number(s.factor),
+              config_code: String(s.config_code || r.config_code),
+              config_factor: s.config_factor == null ? null : Number(s.config_factor),
+              estimate_factor: estimate,
+              min_factor,
+              max_factor,
               prod_tonnes_pred: (r.prod_buckets || 0) * Number(s.factor || 0),
               dev_tonnes_pred: (r.dev_buckets || 0) * Number(s.factor || 0),
             }
-          : r;
+          : {
+              ...r,
+              estimate_factor: estimate,
+              min_factor,
+              max_factor,
+            };
       });
 
-      return res.json({ ok: true, site, month_ym, reconciled: recon, loaders: mergedLoaders, bounds: bounds.rows || [], saved: saved.rows || [] });
+      // Provide config list for UI
+      const configs = Object.keys(cfgDefs).map((k) => cfgDefs[k]);
+
+      return res.json({
+        ok: true,
+        site,
+        month_ym,
+        reconciled: recon,
+        loaders,
+        configs,
+        assignment,
+        saved: saved.rows || [],
+      });
     } finally {
       client.release();
     }
-  } catch (e) {
-    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  } catch (e: any) {
+    return res.status(500).json({ ok: false, error: e?.message || 'failed' });
   }
 });
 
 // POST /api/site-admin/bucket-factors/solve
-// body: { site, month_ym, bounds?: { [loader_id]: {min?:number,max?:number} }, save?: boolean }
+// Body:
+//  { site, month_ym, save?:boolean,
+//    assignments?: { [loader_id]: config_code },
+//    configs?: { [config_code]: { estimate?:number|null, min?:number|null, max?:number|null, lock?:boolean } } }
 router.post('/bucket-factors/solve', siteAdminMiddleware, async (req: any, res) => {
   try {
     const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
     assertSiteAccess(req, site);
     if (site === '*') return res.status(400).json({ ok: false, error: 'site required' });
+
     const month_ym = String(req.body?.month_ym || '').trim();
     if (!isYm(month_ym)) return res.status(400).json({ ok: false, error: 'invalid month_ym' });
+
     const save = req.body?.save === true;
-    const boundsIn = (req.body?.bounds && typeof req.body.bounds === 'object') ? (req.body.bounds as Record<string, BucketFactorBounds>) : {};
+    const assignmentsIn = (req.body?.assignments && typeof req.body.assignments === 'object') ? (req.body.assignments as Record<string, string>) : {};
+    const configsIn = (req.body?.configs && typeof req.body.configs === 'object') ? (req.body.configs as Record<string, any>) : {};
 
     const { fromYmd, toYmd } = monthBounds(month_ym);
 
@@ -3586,20 +3653,24 @@ router.post('/bucket-factors/solve', siteAdminMiddleware, async (req: any, res) 
         return res.status(400).json({ ok: false, error: 'missing reconciled ore tonnes (production and/or development) for this month' });
       }
 
-      // Default bounds from DB
-      const bRows = await client.query(
-        `SELECT loader_id, min_factor, max_factor
-           FROM bucket_factor_bounds
+      // Load config defs from DB (defaults)
+      const cfgDefsQ = await client.query(
+        `SELECT config_code, estimate_factor, min_factor, max_factor
+           FROM bucket_config_defs
           WHERE admin_site_id=$1`,
         [adminSiteId],
       );
-      const boundsDb: Record<string, BucketFactorBounds> = {};
-      for (const r of bRows.rows || []) boundsDb[String(r.loader_id)] = { min: r.min_factor == null ? null : Number(r.min_factor), max: r.max_factor == null ? null : Number(r.max_factor) };
+      const cfgDb: Record<string, any> = {};
+      for (const r of cfgDefsQ.rows || []) {
+        const c = String(r.config_code);
+        cfgDb[c] = {
+          estimate: r.estimate_factor == null ? null : Number(r.estimate_factor),
+          min: r.min_factor == null ? null : Number(r.min_factor),
+          max: r.max_factor == null ? null : Number(r.max_factor),
+        };
+      }
 
       // Pull loading bucket counts per loader, split by prod/dev.
-      // Primary buckets definition (as per spec):
-      //  - Production: (Stope to Truck + Stope to SP)
-      //  - Development: (Heading to Truck + Heading to SP)
       const load = await client.query(
         `SELECT payload_json, sub_activity
            FROM validated_shift_activities
@@ -3609,7 +3680,7 @@ router.post('/bucket-factors/solve', siteAdminMiddleware, async (req: any, res) 
         [adminSiteId, fromYmd, toYmd],
       );
 
-      const agg: Record<string, { prod: number; dev: number }> = {};
+      const loaderAgg: Record<string, { prod: number; dev: number }> = {};
       for (const row of load.rows || []) {
         const v = valObj(row.payload_json);
         const loaderId = String(v.Equipment || v.equipment || '').trim();
@@ -3627,150 +3698,229 @@ router.post('/bucket-factors/solve', siteAdminMiddleware, async (req: any, res) 
         const headingToTruck = nNum(v['Heading to Truck']);
         const headingToSP = nNum(v['Heading to SP']);
 
-        if (!agg[loaderId]) agg[loaderId] = { prod: 0, dev: 0 };
+        if (!loaderAgg[loaderId]) loaderAgg[loaderId] = { prod: 0, dev: 0 };
 
-        if (sub.toLowerCase().startsWith('production')) {
-          agg[loaderId].prod += stopeToTruck + stopeToSP;
-        } else if (sub.toLowerCase().startsWith('development')) {
-          agg[loaderId].dev += headingToTruck + headingToSP;
-        }
+        if (sub.toLowerCase().startsWith('production')) loaderAgg[loaderId].prod += stopeToTruck + stopeToSP;
+        else if (sub.toLowerCase().startsWith('development')) loaderAgg[loaderId].dev += headingToTruck + headingToSP;
       }
 
-      const loaderIds = Object.keys(agg).filter((k) => (agg[k].prod || 0) > 0 || (agg[k].dev || 0) > 0).sort();
+      const loaderIds = Object.keys(loaderAgg).filter((k) => (loaderAgg[k].prod || 0) > 0 || (loaderAgg[k].dev || 0) > 0).sort();
       if (!loaderIds.length) return res.status(400).json({ ok: false, error: 'no loading buckets found for this month (cannot solve)' });
 
-      const n = loaderIds.length;
-      const A: number[][] = [new Array(n).fill(0), new Array(n).fill(0)];
-      for (let j = 0; j < n; j++) {
-        const id = loaderIds[j];
-        A[0][j] = nNum(agg[id].prod);
-        A[1][j] = nNum(agg[id].dev);
+      // Map loader -> config_code (default each loader to itself)
+      const loaderToCfg: Record<string, string> = {};
+      for (const lid of loaderIds) {
+        const raw = String(assignmentsIn[lid] || '').trim();
+        loaderToCfg[lid] = raw || lid;
+      }
+
+      // Aggregate buckets per config
+      const cfgAgg: Record<string, { prod: number; dev: number }> = {};
+      for (const lid of loaderIds) {
+        const c = loaderToCfg[lid];
+        if (!cfgAgg[c]) cfgAgg[c] = { prod: 0, dev: 0 };
+        cfgAgg[c].prod += nNum(loaderAgg[lid].prod);
+        cfgAgg[c].dev += nNum(loaderAgg[lid].dev);
+      }
+
+      const configCodes = Object.keys(cfgAgg).filter((c) => (cfgAgg[c].prod || 0) > 0 || (cfgAgg[c].dev || 0) > 0).sort();
+      const m = configCodes.length;
+      if (!m) return res.status(400).json({ ok: false, error: 'no config buckets found (cannot solve)' });
+
+      // Build A (2 x m)
+      const A: number[][] = [new Array(m).fill(0), new Array(m).fill(0)];
+      for (let j = 0; j < m; j++) {
+        const c = configCodes[j];
+        A[0][j] = nNum(cfgAgg[c].prod);
+        A[1][j] = nNum(cfgAgg[c].dev);
       }
       const b = [Number(recon.prod || 0), Number(recon.dev || 0)];
 
-      // Build bounds + priors
+      // Bounds + priors per config
       const bounds = [] as Array<{ lo: number; hi: number }>;
       const prior = [] as number[];
-      for (const id of loaderIds) {
-        const inB = boundsIn[id] || {};
-        const dbB = boundsDb[id] || {};
-        const minRaw = inB.min != null ? Number(inB.min) : (dbB.min != null ? Number(dbB.min) : 0);
-        const maxRaw = inB.max != null ? Number(inB.max) : (dbB.max != null ? Number(dbB.max) : Number.POSITIVE_INFINITY);
-        const lo = Number.isFinite(minRaw) ? Math.max(0, minRaw) : 0;
-        const hi = Number.isFinite(maxRaw) ? Math.max(lo, maxRaw) : Number.POSITIVE_INFINITY;
+      for (const c of configCodes) {
+        const inC = configsIn[c] || {};
+        const dbC = cfgDb[c] || {};
+        const estRaw = inC.estimate != null ? Number(inC.estimate) : (dbC.estimate != null ? Number(dbC.estimate) : null);
+
+        const minRaw = inC.min != null ? Number(inC.min) : (dbC.min != null ? Number(dbC.min) : 0);
+        const maxRaw = inC.max != null ? Number(inC.max) : (dbC.max != null ? Number(dbC.max) : Number.POSITIVE_INFINITY);
+
+        let lo = Number.isFinite(minRaw) ? Math.max(0, minRaw) : 0;
+        let hi = Number.isFinite(maxRaw) ? Math.max(lo, maxRaw) : Number.POSITIVE_INFINITY;
+
+        // Optional lock to estimate
+        if (inC.lock === true && estRaw != null && Number.isFinite(estRaw)) {
+          lo = Math.max(0, estRaw);
+          hi = lo;
+        }
+
         bounds.push({ lo, hi });
-        const p = Number.isFinite(hi) ? (lo + hi) / 2 : Math.max(lo, 0);
+
+        // Prior: estimate if provided, else midpoint of bounds
+        const p = (estRaw != null && Number.isFinite(estRaw))
+          ? Math.max(0, estRaw)
+          : (Number.isFinite(hi) ? (lo + hi) / 2 : Math.max(lo, 0));
         prior.push(p);
       }
 
       const solved = solveProjectedGradient({ A, b, bounds, prior, lambda: 0.05, iters: 800 });
       const x = solved.x;
 
-      // Prepare response rows
-      const rows = loaderIds.map((id, j) => {
-        const prod_buckets = nNum(agg[id].prod);
-        const dev_buckets = nNum(agg[id].dev);
+      // Build per-config results
+      const configRows = configCodes.map((c, j) => {
         const factor = nNum(x[j]);
         return {
-          loader_id: id,
-          prod_buckets,
-          dev_buckets,
+          config_code: c,
+          prod_buckets: nNum(cfgAgg[c].prod),
+          dev_buckets: nNum(cfgAgg[c].dev),
+          factor,
           min_factor: bounds[j].lo,
           max_factor: Number.isFinite(bounds[j].hi) ? bounds[j].hi : null,
-          factor,
-          prod_tonnes_pred: prod_buckets * factor,
-          dev_tonnes_pred: dev_buckets * factor,
+          estimate_factor: prior[j],
+          prod_tonnes_pred: nNum(cfgAgg[c].prod) * factor,
+          dev_tonnes_pred: nNum(cfgAgg[c].dev) * factor,
         };
       });
 
-      const predicted = { prod: Number(solved.predicted?.[0] ?? 0), dev: Number(solved.predicted?.[1] ?? 0) };
-      const residual = { prod: predicted.prod - b[0], dev: predicted.dev - b[1] };
+      // Per-loader rows (factor assigned by config)
+      const factorByCfg: Record<string, number> = {};
+      for (const r of configRows) factorByCfg[String(r.config_code)] = Number(r.factor || 0);
+
+      const loaderRows = loaderIds.map((lid) => {
+        const c = loaderToCfg[lid];
+        const f = factorByCfg[c] || 0;
+        const prod_buckets = nNum(loaderAgg[lid].prod);
+        const dev_buckets = nNum(loaderAgg[lid].dev);
+        return {
+          loader_id: lid,
+          config_code: c,
+          prod_buckets,
+          dev_buckets,
+          factor: f,
+          prod_tonnes_pred: prod_buckets * f,
+          dev_tonnes_pred: dev_buckets * f,
+        };
+      });
+
+      // Totals + residuals
+      const prodPred = configRows.reduce((s, r) => s + nNum(r.prod_tonnes_pred), 0);
+      const devPred = configRows.reduce((s, r) => s + nNum(r.dev_tonnes_pred), 0);
+      const residuals = { prod: prodPred - Number(recon.prod || 0), dev: devPred - Number(recon.dev || 0) };
 
       if (save) {
+        // Persist config defs + assignments for this month, then store monthly factors per loader
         await client.query('BEGIN');
-        try {
-          // Save bounds (upsert)
-          for (const r of rows) {
-            await client.query(
-              `INSERT INTO bucket_factor_bounds (admin_site_id, site, loader_id, min_factor, max_factor, updated_by_user_id, updated_at)
-               VALUES ($1,$2,$3,$4,$5,$6,now())
-               ON CONFLICT (admin_site_id, loader_id)
-               DO UPDATE SET
-                 site=EXCLUDED.site,
-                 min_factor=EXCLUDED.min_factor,
-                 max_factor=EXCLUDED.max_factor,
-                 updated_by_user_id=EXCLUDED.updated_by_user_id,
-                 updated_at=now()`,
-              [adminSiteId, site, r.loader_id, r.min_factor, r.max_factor, req?.site_admin?.user_id || req?.user_id || null],
-            );
-          }
 
-          // Replace monthly factors for this month
-          await client.query(`DELETE FROM bucket_factors_monthly WHERE admin_site_id=$1 AND month_ym=$2`, [adminSiteId, month_ym]);
-          for (const r of rows) {
-            await client.query(
-              `INSERT INTO bucket_factors_monthly (
-                 admin_site_id, site, month_ym, loader_id, factor,
-                 prod_buckets, dev_buckets, prod_tonnes, dev_tonnes,
-                 min_factor, max_factor, method, created_by_user_id, created_at
-               ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'projected_gradient',$12,now())`,
-              [
-                adminSiteId,
-                site,
-                month_ym,
-                r.loader_id,
-                r.factor,
-                r.prod_buckets,
-                r.dev_buckets,
-                Number(recon.prod || 0),
-                Number(recon.dev || 0),
-                r.min_factor,
-                r.max_factor,
-                req?.site_admin?.user_id || req?.user_id || null,
-              ],
-            );
-          }
-          await client.query('COMMIT');
-        } catch (e) {
-          await client.query('ROLLBACK').catch(() => undefined);
-          throw e;
+        // Upsert config defs for codes used this month (only those provided/edited)
+        for (const c of configCodes) {
+          const inC = configsIn[c] || {};
+          const est = (inC.estimate != null && Number.isFinite(Number(inC.estimate))) ? Number(inC.estimate) : null;
+          const minF = (inC.min != null && Number.isFinite(Number(inC.min))) ? Math.max(0, Number(inC.min)) : null;
+          const maxF = (inC.max != null && Number.isFinite(Number(inC.max))) ? Math.max(minF ?? 0, Number(inC.max)) : null;
+
+          // Only upsert if something was provided OR it already exists
+          const exists = cfgDb[c] != null;
+          if (est == null && minF == null && maxF == null && !exists) continue;
+
+          await client.query(
+            `INSERT INTO bucket_config_defs (admin_site_id, site, config_code, estimate_factor, min_factor, max_factor, updated_by_user_id, updated_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7, now())
+             ON CONFLICT (admin_site_id, config_code)
+             DO UPDATE SET estimate_factor=EXCLUDED.estimate_factor,
+                           min_factor=EXCLUDED.min_factor,
+                           max_factor=EXCLUDED.max_factor,
+                           updated_by_user_id=EXCLUDED.updated_by_user_id,
+                           updated_at=now()`,
+            [adminSiteId, site, c, est, minF, maxF, req.user?.id || null],
+          );
         }
+
+        // Upsert loader monthly assignments
+        for (const lid of loaderIds) {
+          const c = loaderToCfg[lid] || lid;
+          await client.query(
+            `INSERT INTO bucket_loader_config_month (admin_site_id, site, month_ym, loader_id, config_code, updated_by_user_id, updated_at)
+             VALUES ($1,$2,$3,$4,$5,$6, now())
+             ON CONFLICT (admin_site_id, month_ym, loader_id)
+             DO UPDATE SET config_code=EXCLUDED.config_code,
+                           updated_by_user_id=EXCLUDED.updated_by_user_id,
+                           updated_at=now()`,
+            [adminSiteId, site, month_ym, lid, c, req.user?.id || null],
+          );
+        }
+
+        // Upsert per-loader monthly factors snapshot
+        for (const lr of loaderRows) {
+          const c = String(lr.config_code || lr.loader_id);
+          const cfgFactor = factorByCfg[c] || 0;
+          // Find bounds for this config for storage convenience
+          const cr = configRows.find((r) => String(r.config_code) === c) || null;
+          await client.query(
+            `INSERT INTO bucket_factors_monthly
+              (admin_site_id, site, month_ym, loader_id, factor, prod_buckets, dev_buckets, prod_tonnes, dev_tonnes, min_factor, max_factor, method, created_by_user_id, created_at, config_code, config_factor)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'projected_gradient',$12, now(), $13, $14)
+             ON CONFLICT (admin_site_id, month_ym, loader_id)
+             DO UPDATE SET factor=EXCLUDED.factor,
+                           prod_buckets=EXCLUDED.prod_buckets,
+                           dev_buckets=EXCLUDED.dev_buckets,
+                           prod_tonnes=EXCLUDED.prod_tonnes,
+                           dev_tonnes=EXCLUDED.dev_tonnes,
+                           min_factor=EXCLUDED.min_factor,
+                           max_factor=EXCLUDED.max_factor,
+                           config_code=EXCLUDED.config_code,
+                           config_factor=EXCLUDED.config_factor,
+                           created_by_user_id=EXCLUDED.created_by_user_id,
+                           created_at=now()`,
+            [
+              adminSiteId,
+              site,
+              month_ym,
+              lr.loader_id,
+              lr.factor,
+              lr.prod_buckets,
+              lr.dev_buckets,
+              lr.prod_tonnes_pred,
+              lr.dev_tonnes_pred,
+              cr?.min_factor ?? null,
+              cr?.max_factor ?? null,
+              req.user?.id || null,
+              c,
+              cfgFactor,
+            ],
+          );
+        }
+
+        await client.query('COMMIT');
       }
 
       return res.json({
         ok: true,
         site,
         month_ym,
-        reconciled: { prod: b[0], dev: b[1] },
-        predicted,
-        residual,
-        loaders: rows,
-        notes: {
-          model: 'shared_factor_per_loader',
-          equations: 2,
-          unknowns: n,
-          warning:
-            n > 2
-              ? 'Underdetermined for a single month (2 equations, >2 loaders). Bounds/prior are used to select a plausible solution.'
-              : null,
-        },
+        reconciled: recon,
+        assignment: loaderToCfg,
+        configs: configRows,
+        loaders: loaderRows,
+        totals: { prod_pred: prodPred, dev_pred: devPred },
+        residuals,
+        underdetermined: m > 2,
+        notes: (m > 2)
+          ? { warning: `Underdetermined for a single month (2 equations, ${m} configs). Bucket config estimates/bounds are used to select a plausible solution.` }
+          : null,
       });
+    } catch (e: any) {
+      try { await client.query('ROLLBACK'); } catch {}
+      return res.status(500).json({ ok: false, error: e?.message || 'failed' });
     } finally {
       client.release();
     }
-  } catch (e) {
-    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  } catch (e: any) {
+    return res.status(500).json({ ok: false, error: e?.message || 'failed' });
   }
 });
 
-
-// =============================
-// POWER BI SITE TOKENS (per-site)
-// =============================
-// These are used by Power BI Desktop/Service via Web connector URLs.
-// Security model:
-// - Site Admin managers can create/revoke tokens for their allowed site(s)
-// - Tokens are bound to a specific site
 
 router.get('/powerbi-tokens', siteAdminMiddleware, async (req: any, res) => {
   try {

@@ -756,6 +756,36 @@ CREATE TABLE IF NOT EXISTS bucket_factors_monthly (
   UNIQUE(admin_site_id, month_ym, loader_id)
 );
 
+
+-- Bucket configs (per site) and per-loader monthly assignment (supports bucket swaps)
+CREATE TABLE IF NOT EXISTS bucket_config_defs (
+  admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  site TEXT NOT NULL,
+  config_code TEXT NOT NULL,
+  estimate_factor NUMERIC NULL, -- t/bkt estimate (prior)
+  min_factor NUMERIC NULL,
+  max_factor NUMERIC NULL,
+  updated_by_user_id INT NULL REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (admin_site_id, config_code)
+);
+
+CREATE TABLE IF NOT EXISTS bucket_loader_config_month (
+  admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  site TEXT NOT NULL,
+  month_ym TEXT NOT NULL,
+  loader_id TEXT NOT NULL,
+  config_code TEXT NOT NULL,
+  updated_by_user_id INT NULL REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (admin_site_id, month_ym, loader_id)
+);
+
+-- Extend monthly factors to remember config used
+ALTER TABLE bucket_factors_monthly ADD COLUMN IF NOT EXISTS config_code TEXT;
+ALTER TABLE bucket_factors_monthly ADD COLUMN IF NOT EXISTS config_factor NUMERIC;
+
+
 -- Ensure reconciliation columns exist on older DBs (idempotent upgrades)
 ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS month_ym TEXT;
 ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS metric_key TEXT;
