@@ -208,7 +208,11 @@ export default function SiteAdminReconciliation() {
         }
       }
 
-      setBucketConfigs(cfg);      setBucketLoading(false);
+      setBucketConfigs(cfg);
+    } catch (e: any) {
+      setMsg(e?.message || 'Failed to load bucket factors');
+    } finally {
+      setBucketLoading(false);
     }
   }
 
