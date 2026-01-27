@@ -284,4 +284,33 @@ export const track = {
   feedbackOpen(source?: string) {
     gaEvent('feedback_open', { source: source || 'unknown' });
   },
+
+  // Generic UI helpers (landing / how-to / navigation)
+  click(label: string, extra?: Record<string, any>) {
+    gaEvent('ui_click', { label, ...(extra || {}) });
+  },
+  clickNavigate(label: string, href: string) {
+    let done = false;
+    const go = () => {
+      if (done) return;
+      done = true;
+      safeNavigate(withAttribution(href));
+    };
+    gaEvent('ui_click', { label, href }, { callback: go, timeoutMs: 800 });
+    window.setTimeout(go, 900);
+  },
+  videoPlay(id: string) {
+    gaEvent('video_play', { id });
+  },
+
+  // Page opens (useful for landing-style pages that are part of the SPA)
+  openCommunity() {
+    gaEvent('page_open', { page: 'community' });
+  },
+  openYouVsCrew() {
+    gaEvent('page_open', { page: 'you_vs_crew' });
+  },
+  openYouVsYou() {
+    gaEvent('page_open', { page: 'you_vs_you' });
+  },
 };
