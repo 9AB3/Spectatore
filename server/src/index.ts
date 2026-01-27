@@ -115,55 +115,94 @@ async function ensureDbColumns() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id)`);
 
     // Realtime presence + sessions (best-effort for existing DBs)
-    await pool.query(`CREATE TABLE IF NOT EXISTS presence_current (
-      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-      admin_site_id INTEGER NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
-      work_site_id INTEGER NULL REFERENCES work_sites(id) ON DELETE CASCADE,
-      last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
-      country_code TEXT NULL,
-      region_code TEXT NULL,
-      user_agent TEXT NULL
-    );`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_admin_site ON presence_current(admin_site_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_work_site ON presence_current(work_site_id)`);
+    // We support two nullable site columns:
+    // - admin_site_id (FK -> admin_sites.id)
+    // - work_site_id  (FK -> work_sites.id)
+    // Older DBs used presence_current.site_id (NOT NULL FK -> admin_sites) and/or different PKs.
+    const pcExists = await pool.query(`SELECT to_regclass('public.presence_current') AS reg`);
+    const pcReg = pcExists.rows?.[0]?.reg;
 
-    // --- presence_current migration (legacy schema had site_id NOT NULL FK to admin_sites and PK (user_id, site_id)) ---
-    // New schema: one row per user, admin_site_id/work_site_id nullable.
-    const pcCols = await pool.query(
-      `SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='presence_current'`
-    );
-    const pcColSet = new Set(pcCols.rows.map((r: any) => String(r.column_name)));
-    if (pcColSet.has('site_id') && !pcColSet.has('admin_site_id')) {
-      // 1) Rename site_id -> admin_site_id, allow NULL
-      await pool.query(`ALTER TABLE presence_current RENAME COLUMN site_id TO admin_site_id`);
-      await pool.query(`ALTER TABLE presence_current ALTER COLUMN admin_site_id DROP NOT NULL`);
-      // 2) Add work_site_id
-      await pool.query(`ALTER TABLE presence_current ADD COLUMN IF NOT EXISTS work_site_id INTEGER NULL`);
-      // 3) Drop old constraints if present
+    if (!pcReg) {
+      // Fresh DB: create the new schema directly
+      await pool.query(`CREATE TABLE presence_current (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        admin_site_id INTEGER NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+        work_site_id INTEGER NULL REFERENCES work_sites(id) ON DELETE CASCADE,
+        last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+        country_code TEXT NULL,
+        region_code TEXT NULL,
+        user_agent TEXT NULL
+      );`);
+    } else {
+      // Existing DB: inspect columns and migrate defensively
+      const pcCols = await pool.query(
+        `SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='presence_current'`
+      );
+      const pcColSet = new Set(pcCols.rows.map((r: any) => String(r.column_name)));
+
+      // If legacy site_id exists, rename -> admin_site_id
+      if (pcColSet.has('site_id') && !pcColSet.has('admin_site_id')) {
+        await pool.query(`ALTER TABLE presence_current RENAME COLUMN site_id TO admin_site_id`);
+        pcColSet.add('admin_site_id');
+        pcColSet.delete('site_id');
+      }
+
+      // Ensure columns exist
+      if (!pcColSet.has('admin_site_id')) {
+        await pool.query(`ALTER TABLE presence_current ADD COLUMN IF NOT EXISTS admin_site_id INTEGER NULL`);
+        pcColSet.add('admin_site_id');
+      }
+      if (!pcColSet.has('work_site_id')) {
+        await pool.query(`ALTER TABLE presence_current ADD COLUMN IF NOT EXISTS work_site_id INTEGER NULL`);
+        pcColSet.add('work_site_id');
+      }
+
+      // Make admin_site_id nullable (older schema could be NOT NULL)
+      try {
+        await pool.query(`ALTER TABLE presence_current ALTER COLUMN admin_site_id DROP NOT NULL`);
+      } catch {
+        // ignore
+      }
+
+      // Drop legacy constraints if they exist (names vary across iterations)
       await pool.query(`ALTER TABLE presence_current DROP CONSTRAINT IF EXISTS presence_current_site_id_fkey`);
+      await pool.query(`ALTER TABLE presence_current DROP CONSTRAINT IF EXISTS presence_current_admin_site_id_fkey`);
+      await pool.query(`ALTER TABLE presence_current DROP CONSTRAINT IF EXISTS presence_current_work_site_id_fkey`);
+      await pool.query(`ALTER TABLE presence_current DROP CONSTRAINT IF EXISTS presence_current_one_site_chk`);
+
+      // Ensure PK is (user_id)
       await pool.query(`ALTER TABLE presence_current DROP CONSTRAINT IF EXISTS presence_current_pkey`);
-      // 4) Dedupe to one row per user (keep most recent)
-      await pool.query(`
-        DELETE FROM presence_current a
-        USING presence_current b
-        WHERE a.user_id = b.user_id
-          AND a.last_seen < b.last_seen
-      `);
-      // 5) Recreate PK + FKs
       await pool.query(`ALTER TABLE presence_current ADD CONSTRAINT presence_current_pkey PRIMARY KEY (user_id)`);
-      await pool.query(
-        `ALTER TABLE presence_current ADD CONSTRAINT presence_current_admin_site_id_fkey FOREIGN KEY (admin_site_id) REFERENCES admin_sites(id) ON DELETE CASCADE`
-      );
-      await pool.query(
-        `ALTER TABLE presence_current ADD CONSTRAINT presence_current_work_site_id_fkey FOREIGN KEY (work_site_id) REFERENCES work_sites(id) ON DELETE CASCADE`
-      );
+
+      // Re-add FKs (only if not already present)
+      await pool.query(`
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='presence_current_admin_site_id_fkey') THEN
+    ALTER TABLE presence_current
+      ADD CONSTRAINT presence_current_admin_site_id_fkey
+      FOREIGN KEY (admin_site_id) REFERENCES admin_sites(id) ON DELETE CASCADE;
+  END IF;
+END $$;`);
+      await pool.query(`
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='presence_current_work_site_id_fkey') THEN
+    ALTER TABLE presence_current
+      ADD CONSTRAINT presence_current_work_site_id_fkey
+      FOREIGN KEY (work_site_id) REFERENCES work_sites(id) ON DELETE CASCADE;
+  END IF;
+END $$;`);
+
+      // Allow both nullable; no CHECK constraint forcing one-or-the-other (per your request).
     }
 
-
+    // Indexes (safe now that columns exist)
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_admin_site ON presence_current(admin_site_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_work_site ON presence_current(work_site_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_admin_last_seen ON presence_current(admin_site_id, last_seen)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_work_last_seen ON presence_current(work_site_id, last_seen)`);
-
-    await pool.query(
+await pool.query(
       `CREATE TABLE IF NOT EXISTS presence_sessions (
         id BIGSERIAL PRIMARY KEY,
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
