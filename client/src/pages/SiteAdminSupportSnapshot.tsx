@@ -22,20 +22,26 @@ function Row({ k, v }: { k: string; v: any }) {
 }
 
 export default function SiteAdminSupportSnapshot() {
-  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [snap, setSnap] = useState<any>(null);
+  const [matches, setMatches] = useState<any[]>([]);
 
-  const normalized = useMemo(() => email.trim().toLowerCase(), [email]);
+  const normalized = useMemo(() => name.trim(), [name]);
 
   async function load() {
     setErr('');
     setBusy(true);
     setSnap(null);
+    setMatches([]);
     try {
-      const r: any = await api(`/api/site-admin/support-snapshot?email=${encodeURIComponent(normalized)}`);
-      setSnap(r);
+      const r: any = await api(`/api/site-admin/support-snapshot?name=${encodeURIComponent(normalized)}`);
+      if (Array.isArray(r?.matches) && r.matches.length > 1) {
+        setMatches(r.matches);
+      } else {
+        setSnap(r);
+      }
     } catch (e: any) {
       let msg = e?.message || 'Could not load snapshot';
       try {
@@ -52,6 +58,28 @@ export default function SiteAdminSupportSnapshot() {
 
   const u = snap?.user || null;
 
+  async function loadByUserId(userId: number) {
+    setErr('');
+    setBusy(true);
+    setSnap(null);
+    try {
+      const r: any = await api(`/api/site-admin/support-snapshot?user_id=${encodeURIComponent(String(userId))}`);
+      setSnap(r);
+      setMatches([]);
+    } catch (e: any) {
+      let msg = e?.message || 'Could not load snapshot';
+      try {
+        const j = JSON.parse(msg);
+        msg = j?.error || msg;
+      } catch {
+        // ignore
+      }
+      setErr(msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="p-4 space-y-4 max-w-4xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-end gap-3">
@@ -62,9 +90,9 @@ export default function SiteAdminSupportSnapshot() {
         <div className="flex gap-2">
           <input
             className="input"
-            placeholder="user@email.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Search by name (e.g. Alan)"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
             style={{ minWidth: 260 }}
           />
           <button className="btn btn-primary" disabled={!normalized || busy} onClick={load}>
@@ -74,6 +102,27 @@ export default function SiteAdminSupportSnapshot() {
       </div>
 
       {err ? <div className="card border border-red-300 text-red-700">{err}</div> : null}
+
+      {matches.length ? (
+        <div className="card">
+          <div className="text-lg font-semibold">Multiple matches</div>
+          <div className="text-sm tv-muted mt-1">Pick the correct user to load the full snapshot.</div>
+          <div className="mt-3 space-y-2">
+            {matches.map((m) => (
+              <button
+                key={m.id}
+                className="w-full text-left p-3 rounded-2xl border hover:opacity-90"
+                style={{ borderColor: 'var(--hairline)' }}
+                onClick={() => loadByUserId(m.id)}
+                disabled={busy}
+              >
+                <div className="font-semibold">{m.name || '(no name)'} </div>
+                <div className="text-xs tv-muted mt-1">id: {m.id} · email: {m.email || '—'}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {snap?.ok && u ? (
         <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>

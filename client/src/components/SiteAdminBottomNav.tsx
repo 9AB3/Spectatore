@@ -98,7 +98,7 @@ function IconTool(props: React.SVGProps<SVGSVGElement>) {
       <path d="M14.7 6.3a5 5 0 0 0-6.9 6.9l-5.3 5.3a2 2 0 0 0 2.8 2.8l5.3-5.3a5 5 0 0 0 6.9-6.9l-2 2-3-3 2-2z" />
     </svg>
   );
-
+}
 
 function IconLife(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -111,7 +111,6 @@ function IconLife(props: React.SVGProps<SVGSVGElement>) {
       <path d="M19.07 19.07 16 16" />
     </svg>
   );
-}
 }
 
 const IS_DEV = import.meta.env.MODE !== 'production';

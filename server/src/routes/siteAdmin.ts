@@ -3335,8 +3335,47 @@ router.get('/support-snapshot', siteAdminMiddleware, async (req, res) => {
   try {
     assertSuperAdmin(req);
 
+    const rawUserId = String(req.query?.user_id || '').trim();
     const rawEmail = String(req.query?.email || '').trim().toLowerCase();
-    if (!rawEmail) return res.status(400).json({ error: 'email required' });
+    const rawName = String(req.query?.name || '').trim();
+
+    // We prefer name-based lookup for the Support UI (safer for operators who don’t know the exact email).
+    // Behavior:
+    // - If user_id provided: load snapshot for that user.
+    // - Else if email provided: load snapshot.
+    // - Else if name provided:
+    //    - If 0 matches: 404
+    //    - If >1 matches: return { matches:[...] } for the UI to let support choose
+    //    - If 1 match: load snapshot
+    if (!rawUserId && !rawEmail && !rawName) {
+      return res.status(400).json({ error: 'name (or user_id) required' });
+    }
+
+    let targetUserId: number | null = null;
+    let targetEmail: string | null = null;
+
+    if (rawUserId) {
+      const n = Number(rawUserId);
+      if (!Number.isFinite(n)) return res.status(400).json({ error: 'invalid user_id' });
+      targetUserId = n;
+    } else if (rawEmail) {
+      targetEmail = rawEmail;
+    } else if (rawName) {
+      const like = `%${rawName}%`;
+      const mr = await pool.query(
+        `SELECT id, email, name
+           FROM users
+          WHERE name ILIKE $1
+          ORDER BY name ASC
+          LIMIT 10`,
+        [like],
+      );
+      const matches = mr.rows || [];
+      if (!matches.length) return res.status(404).json({ error: 'no users matched that name' });
+      if (matches.length > 1) return res.json({ ok: true, matches });
+      targetUserId = matches[0].id;
+      targetEmail = matches[0].email;
+    }
 
     const ur = await pool.query(
       `SELECT id, email, name, is_admin, billing_exempt,
@@ -3345,9 +3384,10 @@ router.get('/support-snapshot', siteAdminMiddleware, async (req, res) => {
               current_period_end, cancel_at_period_end,
               work_site_id, site
          FROM users
-        WHERE LOWER(email)=LOWER($1)
+        WHERE ($1::int IS NOT NULL AND id = $1)
+           OR ($2::text IS NOT NULL AND LOWER(email)=LOWER($2))
         LIMIT 1`,
-      [rawEmail],
+      [targetUserId, targetEmail],
     );
     const u = ur.rows?.[0];
     if (!u) return res.status(404).json({ error: 'user not found' });

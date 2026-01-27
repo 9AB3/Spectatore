@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getDB } from '../lib/idb';
 import useToast from '../hooks/useToast';
+import { track } from '../lib/analytics';
 
 export default function Home() {
   const nav = useNavigate();
