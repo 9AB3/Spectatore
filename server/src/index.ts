@@ -115,16 +115,15 @@ async function ensureDbColumns() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id)`);
 
     // Realtime presence + sessions (best-effort for existing DBs)
-    await pool.query(
-      `CREATE TABLE IF NOT EXISTS presence_current (
-        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-        admin_site_id INTEGER NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
-        work_site_id INTEGER NULL REFERENCES work_sites(id) ON DELETE CASCADE,
-        last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
-        country_code TEXT NULL,
-        region_code TEXT NULL,
-        user_agent TEXT NULL
-      );
+    await pool.query(`CREATE TABLE IF NOT EXISTS presence_current (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      admin_site_id INTEGER NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+      work_site_id INTEGER NULL REFERENCES work_sites(id) ON DELETE CASCADE,
+      last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+      country_code TEXT NULL,
+      region_code TEXT NULL,
+      user_agent TEXT NULL
+    );`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_admin_site ON presence_current(admin_site_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_work_site ON presence_current(work_site_id)`);
 
@@ -161,8 +160,8 @@ async function ensureDbColumns() {
     }
 
 
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_admin_last_seen ON presence_current(admin_site_id, last_seen);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_work_last_seen ON presence_current(work_site_id, last_seen)`)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_admin_last_seen ON presence_current(admin_site_id, last_seen)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_presence_current_work_last_seen ON presence_current(work_site_id, last_seen)`);
 
     await pool.query(
       `CREATE TABLE IF NOT EXISTS presence_sessions (
