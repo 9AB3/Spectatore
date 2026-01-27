@@ -244,70 +244,52 @@ CREATE TABLE IF NOT EXISTS admin_equipment (
   UNIQUE(admin_site_id, equipment_id)
 );
 
-ALTER TABLE admin_equipment ADD COLUMN IF NOT EXISTS admin_site_id INT;
-
-CREATE INDEX IF NOT EXISTS idx_admin_equipment_admin_site_id ON admin_equipment(admin_site_id);
-
--- Backward-compatible migrations for legacy admin_equipment schema (older builds used columns like site/name).
+-- Legacy compatibility for older DBs:
+-- Some earlier schemas used columns: name (instead of equipment_id) and/or site (NOT NULL).
+-- This block makes the table compatible without deleting data.
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='admin_equipment') THEN
-    -- If legacy column "site" exists and is NOT NULL, relax it so new inserts (admin_site_id only) don't fail.
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='admin_equipment' AND column_name='site') THEN
-      BEGIN
-        EXECUTE 'ALTER TABLE admin_equipment ALTER COLUMN site DROP NOT NULL';
-      EXCEPTION WHEN others THEN
-        -- ignore if already nullable or permission/lock issues
-        NULL;
-      END;
+  -- If legacy "name" exists but "equipment_id" doesn't, create equipment_id and backfill.
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='admin_equipment' AND column_name='name'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='admin_equipment' AND column_name='equipment_id'
+  ) THEN
+    ALTER TABLE admin_equipment ADD COLUMN equipment_id TEXT;
+    EXECUTE 'UPDATE admin_equipment SET equipment_id = COALESCE(equipment_id, name)';
+    ALTER TABLE admin_equipment ALTER COLUMN equipment_id SET NOT NULL;
+  END IF;
 
-      -- Ensure admin_site_id exists and is backfilled from site name where possible.
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='admin_equipment' AND column_name='admin_site_id') THEN
-        ALTER TABLE admin_equipment ADD COLUMN admin_site_id INT NULL;
-      END IF;
+  -- If both exist, backfill equipment_id from name where missing.
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='admin_equipment' AND column_name='name'
+  ) AND EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='admin_equipment' AND column_name='equipment_id'
+  ) THEN
+    EXECUTE 'UPDATE admin_equipment SET equipment_id = COALESCE(equipment_id, name) WHERE equipment_id IS NULL';
+  END IF;
 
-      -- Create missing admin_sites for any legacy site strings, then map them.
-      INSERT INTO admin_sites(name)
-      SELECT DISTINCT ae.site
-      FROM admin_equipment ae
-      WHERE ae.site IS NOT NULL
-        AND NOT EXISTS (SELECT 1 FROM admin_sites s WHERE s.name = ae.site)
-      ON CONFLICT (name) DO NOTHING;
-
-      UPDATE admin_equipment ae
-      SET admin_site_id = s.id
-      FROM admin_sites s
-      WHERE ae.admin_site_id IS NULL
-        AND ae.site IS NOT NULL
-        AND s.name = ae.site;
-    END IF;
-
-    -- If legacy column "name" exists (old unique constraint used it), keep compatibility by mapping it to equipment_id.
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='admin_equipment' AND column_name='name') THEN
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='admin_equipment' AND column_name='equipment_id') THEN
-        ALTER TABLE admin_equipment ADD COLUMN equipment_id TEXT;
-      END IF;
-
-      UPDATE admin_equipment
-      SET equipment_id = COALESCE(equipment_id, name)
-      WHERE equipment_id IS NULL AND name IS NOT NULL;
-    END IF;
-
-    -- Drop legacy constraint if present (admin_site_id, name) and ensure correct uniqueness on (admin_site_id, equipment_id).
-    IF EXISTS (
-      SELECT 1 FROM pg_constraint
-      WHERE conrelid = 'admin_equipment'::regclass
-        AND conname = 'admin_equipment_site_name_unique'
-    ) THEN
-      ALTER TABLE admin_equipment DROP CONSTRAINT admin_equipment_site_name_unique;
-    END IF;
-
-    -- Make sure correct unique index exists even if constraint creation fails in some legacy states.
-    CREATE UNIQUE INDEX IF NOT EXISTS admin_equipment_admin_site_equipment_unique
-      ON admin_equipment(admin_site_id, equipment_id);
+  -- If legacy "site" exists and is NOT NULL, relax it so inserts that only provide admin_site_id succeed.
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='admin_equipment' AND column_name='site'
+  ) THEN
+    BEGIN
+      ALTER TABLE admin_equipment ALTER COLUMN site DROP NOT NULL;
+    EXCEPTION WHEN others THEN
+      -- ignore if already nullable or column type blocks
+      NULL;
+    END;
   END IF;
 END $$;
 
+ALTER TABLE admin_equipment ADD COLUMN IF NOT EXISTS admin_site_id INT;
+
+CREATE INDEX IF NOT EXISTS idx_admin_equipment_admin_site_id ON admin_equipment(admin_site_id);
 
 CREATE TABLE IF NOT EXISTS admin_locations (
   id SERIAL PRIMARY KEY,
@@ -321,51 +303,6 @@ CREATE TABLE IF NOT EXISTS admin_locations (
 ALTER TABLE admin_locations ADD COLUMN IF NOT EXISTS admin_site_id INT;
 
 CREATE INDEX IF NOT EXISTS idx_admin_locations_admin_site_id ON admin_locations(admin_site_id);
-
--- Backward-compatible migrations for legacy admin_locations schema (older builds used column "site" and/or different keys).
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='admin_locations') THEN
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='admin_locations' AND column_name='site') THEN
-      BEGIN
-        EXECUTE 'ALTER TABLE admin_locations ALTER COLUMN site DROP NOT NULL';
-      EXCEPTION WHEN others THEN
-        NULL;
-      END;
-
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='admin_locations' AND column_name='admin_site_id') THEN
-        ALTER TABLE admin_locations ADD COLUMN admin_site_id INT NULL;
-      END IF;
-
-      INSERT INTO admin_sites(name)
-      SELECT DISTINCT al.site
-      FROM admin_locations al
-      WHERE al.site IS NOT NULL
-        AND NOT EXISTS (SELECT 1 FROM admin_sites s WHERE s.name = al.site)
-      ON CONFLICT (name) DO NOTHING;
-
-      UPDATE admin_locations al
-      SET admin_site_id = s.id
-      FROM admin_sites s
-      WHERE al.admin_site_id IS NULL
-        AND al.site IS NOT NULL
-        AND s.name = al.site;
-    END IF;
-
-    IF EXISTS (
-      SELECT 1 FROM pg_constraint
-      WHERE conrelid = 'admin_locations'::regclass
-        AND conname = 'admin_locations_site_name_unique'
-    ) THEN
-      ALTER TABLE admin_locations DROP CONSTRAINT admin_locations_site_name_unique;
-    END IF;
-
-    -- Ensure uniqueness on (admin_site_id, name) for locations.
-    CREATE UNIQUE INDEX IF NOT EXISTS admin_locations_admin_site_name_unique
-      ON admin_locations(admin_site_id, name);
-  END IF;
-END $$;
-
 
 
 
@@ -967,22 +904,60 @@ ALTER TABLE IF EXISTS presence_current ADD COLUMN IF NOT EXISTS region_code TEXT
 ALTER TABLE IF EXISTS presence_current ADD COLUMN IF NOT EXISTS user_agent TEXT;
 ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS community_state TEXT;
 
--- Ensure unique constraints for site assets (fix UPSERT failures)
+-- Ensure uniqueness for site assets (robust across schema versions)
+--
+-- Why: older DBs had legacy constraints like UNIQUE(admin_site_id, name) on admin_equipment,
+-- but the current schema uses equipment_id instead of name.
+--
+-- This block:
+-- 1) Drops legacy/bad constraints if they exist.
+-- 2) Creates the correct unique index depending on which columns exist.
 DO $$
+DECLARE
+  has_equipment_id boolean;
+  has_name boolean;
+  has_type boolean;
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'admin_locations_site_type_name_unique'
-    ) THEN
-        ALTER TABLE admin_locations
-        ADD CONSTRAINT admin_locations_site_type_name_unique
-        UNIQUE (admin_site_id, type, name);
-    END IF;
+  -- Drop legacy/bad constraints that can crash startup on newer schemas
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'admin_equipment_site_name_unique') THEN
+    ALTER TABLE admin_equipment DROP CONSTRAINT admin_equipment_site_name_unique;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'admin_locations_site_type_name_unique') THEN
+    ALTER TABLE admin_locations DROP CONSTRAINT admin_locations_site_type_name_unique;
+  END IF;
 
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'admin_equipment_site_name_unique'
-    ) THEN
-        ALTER TABLE admin_equipment
-        ADD CONSTRAINT admin_equipment_site_name_unique
-        UNIQUE (admin_site_id, name);
-    END IF;
+  -- admin_equipment: prefer (admin_site_id, equipment_id)
+  SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'admin_equipment' AND column_name = 'equipment_id'
+  ) INTO has_equipment_id;
+
+  SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'admin_equipment' AND column_name = 'name'
+  ) INTO has_name;
+
+  IF has_equipment_id THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_admin_equipment_site_equipment_id
+      ON admin_equipment (admin_site_id, equipment_id);
+  ELSIF has_name THEN
+    -- legacy fallback
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_admin_equipment_site_name
+      ON admin_equipment (admin_site_id, name);
+  END IF;
+
+  -- admin_locations: prefer (admin_site_id, name) and optionally include type if present
+  SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'admin_locations' AND column_name = 'type'
+  ) INTO has_type;
+
+  IF has_type THEN
+    -- If you ever decide to allow the same name across different types, swap this to (admin_site_id, type, name).
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_admin_locations_site_name
+      ON admin_locations (admin_site_id, name);
+  ELSE
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_admin_locations_site_name
+      ON admin_locations (admin_site_id, name);
+  END IF;
 END $$;
