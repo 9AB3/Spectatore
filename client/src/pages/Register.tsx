@@ -73,7 +73,7 @@ export default function Register() {
    } else {
   localStorage.setItem('spectatore-register-email', email);
   setMsg('Registered. Check your email for the confirmation code.');
-  track.signupComplete('email');
+  // Funnel semantics: do NOT fire sign_up until the user successfully logs in (after email confirmation).
   nav('/ConfirmEmail');
 }
 

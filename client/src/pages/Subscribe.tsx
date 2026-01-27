@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getDB } from '../lib/idb';
+import { track } from '../lib/analytics';
 
 type BillingStatus = {
   ok?: boolean;
@@ -124,6 +125,24 @@ export default function Subscribe() {
     setErr('');
     setBusy(true);
     try {
+      // GA: begin checkout + remember what the user picked so we can send purchase after Stripe redirects back.
+      const picked = interval === 'year' ? prices?.yearly : prices?.monthly;
+      const price_id = String(picked?.id || '');
+      const currency = String((picked?.currency || 'AUD')).toUpperCase();
+      const unit_amount = typeof picked?.unit_amount === 'number' ? picked!.unit_amount : null; // cents
+      const value = typeof unit_amount === 'number' ? unit_amount / 100 : undefined;
+
+      if (price_id) track.beginCheckout(price_id);
+
+      try {
+        sessionStorage.setItem(
+          'spectatore_last_checkout',
+          JSON.stringify({ price_id, interval, currency, value, ts: Date.now() }),
+        );
+        sessionStorage.removeItem('spectatore_purchase_sent');
+      } catch {
+        // ignore
+      }
       const r: any = await api('/api/billing/create-checkout-session', {
         method: 'POST',
         body: JSON.stringify({ interval }),
@@ -195,6 +214,19 @@ export default function Subscribe() {
         const r = await fetchStatus();
         if (stopped) return;
         if (r?.allowed) {
+          // GA: purchase (fire once after Stripe success)
+          try {
+            const already = sessionStorage.getItem('spectatore_purchase_sent') === '1';
+            const raw = sessionStorage.getItem('spectatore_last_checkout');
+            const last = raw ? JSON.parse(raw) : null;
+            const fresh = last?.ts && Date.now() - Number(last.ts) < 1000 * 60 * 60; // 1h
+            if (!already && fresh) {
+              track.purchase(last.price_id, typeof last.value === 'number' ? last.value : undefined, last.currency || 'AUD');
+              sessionStorage.setItem('spectatore_purchase_sent', '1');
+            }
+          } catch {
+            // ignore
+          }
           nav('/Main', { replace: true });
         }
       } catch {

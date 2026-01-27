@@ -3318,4 +3318,170 @@ router.post('/powerbi-tokens/:id/revoke', siteAdminMiddleware, async (req: any, 
 
 
 
+
+/**
+ * Support Snapshot (Super Admin tool)
+ *
+ * Returns a single, server-authoritative view of a user's:
+ * - subscription + Stripe ids
+ * - site memberships / roles
+ * - recent presence
+ * - latest audit logs
+ *
+ * Access:
+ * - Super admins only (req.site_admin.sites includes '*')
+ */
+router.get('/support-snapshot', siteAdminMiddleware, async (req, res) => {
+  try {
+    assertSuperAdmin(req);
+
+    const rawEmail = String(req.query?.email || '').trim().toLowerCase();
+    if (!rawEmail) return res.status(400).json({ error: 'email required' });
+
+    const ur = await pool.query(
+      `SELECT id, email, name, is_admin, billing_exempt,
+              stripe_customer_id, stripe_subscription_id,
+              subscription_status, subscription_price_id, subscription_interval,
+              current_period_end, cancel_at_period_end,
+              work_site_id, site
+         FROM users
+        WHERE LOWER(email)=LOWER($1)
+        LIMIT 1`,
+      [rawEmail],
+    );
+    const u = ur.rows?.[0];
+    if (!u) return res.status(404).json({ error: 'user not found' });
+
+    // Memberships (admin sites)
+    let memberships: any[] = [];
+    try {
+      const mr = await pool.query(
+        `SELECT m.id, m.site_id, COALESCE(s.name, m.site_name) AS site_name,
+                m.role, m.status, m.created_at
+           FROM site_memberships m
+      LEFT JOIN admin_sites s ON s.id = m.site_id
+          WHERE m.user_id = $1
+          ORDER BY m.created_at DESC NULLS LAST`,
+        [u.id],
+      );
+      memberships = mr.rows || [];
+    } catch {
+      memberships = [];
+    }
+
+    // Presence (current + last session)
+    let presence_current: any = null;
+    let last_session: any = null;
+    try {
+      const pr = await pool.query(
+        `SELECT user_id, email, name, site_id, site, state, region, is_admin, last_seen, online, meta
+           FROM presence_current
+          WHERE user_id = $1
+          ORDER BY last_seen DESC
+          LIMIT 1`,
+        [u.id],
+      );
+      presence_current = pr.rows?.[0] || null;
+    } catch {
+      presence_current = null;
+    }
+
+    try {
+      const sr = await pool.query(
+        `SELECT id, user_id, email, name, site_id, site, state, region,
+                started_at, last_seen, ended_at,
+                EXTRACT(EPOCH FROM (COALESCE(ended_at, NOW()) - started_at))::int AS seconds
+           FROM presence_sessions
+          WHERE user_id = $1
+          ORDER BY started_at DESC
+          LIMIT 1`,
+        [u.id],
+      );
+      last_session = sr.rows?.[0] || null;
+    } catch {
+      last_session = null;
+    }
+
+    // Audit logs (last 20)
+    let audits: any[] = [];
+    try {
+      const ar = await pool.query(
+        `SELECT ts, action, user_id, ip, ua, meta
+           FROM audit_logs
+          WHERE user_id = $1
+          ORDER BY ts DESC
+          LIMIT 20`,
+        [u.id],
+      );
+      audits = ar.rows || [];
+    } catch {
+      audits = [];
+    }
+
+    // Scheduled Stripe change (best effort; matches /billing/status UI behavior)
+    let scheduled_change: any = null;
+    try {
+      if (u.stripe_subscription_id && process.env.STRIPE_SECRET_KEY) {
+        const StripeMod: any = await import('stripe');
+        const StripeCtor = StripeMod?.default || StripeMod;
+        const stripe = new StripeCtor(String(process.env.STRIPE_SECRET_KEY), { apiVersion: '2023-10-16' } as any);
+        const sub: any = await stripe.subscriptions.retrieve(String(u.stripe_subscription_id));
+        const scheduleId: string | null = (sub as any).schedule ?? null;
+        if (scheduleId) {
+          const sched: any = await stripe.subscriptionSchedules.retrieve(String(scheduleId), {
+            expand: ['phases.items.price'],
+          });
+          const phases = Array.isArray(sched?.phases) ? sched.phases : [];
+          const nowSec = Math.floor(Date.now() / 1000);
+          const currentPhase =
+            phases.find((p: any) => p?.start_date && p.start_date <= nowSec && (!p.end_date || p.end_date > nowSec)) ||
+            phases[0] ||
+            null;
+
+          const nextPhase =
+            phases.find((p: any) => p?.start_date && p.start_date > nowSec) ||
+            phases.find((p: any) => p?.end_date && p.end_date > nowSec && p?.start_date && p.start_date > nowSec) ||
+            null;
+
+          const readPhase = (p: any) => {
+            const items = Array.isArray(p?.items) ? p.items : [];
+            const price = items?.[0]?.price;
+            const interval = price?.recurring?.interval || null;
+            const price_id = price?.id || null;
+            const amount = typeof price?.unit_amount === 'number' ? price.unit_amount : null;
+            const currency = price?.currency || null;
+            return { price_id, interval, unit_amount: amount, currency };
+          };
+
+          if (nextPhase) {
+            scheduled_change = {
+              schedule_id: scheduleId,
+              current: currentPhase ? readPhase(currentPhase) : null,
+              next: readPhase(nextPhase),
+              effective_at: nextPhase?.start_date ? new Date(nextPhase.start_date * 1000).toISOString() : null,
+            };
+          }
+        }
+      }
+    } catch {
+      scheduled_change = null;
+    }
+
+    return res.json({
+      ok: true,
+      user: u,
+      memberships,
+      presence_current,
+      last_session,
+      audits,
+      scheduled_change,
+    });
+  } catch (e: any) {
+    const status = Number(e?.status || 500);
+    if (status === 403) return res.status(403).json({ error: 'forbidden' });
+    return res.status(status).json({ error: e?.message || 'snapshot failed' });
+  }
+});
+
+
 export default router;

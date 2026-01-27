@@ -109,6 +109,17 @@ export default function Home() {
       // Persist remember tick until explicitly unticked
       localStorage.setItem('spectatore-remember-me', remember ? '1' : '0');
 
+      // Funnel semantics: only fire sign_up after the first successful login following registration+confirmation.
+      try {
+        const regEmail = (localStorage.getItem('spectatore-register-email') || '').trim().toLowerCase();
+        if (regEmail && regEmail === String(email || '').trim().toLowerCase()) {
+          track.signupComplete('email');
+          localStorage.removeItem('spectatore-register-email');
+        }
+      } catch {
+        // ignore
+      }
+
       setIsAdmin(isAdminFlag);
       setMsg('Tagged on');
       // Keep toast visible for at least 2s before route change
@@ -116,11 +127,17 @@ export default function Home() {
     } catch (e: any) {
       try {
         const msg = JSON.parse(e.message).error;
-        setMsg(
-          msg.includes('Too many')
-            ? 'Too many attempts. Try again in 5 minutes'
-            : 'Email or password is incorrect',
-        );
+        if (msg === 'EMAIL_NOT_CONFIRMED') {
+          setMsg('Email not confirmed. Enter the code we sent you.');
+          localStorage.setItem('spectatore-register-email', String(email || ''));
+          setTimeout(() => nav('/ConfirmEmail'), 700);
+        } else {
+          setMsg(
+            msg.includes('Too many')
+              ? 'Too many attempts. Try again in 5 minutes'
+              : 'Email or password is incorrect',
+          );
+        }
       } catch {
         setMsg('Email or password is incorrect');
       }

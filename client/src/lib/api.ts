@@ -100,8 +100,48 @@ export async function api(path: string, init: (Omit<RequestInit, "body"> & { bod
     });
 
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(text || res.statusText || `HTTP ${res.status}`);
+      const status = res.status;
+      const ctErr = res.headers.get('content-type') || '';
+      let payload: any = null;
+      let text = '';
+
+      try {
+        if (ctErr.includes('application/json')) {
+          payload = await res.json();
+          text = JSON.stringify(payload);
+        } else {
+          text = await res.text().catch(() => '');
+        }
+      } catch {
+        // ignore parse errors
+        text = await res.text().catch(() => '');
+      }
+
+      // Global Subscription gate handling (server returns 402 + code SUBSCRIPTION_REQUIRED)
+      if (status === 402) {
+        const code = String(payload?.code || payload?.error || '').toUpperCase();
+        if (code.includes('SUBSCRIPTION_REQUIRED') || String(payload?.error || '') === 'subscription_required') {
+          try {
+            // Avoid redirect loops
+            const cur = typeof window !== 'undefined' ? (window.location.pathname + window.location.search) : '';
+            if (typeof window !== 'undefined' && !window.location.pathname.toLowerCase().includes('/subscribe')) {
+              const from = encodeURIComponent(cur || '/Main');
+              window.location.assign(`/subscribe?reason=subscription_required&from=${from}`);
+            }
+          } catch {
+            // ignore
+          }
+          const e: any = new Error(JSON.stringify(payload || { error: 'subscription_required', code: 'SUBSCRIPTION_REQUIRED' }));
+          (e as any).status = 402;
+          (e as any).code = 'SUBSCRIPTION_REQUIRED';
+          throw e;
+        }
+      }
+
+      const err: any = new Error(text || res.statusText || `HTTP ${status}`);
+      err.status = status;
+      err.payload = payload;
+      throw err;
     }
 
     const ct = res.headers.get('content-type') || '';

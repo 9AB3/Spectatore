@@ -98,6 +98,20 @@ function IconTool(props: React.SVGProps<SVGSVGElement>) {
       <path d="M14.7 6.3a5 5 0 0 0-6.9 6.9l-5.3 5.3a2 2 0 0 0 2.8 2.8l5.3-5.3a5 5 0 0 0 6.9-6.9l-2 2-3-3 2-2z" />
     </svg>
   );
+
+
+function IconLife(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="12" r="4" />
+      <path d="M4.93 4.93 8 8" />
+      <path d="M19.07 4.93 16 8" />
+      <path d="M4.93 19.07 8 16" />
+      <path d="M19.07 19.07 16 16" />
+    </svg>
+  );
+}
 }
 
 const IS_DEV = import.meta.env.MODE !== 'production';
@@ -106,6 +120,7 @@ export default function SiteAdminBottomNav() {
   const [canManageMembers, setCanManageMembers] = useState(false);
   const [canManageSites, setCanManageSites] = useState(false);
   const [canUseTools, setCanUseTools] = useState(false);
+  const [canSupport, setCanSupport] = useState(false);
   const [canReconcile, setCanReconcile] = useState(false);
 
   useEffect(() => {
@@ -116,6 +131,7 @@ export default function SiteAdminBottomNav() {
         setCanUseTools(!!me?.ok);
         setCanManageMembers(!!me?.is_super || !!me?.can_manage);
         setCanManageSites(!!me?.is_super);
+        setCanSupport(!!me?.is_super);
         // Reconciliation is available to validators + admins (any SiteAdmin-authorized user)
         setCanReconcile(!!me?.ok);
       } catch {
@@ -123,6 +139,7 @@ export default function SiteAdminBottomNav() {
         setCanManageSites(false);
         setCanUseTools(false);
         setCanReconcile(false);
+        setCanSupport(false);
       }
     })();
   }, []);
@@ -155,7 +172,7 @@ export default function SiteAdminBottomNav() {
       <div
         className={cx('max-w-2xl mx-auto px-2 py-1 grid text-[var(--text)]')}
         style={{
-          gridTemplateColumns: `repeat(${2 + (canManageSites ? 1 : 0) + (canManageMembers ? 1 : 0) + (canReconcile ? 1 : 0) + (canUseTools ? 1 : 0) + (IS_DEV && canManageSites ? 1 : 0)}, minmax(0, 1fr))`,
+          gridTemplateColumns: `repeat(${2 + (canManageSites ? 1 : 0) + (canManageMembers ? 1 : 0) + (canReconcile ? 1 : 0) + (canUseTools ? 1 : 0) + (canSupport ? 1 : 0) + (IS_DEV && canManageSites ? 1 : 0)}, minmax(0, 1fr))`,
         }}
       >
         <Item to="/SiteAdmin" end label="Home" icon={<IconHome className="h-6 w-6" />} />
@@ -177,6 +194,10 @@ export default function SiteAdminBottomNav() {
             icon={<IconTool className="h-6 w-6" />}
           />
         )}
+        {canSupport && (
+          <Item to="/SiteAdmin/Support" label="Support" icon={<IconLife className="h-6 w-6" />} />
+        )}
+
       </div>
     </nav>
   );
