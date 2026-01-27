@@ -722,6 +722,40 @@ CREATE TABLE IF NOT EXISTS validated_reconciliation_days (
   UNIQUE(reconciliation_id, date)
 );
 
+-- -----------------------------------------------------------------------------
+-- Bucket factors (shared factor per loader across Production + Development)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS bucket_factor_bounds (
+  id SERIAL PRIMARY KEY,
+  admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  site TEXT NOT NULL,
+  loader_id TEXT NOT NULL,
+  min_factor NUMERIC NULL,
+  max_factor NUMERIC NULL,
+  updated_by_user_id INT NULL REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(admin_site_id, loader_id)
+);
+
+CREATE TABLE IF NOT EXISTS bucket_factors_monthly (
+  id SERIAL PRIMARY KEY,
+  admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  site TEXT NOT NULL,
+  month_ym TEXT NOT NULL,
+  loader_id TEXT NOT NULL,
+  factor NUMERIC NOT NULL,
+  prod_buckets NUMERIC NOT NULL DEFAULT 0,
+  dev_buckets NUMERIC NOT NULL DEFAULT 0,
+  prod_tonnes NUMERIC NOT NULL DEFAULT 0,
+  dev_tonnes NUMERIC NOT NULL DEFAULT 0,
+  min_factor NUMERIC NULL,
+  max_factor NUMERIC NULL,
+  method TEXT NOT NULL DEFAULT 'projected_gradient',
+  created_by_user_id INT NULL REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(admin_site_id, month_ym, loader_id)
+);
+
 -- Ensure reconciliation columns exist on older DBs (idempotent upgrades)
 ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS month_ym TEXT;
 ALTER TABLE validated_reconciliations ADD COLUMN IF NOT EXISTS metric_key TEXT;

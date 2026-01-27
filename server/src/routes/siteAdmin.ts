@@ -3367,6 +3367,402 @@ router.post('/reconciliation/unlock', siteAdminMiddleware, async (req: any, res)
   }
 });
 
+// -----------------------------------------------------------------------------
+// BUCKET FACTORS (Model 1: shared factor per loader across Prod+Dev)
+// -----------------------------------------------------------------------------
+
+type BucketFactorBounds = { min?: number | null; max?: number | null };
+
+function clamp(x: number, lo: number, hi: number) {
+  if (x < lo) return lo;
+  if (x > hi) return hi;
+  return x;
+}
+
+function solveProjectedGradient(opts: {
+  A: number[][]; // m x n
+  b: number[]; // m
+  bounds: Array<{ lo: number; hi: number }>; // n
+  prior: number[]; // n
+  lambda?: number;
+  iters?: number;
+}) {
+  const { A, b, bounds, prior } = opts;
+  const lambda = Number.isFinite(opts.lambda as any) ? Number(opts.lambda) : 0.05;
+  const iters = Number.isFinite(opts.iters as any) ? Number(opts.iters) : 500;
+  const m = A.length;
+  const n = A[0]?.length || 0;
+  if (!m || !n) return { x: [], residual: [], predicted: [] };
+
+  // Compute a conservative step size from Frobenius norm.
+  let fro2 = 0;
+  for (let i = 0; i < m; i++) for (let j = 0; j < n; j++) fro2 += (A[i][j] || 0) * (A[i][j] || 0);
+  const L = 2 * fro2 + 2 * lambda + 1e-9;
+  const alpha = 1 / L;
+
+  let x = prior.slice(0, n);
+  // Project init
+  for (let j = 0; j < n; j++) x[j] = clamp(x[j] || 0, bounds[j].lo, bounds[j].hi);
+
+  const Ax = new Array(m).fill(0);
+  for (let k = 0; k < iters; k++) {
+    // Ax
+    for (let i = 0; i < m; i++) {
+      let s = 0;
+      for (let j = 0; j < n; j++) s += (A[i][j] || 0) * (x[j] || 0);
+      Ax[i] = s;
+    }
+    // grad = 2 A^T(Ax - b) + 2 lambda (x - prior)
+    const grad = new Array(n).fill(0);
+    for (let j = 0; j < n; j++) {
+      let g = 0;
+      for (let i = 0; i < m; i++) g += (A[i][j] || 0) * ((Ax[i] || 0) - (b[i] || 0));
+      g = 2 * g + 2 * lambda * ((x[j] || 0) - (prior[j] || 0));
+      grad[j] = g;
+    }
+    // step + project
+    let moved = 0;
+    for (let j = 0; j < n; j++) {
+      const nx = clamp((x[j] || 0) - alpha * (grad[j] || 0), bounds[j].lo, bounds[j].hi);
+      moved += Math.abs(nx - (x[j] || 0));
+      x[j] = nx;
+    }
+    if (moved < 1e-6) break;
+  }
+
+  // final predicted/residual
+  const predicted = new Array(m).fill(0);
+  const residual = new Array(m).fill(0);
+  for (let i = 0; i < m; i++) {
+    let s = 0;
+    for (let j = 0; j < n; j++) s += (A[i][j] || 0) * (x[j] || 0);
+    predicted[i] = s;
+    residual[i] = s - (b[i] || 0);
+  }
+  return { x, predicted, residual };
+}
+
+async function getReconTonnes(client: any, adminSiteId: number, month_ym: string) {
+  const prodKey = 'hauling|production_ore_tonnes_hauled';
+  const devKey = 'hauling|development_ore_tonnes_hauled';
+  const r = await client.query(
+    `SELECT metric_key, reconciled_total
+       FROM validated_reconciliations
+      WHERE admin_site_id=$1 AND month_ym=$2 AND metric_key IN ($3,$4)`,
+    [adminSiteId, month_ym, prodKey, devKey],
+  );
+  let prod = null as null | number;
+  let dev = null as null | number;
+  for (const row of r.rows || []) {
+    if (row.metric_key === prodKey) prod = Number(row.reconciled_total ?? 0);
+    if (row.metric_key === devKey) dev = Number(row.reconciled_total ?? 0);
+  }
+  return { prod, dev };
+}
+
+function nNum(v: any) {
+  const x = typeof v === 'string' ? parseFloat(v) : Number(v);
+  return Number.isFinite(x) ? x : 0;
+}
+
+function valObj(payload_json: any) {
+  const v = payload_json?.values;
+  return v && typeof v === 'object' ? v : {};
+}
+
+// GET /api/site-admin/bucket-factors/month?site=...&month_ym=YYYY-MM
+router.get('/bucket-factors/month', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    const site = String(req.query?.site || '').trim() || normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+    if (site === '*') return res.status(400).json({ ok: false, error: 'site required' });
+    const month_ym = String(req.query?.month_ym || '').trim();
+    if (!isYm(month_ym)) return res.status(400).json({ ok: false, error: 'invalid month_ym' });
+
+    const client = await pool.connect();
+    try {
+      const adminSiteId = await resolveAdminSiteId(client as any, site);
+      if (!adminSiteId) return res.status(404).json({ ok: false, error: 'unknown site' });
+
+      const recon = await getReconTonnes(client as any, adminSiteId, month_ym);
+
+      // Loader bucket totals for this month (same definition as solver)
+      const { fromYmd, toYmd } = monthBounds(month_ym);
+      const load = await client.query(
+        `SELECT payload_json, sub_activity
+           FROM validated_shift_activities
+          WHERE admin_site_id=$1
+            AND date >= $2::date AND date < $3::date
+            AND activity='Loading'`,
+        [adminSiteId, fromYmd, toYmd],
+      );
+      const agg: Record<string, { prod: number; dev: number }> = {};
+      for (const row of load.rows || []) {
+        const v = valObj(row.payload_json);
+        const loaderId = String(v.Equipment || v.equipment || '').trim();
+        if (!loaderId) continue;
+        const sub = String(row.sub_activity || '').trim();
+        const mat = String(v.Material || v.material || '').trim();
+        if (mat && mat.toLowerCase() !== 'ore') continue;
+
+        // Primary bucket fields (as per spec)
+        //  - Production primary: Stope to Truck + Stope to SP
+        //  - Development primary: Heading to Truck + Heading to SP
+        const stopeToTruck = nNum(v['Stope to Truck']);
+        const stopeToSP = nNum(v['Stope to SP']);
+        const headingToTruck = nNum(v['Heading to Truck']);
+        const headingToSP = nNum(v['Heading to SP']);
+        if (!agg[loaderId]) agg[loaderId] = { prod: 0, dev: 0 };
+        if (sub.toLowerCase().startsWith('production')) agg[loaderId].prod += stopeToTruck + stopeToSP;
+        else if (sub.toLowerCase().startsWith('development')) agg[loaderId].dev += headingToTruck + headingToSP;
+      }
+      const loaders = Object.keys(agg)
+        .filter((k) => (agg[k].prod || 0) > 0 || (agg[k].dev || 0) > 0)
+        .sort()
+        .map((k) => ({ loader_id: k, prod_buckets: agg[k].prod || 0, dev_buckets: agg[k].dev || 0 }));
+
+      const bounds = await client.query(
+        `SELECT loader_id, min_factor, max_factor
+           FROM bucket_factor_bounds
+          WHERE admin_site_id=$1
+          ORDER BY loader_id ASC`,
+        [adminSiteId],
+      );
+      const saved = await client.query(
+        `SELECT loader_id, factor, prod_buckets, dev_buckets, prod_tonnes, dev_tonnes, min_factor, max_factor, created_at
+           FROM bucket_factors_monthly
+          WHERE admin_site_id=$1 AND month_ym=$2
+          ORDER BY loader_id ASC`,
+        [adminSiteId, month_ym],
+      );
+
+      // If solved factors exist for this month, merge into loaders list for convenience
+      const savedBy: Record<string, any> = {};
+      for (const r of saved.rows || []) savedBy[String(r.loader_id)] = r;
+      const mergedLoaders = loaders.map((r) => {
+        const s = savedBy[String(r.loader_id)] || null;
+        return s
+          ? {
+              ...r,
+              factor: s.factor,
+              min_factor: s.min_factor,
+              max_factor: s.max_factor,
+              prod_tonnes_pred: (r.prod_buckets || 0) * Number(s.factor || 0),
+              dev_tonnes_pred: (r.dev_buckets || 0) * Number(s.factor || 0),
+            }
+          : r;
+      });
+
+      return res.json({ ok: true, site, month_ym, reconciled: recon, loaders: mergedLoaders, bounds: bounds.rows || [], saved: saved.rows || [] });
+    } finally {
+      client.release();
+    }
+  } catch (e) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
+// POST /api/site-admin/bucket-factors/solve
+// body: { site, month_ym, bounds?: { [loader_id]: {min?:number,max?:number} }, save?: boolean }
+router.post('/bucket-factors/solve', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+    if (site === '*') return res.status(400).json({ ok: false, error: 'site required' });
+    const month_ym = String(req.body?.month_ym || '').trim();
+    if (!isYm(month_ym)) return res.status(400).json({ ok: false, error: 'invalid month_ym' });
+    const save = req.body?.save === true;
+    const boundsIn = (req.body?.bounds && typeof req.body.bounds === 'object') ? (req.body.bounds as Record<string, BucketFactorBounds>) : {};
+
+    const { fromYmd, toYmd } = monthBounds(month_ym);
+
+    const client = await pool.connect();
+    try {
+      const adminSiteId = await resolveAdminSiteId(client as any, site);
+      if (!adminSiteId) return res.status(404).json({ ok: false, error: 'unknown site' });
+
+      const recon = await getReconTonnes(client as any, adminSiteId, month_ym);
+      if (!Number.isFinite(recon.prod as any) || !Number.isFinite(recon.dev as any) || recon.prod == null || recon.dev == null) {
+        return res.status(400).json({ ok: false, error: 'missing reconciled ore tonnes (production and/or development) for this month' });
+      }
+
+      // Default bounds from DB
+      const bRows = await client.query(
+        `SELECT loader_id, min_factor, max_factor
+           FROM bucket_factor_bounds
+          WHERE admin_site_id=$1`,
+        [adminSiteId],
+      );
+      const boundsDb: Record<string, BucketFactorBounds> = {};
+      for (const r of bRows.rows || []) boundsDb[String(r.loader_id)] = { min: r.min_factor == null ? null : Number(r.min_factor), max: r.max_factor == null ? null : Number(r.max_factor) };
+
+      // Pull loading bucket counts per loader, split by prod/dev.
+      // Primary buckets definition (as per spec):
+      //  - Production: (Stope to Truck + Stope to SP)
+      //  - Development: (Heading to Truck + Heading to SP)
+      const load = await client.query(
+        `SELECT payload_json, sub_activity
+           FROM validated_shift_activities
+          WHERE admin_site_id=$1
+            AND date >= $2::date AND date < $3::date
+            AND activity='Loading'`,
+        [adminSiteId, fromYmd, toYmd],
+      );
+
+      const agg: Record<string, { prod: number; dev: number }> = {};
+      for (const row of load.rows || []) {
+        const v = valObj(row.payload_json);
+        const loaderId = String(v.Equipment || v.equipment || '').trim();
+        if (!loaderId) continue;
+
+        const sub = String(row.sub_activity || '').trim();
+
+        // If Material exists, filter to Ore
+        const mat = String(v.Material || v.material || '').trim();
+        if (mat && mat.toLowerCase() !== 'ore') continue;
+
+        // Primary bucket fields
+        const stopeToTruck = nNum(v['Stope to Truck']);
+        const stopeToSP = nNum(v['Stope to SP']);
+        const headingToTruck = nNum(v['Heading to Truck']);
+        const headingToSP = nNum(v['Heading to SP']);
+
+        if (!agg[loaderId]) agg[loaderId] = { prod: 0, dev: 0 };
+
+        if (sub.toLowerCase().startsWith('production')) {
+          agg[loaderId].prod += stopeToTruck + stopeToSP;
+        } else if (sub.toLowerCase().startsWith('development')) {
+          agg[loaderId].dev += headingToTruck + headingToSP;
+        }
+      }
+
+      const loaderIds = Object.keys(agg).filter((k) => (agg[k].prod || 0) > 0 || (agg[k].dev || 0) > 0).sort();
+      if (!loaderIds.length) return res.status(400).json({ ok: false, error: 'no loading buckets found for this month (cannot solve)' });
+
+      const n = loaderIds.length;
+      const A: number[][] = [new Array(n).fill(0), new Array(n).fill(0)];
+      for (let j = 0; j < n; j++) {
+        const id = loaderIds[j];
+        A[0][j] = nNum(agg[id].prod);
+        A[1][j] = nNum(agg[id].dev);
+      }
+      const b = [Number(recon.prod || 0), Number(recon.dev || 0)];
+
+      // Build bounds + priors
+      const bounds = [] as Array<{ lo: number; hi: number }>;
+      const prior = [] as number[];
+      for (const id of loaderIds) {
+        const inB = boundsIn[id] || {};
+        const dbB = boundsDb[id] || {};
+        const minRaw = inB.min != null ? Number(inB.min) : (dbB.min != null ? Number(dbB.min) : 0);
+        const maxRaw = inB.max != null ? Number(inB.max) : (dbB.max != null ? Number(dbB.max) : Number.POSITIVE_INFINITY);
+        const lo = Number.isFinite(minRaw) ? Math.max(0, minRaw) : 0;
+        const hi = Number.isFinite(maxRaw) ? Math.max(lo, maxRaw) : Number.POSITIVE_INFINITY;
+        bounds.push({ lo, hi });
+        const p = Number.isFinite(hi) ? (lo + hi) / 2 : Math.max(lo, 0);
+        prior.push(p);
+      }
+
+      const solved = solveProjectedGradient({ A, b, bounds, prior, lambda: 0.05, iters: 800 });
+      const x = solved.x;
+
+      // Prepare response rows
+      const rows = loaderIds.map((id, j) => {
+        const prod_buckets = nNum(agg[id].prod);
+        const dev_buckets = nNum(agg[id].dev);
+        const factor = nNum(x[j]);
+        return {
+          loader_id: id,
+          prod_buckets,
+          dev_buckets,
+          min_factor: bounds[j].lo,
+          max_factor: Number.isFinite(bounds[j].hi) ? bounds[j].hi : null,
+          factor,
+          prod_tonnes_pred: prod_buckets * factor,
+          dev_tonnes_pred: dev_buckets * factor,
+        };
+      });
+
+      const predicted = { prod: Number(solved.predicted?.[0] ?? 0), dev: Number(solved.predicted?.[1] ?? 0) };
+      const residual = { prod: predicted.prod - b[0], dev: predicted.dev - b[1] };
+
+      if (save) {
+        await client.query('BEGIN');
+        try {
+          // Save bounds (upsert)
+          for (const r of rows) {
+            await client.query(
+              `INSERT INTO bucket_factor_bounds (admin_site_id, site, loader_id, min_factor, max_factor, updated_by_user_id, updated_at)
+               VALUES ($1,$2,$3,$4,$5,$6,now())
+               ON CONFLICT (admin_site_id, loader_id)
+               DO UPDATE SET
+                 site=EXCLUDED.site,
+                 min_factor=EXCLUDED.min_factor,
+                 max_factor=EXCLUDED.max_factor,
+                 updated_by_user_id=EXCLUDED.updated_by_user_id,
+                 updated_at=now()`,
+              [adminSiteId, site, r.loader_id, r.min_factor, r.max_factor, req?.site_admin?.user_id || req?.user_id || null],
+            );
+          }
+
+          // Replace monthly factors for this month
+          await client.query(`DELETE FROM bucket_factors_monthly WHERE admin_site_id=$1 AND month_ym=$2`, [adminSiteId, month_ym]);
+          for (const r of rows) {
+            await client.query(
+              `INSERT INTO bucket_factors_monthly (
+                 admin_site_id, site, month_ym, loader_id, factor,
+                 prod_buckets, dev_buckets, prod_tonnes, dev_tonnes,
+                 min_factor, max_factor, method, created_by_user_id, created_at
+               ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'projected_gradient',$12,now())`,
+              [
+                adminSiteId,
+                site,
+                month_ym,
+                r.loader_id,
+                r.factor,
+                r.prod_buckets,
+                r.dev_buckets,
+                Number(recon.prod || 0),
+                Number(recon.dev || 0),
+                r.min_factor,
+                r.max_factor,
+                req?.site_admin?.user_id || req?.user_id || null,
+              ],
+            );
+          }
+          await client.query('COMMIT');
+        } catch (e) {
+          await client.query('ROLLBACK').catch(() => undefined);
+          throw e;
+        }
+      }
+
+      return res.json({
+        ok: true,
+        site,
+        month_ym,
+        reconciled: { prod: b[0], dev: b[1] },
+        predicted,
+        residual,
+        loaders: rows,
+        notes: {
+          model: 'shared_factor_per_loader',
+          equations: 2,
+          unknowns: n,
+          warning:
+            n > 2
+              ? 'Underdetermined for a single month (2 equations, >2 loaders). Bounds/prior are used to select a plausible solution.'
+              : null,
+        },
+      });
+    } finally {
+      client.release();
+    }
+  } catch (e) {
+    return res.status(e?.status || 500).json({ ok: false, error: e?.message || 'failed' });
+  }
+});
+
 
 // =============================
 // POWER BI SITE TOKENS (per-site)

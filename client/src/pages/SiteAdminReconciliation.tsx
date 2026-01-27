@@ -33,6 +33,12 @@ export default function SiteAdminReconciliation() {
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<any>(null);
 
+  // Bucket factors modal
+  const [showBuckets, setShowBuckets] = useState(false);
+  const [bucketLoading, setBucketLoading] = useState(false);
+  const [bucketData, setBucketData] = useState<any>(null);
+  const [bucketBounds, setBucketBounds] = useState<Record<string, { min: string; max: string }>>({});
+
   const selectedMetric = useMemo(() => metrics.find((m) => m.key === metricKey), [metrics, metricKey]);
 
   // Load scope + metrics
@@ -146,6 +152,65 @@ export default function SiteAdminReconciliation() {
       setMsg(e?.message || 'Failed');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function openBucketFactors() {
+    if (!site) return setMsg('Select a site');
+    if (!/^[0-9]{4}-[0-9]{2}$/.test(monthYm)) return setMsg('Invalid month');
+    setShowBuckets(true);
+    setBucketLoading(true);
+    try {
+      const q = new URLSearchParams({ site, month_ym: monthYm });
+      const r: any = await api(`/api/site-admin/bucket-factors/month?${q.toString()}`);
+      setBucketData(r);
+      // seed bounds inputs
+      const b: Record<string, { min: string; max: string }> = {};
+      for (const row of (r?.bounds || [])) {
+        const id = String(row.loader_id || '');
+        if (!id) continue;
+        b[id] = { min: row.min_factor == null ? '' : String(row.min_factor), max: row.max_factor == null ? '' : String(row.max_factor) };
+      }
+      // if already solved this month, prefer those bounds
+      for (const row of (r?.saved || [])) {
+        const id = String(row.loader_id || '');
+        if (!id) continue;
+        b[id] = { min: row.min_factor == null ? (b[id]?.min || '') : String(row.min_factor), max: row.max_factor == null ? (b[id]?.max || '') : String(row.max_factor) };
+      }
+      setBucketBounds(b);
+    } catch (e: any) {
+      setBucketData(null);
+      setMsg(e?.message || 'Failed to load bucket factor inputs');
+    } finally {
+      setBucketLoading(false);
+    }
+  }
+
+  async function solveBucketFactors(save: boolean) {
+    if (!site) return setMsg('Select a site');
+    if (!/^[0-9]{4}-[0-9]{2}$/.test(monthYm)) return setMsg('Invalid month');
+    setBucketLoading(true);
+    try {
+      const bounds: Record<string, { min?: number; max?: number }> = {};
+      for (const [id, v] of Object.entries(bucketBounds || {})) {
+        const min = v.min.trim() === '' ? undefined : Number(v.min);
+        const max = v.max.trim() === '' ? undefined : Number(v.max);
+        bounds[id] = {
+          ...(Number.isFinite(min as any) ? { min } : {}),
+          ...(Number.isFinite(max as any) ? { max } : {}),
+        };
+      }
+      const r: any = await api('/api/site-admin/bucket-factors/solve', {
+        method: 'POST',
+        body: { site, month_ym: monthYm, bounds, save },
+      });
+      // merge result into bucketData
+      setBucketData((prev: any) => ({ ...(prev || {}), solved: r }));
+      if (save) setMsg('Bucket factors saved');
+    } catch (e: any) {
+      setMsg(e?.message || 'Failed to solve bucket factors');
+    } finally {
+      setBucketLoading(false);
     }
   }
 
@@ -284,9 +349,179 @@ export default function SiteAdminReconciliation() {
               </button>
             )}
             {loading && <div className="text-sm opacity-70 self-center">Working…</div>}
+
+            <button
+              className="px-4 py-2 rounded-xl border bg-[color:var(--card)]"
+              onClick={openBucketFactors}
+              disabled={loading || !site || site === '*'}
+              title="Solve bucket factors for loaders from reconciled ore tonnes and loading buckets"
+            >
+              Bucket factors…
+            </button>
           </div>
         </div>
       </div>
+
+      {showBuckets && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.45)' }}>
+          <div className="w-full max-w-3xl bg-[var(--card)] rounded-2xl shadow-xl border" style={{ borderColor: '#e9d9c3' }}>
+            <div className="p-4 border-b" style={{ borderColor: '#f0e4d4' }}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-lg font-semibold">Bucket factors</div>
+                  <div className="text-xs opacity-70">
+                    Model 1 (shared factor per loader). Uses reconciled ore tonnes hauled (Prod + Dev) and loading primary buckets per loader.
+                  </div>
+                </div>
+                <button className="px-3 py-1.5 rounded-xl border bg-[color:var(--card)]" onClick={() => setShowBuckets(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4">
+              {bucketLoading ? (
+                <div className="text-sm opacity-70">Working…</div>
+              ) : (
+                <>
+                  <div className="p-3 rounded-xl border bg-[color:var(--card)]" style={{ borderColor: '#f0e4d4' }}>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                      <div>
+                        <div className="text-xs opacity-70">Month</div>
+                        <div className="font-semibold">{monthYm}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs opacity-70">Site</div>
+                        <div className="font-semibold">{site}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs opacity-70">Reconciled Prod tonnes</div>
+                        <div className="font-semibold">{bucketData?.reconciled?.prod == null ? '-' : fmt(bucketData.reconciled.prod, 2)} t</div>
+                      </div>
+                      <div>
+                        <div className="text-xs opacity-70">Reconciled Dev tonnes</div>
+                        <div className="font-semibold">{bucketData?.reconciled?.dev == null ? '-' : fmt(bucketData.reconciled.dev, 2)} t</div>
+                      </div>
+                    </div>
+                    {bucketData?.solved?.notes?.warning && (
+                      <div className="mt-2 text-xs text-amber-700">{bucketData.solved.notes.warning}</div>
+                    )}
+                  </div>
+
+                  <div className="mt-3 overflow-auto border rounded-xl" style={{ borderColor: '#f0e4d4' }}>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs opacity-70 border-b" style={{ borderColor: '#f0e4d4' }}>
+                          <th className="text-left p-2">Loader</th>
+                          <th className="text-right p-2">Prod buckets</th>
+                          <th className="text-right p-2">Dev buckets</th>
+                          <th className="text-right p-2">Min (t/bkt)</th>
+                          <th className="text-right p-2">Max (t/bkt)</th>
+                          <th className="text-right p-2">Factor (t/bkt)</th>
+                          <th className="text-right p-2">Prod t (calc)</th>
+                          <th className="text-right p-2">Dev t (calc)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(
+                          Array.isArray(bucketData?.solved?.loaders)
+                            ? bucketData.solved.loaders
+                            : Array.isArray(bucketData?.loaders)
+                              ? bucketData.loaders
+                              : Array.isArray(bucketData?.saved)
+                                ? bucketData.saved
+                                : []
+                        ).map((r: any) => {
+                          const id = String(r.loader_id || '').trim();
+                          const b = bucketBounds[id] || { min: '', max: '' };
+                          return (
+                            <tr key={id} className="border-b" style={{ borderColor: '#f0e4d4' }}>
+                              <td className="p-2 font-semibold">{id}</td>
+                              <td className="p-2 text-right">{fmt(r.prod_buckets ?? 0, 0)}</td>
+                              <td className="p-2 text-right">{fmt(r.dev_buckets ?? 0, 0)}</td>
+                              <td className="p-2 text-right">
+                                <input
+                                  className="w-24 p-1 rounded-lg border text-right bg-[color:var(--card)]"
+                                  value={b.min}
+                                  onChange={(e) => setBucketBounds((prev) => ({ ...prev, [id]: { ...prev[id], min: e.target.value } }))}
+                                  placeholder="0"
+                                />
+                              </td>
+                              <td className="p-2 text-right">
+                                <input
+                                  className="w-24 p-1 rounded-lg border text-right bg-[color:var(--card)]"
+                                  value={b.max}
+                                  onChange={(e) => setBucketBounds((prev) => ({ ...prev, [id]: { ...prev[id], max: e.target.value } }))}
+                                  placeholder=""
+                                />
+                              </td>
+                              <td className="p-2 text-right font-semibold">{r.factor == null ? '-' : fmt(r.factor, 4)}</td>
+                              <td className="p-2 text-right">{r.prod_tonnes_pred == null ? '-' : fmt(r.prod_tonnes_pred, 2)}</td>
+                              <td className="p-2 text-right">{r.dev_tonnes_pred == null ? '-' : fmt(r.dev_tonnes_pred, 2)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="mt-3 p-3 rounded-xl border bg-[color:var(--card)]" style={{ borderColor: '#f0e4d4' }}>
+                    <div className="text-xs opacity-70 mb-1">How it’s calculated</div>
+                    <div className="text-sm">
+                      For each loader <span className="font-semibold">i</span>, the bucket factor is <span className="font-semibold">fᵢ</span> (t/bucket).
+                      We solve the system:
+                      <div className="mt-1 text-xs opacity-80">
+                        Σ(prodBucketsᵢ × fᵢ) = reconciled production ore tonnes &nbsp; and &nbsp; Σ(devBucketsᵢ × fᵢ) = reconciled development ore tonnes.
+                      </div>
+                      <div className="mt-1 text-xs opacity-80">Constraints: fᵢ ≥ 0 and optional per-loader bounds you enter above.</div>
+                    </div>
+                    {bucketData?.solved?.predicted && bucketData?.solved?.reconciled && (
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <div className="text-xs opacity-70">Prod predicted vs reconciled</div>
+                          <div className="font-semibold">
+                            {fmt(bucketData.solved.predicted.prod, 2)} t / {fmt(bucketData.solved.reconciled.prod, 2)} t
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs opacity-70">Dev predicted vs reconciled</div>
+                          <div className="font-semibold">
+                            {fmt(bucketData.solved.predicted.dev, 2)} t / {fmt(bucketData.solved.reconciled.dev, 2)} t
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {bucketData?.solved?.residual && (
+                      <div className="mt-2 text-xs opacity-80">
+                        Residuals: Prod {fmt(bucketData.solved.residual.prod, 2)} t, Dev {fmt(bucketData.solved.residual.dev, 2)} t
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      className="px-4 py-2 rounded-xl text-white"
+                      style={{ background: 'var(--brand)' }}
+                      onClick={() => solveBucketFactors(false)}
+                      disabled={bucketLoading}
+                    >
+                      Recalculate
+                    </button>
+                    <button
+                      className="px-4 py-2 rounded-xl border bg-[color:var(--card)]"
+                      onClick={() => solveBucketFactors(true)}
+                      disabled={bucketLoading}
+                      title="Saves bounds + factors to the database for this month"
+                    >
+                      Save factors
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
