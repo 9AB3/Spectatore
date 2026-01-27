@@ -51,9 +51,12 @@ async function ensureParentIsPartitioned() {
 
 async function createPartition(startTs, endTs) {
   const name = `presence_events_${fmtYYYYMM(startTs)}`;
+  const startIso = startTs.toISOString();
+  const endIso = endTs.toISOString();
+  // Note: Postgres does not allow bind parameters in partition bounds for CREATE TABLE ... PARTITION OF.
+  // So we inline the timestamps as SQL literals.
   await pool.query(
-    `CREATE TABLE IF NOT EXISTS public.${name} PARTITION OF public.presence_events FOR VALUES FROM ($1) TO ($2);`,
-    [startTs.toISOString(), endTs.toISOString()],
+    `CREATE TABLE IF NOT EXISTS public.${name} PARTITION OF public.presence_events FOR VALUES FROM ('${startIso}') TO ('${endIso}');`
   );
 }
 
