@@ -860,3 +860,23 @@ ALTER TABLE IF EXISTS presence_current ADD COLUMN IF NOT EXISTS country_code TEX
 ALTER TABLE IF EXISTS presence_current ADD COLUMN IF NOT EXISTS region_code TEXT;
 ALTER TABLE IF EXISTS presence_current ADD COLUMN IF NOT EXISTS user_agent TEXT;
 ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS community_state TEXT;
+
+-- Ensure unique constraints for site assets (fix UPSERT failures)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'admin_locations_site_type_name_unique'
+    ) THEN
+        ALTER TABLE admin_locations
+        ADD CONSTRAINT admin_locations_site_type_name_unique
+        UNIQUE (admin_site_id, type, name);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'admin_equipment_site_name_unique'
+    ) THEN
+        ALTER TABLE admin_equipment
+        ADD CONSTRAINT admin_equipment_site_name_unique
+        UNIQUE (admin_site_id, name);
+    END IF;
+END $$;
