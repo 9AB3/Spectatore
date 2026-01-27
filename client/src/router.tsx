@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { gaPageView } from './lib/analytics';
 import Landing from './pages/Landing';
+import RedirectTrack from './pages/RedirectTrack';
 import HowTo from './pages/HowTo';
 import Home from './pages/Home';
 import Main from './pages/Main';
@@ -138,6 +139,7 @@ export default function App() {
     <>
       <StartupSplash />
       <Routes>
+      <Route path="/r/:key" element={<RedirectTrack />} />
       <Route
         path="/"
         element={
