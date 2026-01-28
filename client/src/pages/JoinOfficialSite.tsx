@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import useToast from '../hooks/useToast';
+import { getDB } from '../lib/idb';
 
 function Card({ children }: { children: any }) {
   return <div className="card w-full max-w-2xl">{children}</div>;
@@ -18,6 +19,8 @@ export default function JoinOfficialSite() {
   const nav = useNavigate();
   const { setMsg, Toast } = useToast();
 
+  const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
+
   const token = useMemo(() => {
     const fromQuery = String(q.get('token') || q.get('join_token') || q.get('t') || '').trim();
     if (fromQuery) return fromQuery;
@@ -30,6 +33,18 @@ export default function JoinOfficialSite() {
     const m = String(loc.pathname || '').match(/\/join\/(.+)$/i);
     return m ? String(m[1] || '').trim() : '';
   }, [q, loc.hash, loc.pathname]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const db = await getDB();
+        const session = await db.get('session', 'auth');
+        setLoggedIn(!!session?.token);
+      } catch {
+        setLoggedIn(false);
+      }
+    })();
+  }, []);
 
 
   const [siteName, setSiteName] = useState<string>('');
@@ -61,6 +76,11 @@ export default function JoinOfficialSite() {
 
   async function submit() {
     if (!token) return setMsg('Missing join token');
+    if (loggedIn === false) {
+      const next = `${loc.pathname}${loc.search}${loc.hash || ''}`;
+      nav(`/SiteAdminLogin?next=${encodeURIComponent(next)}`);
+      return;
+    }
     if (!tick) return setMsg('Please accept the site consent to continue');
     setSending(true);
     try {
@@ -120,8 +140,16 @@ export default function JoinOfficialSite() {
               </label>
             </div>
 
-            <button className="btn w-full" onClick={submit} disabled={sending}>
-              {sending ? 'Sending…' : 'Request Access'}
+            {loggedIn === false && (
+              <div className="p-3 rounded-xl" style={{ background: 'rgba(0,0,0,0.04)' }}>
+                <div className="text-sm">
+                  You need to <b>log in</b> before we can attach this request to your account.
+                </div>
+              </div>
+            )}
+
+            <button className="btn w-full" onClick={submit} disabled={sending || loggedIn === null}>
+              {sending ? 'Sending…' : loggedIn === false ? 'Log in to request access' : 'Request Access'}
             </button>
           </div>
         )}

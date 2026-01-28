@@ -102,7 +102,6 @@ async function adminSitesSelectAll(): Promise<Array<{ id: number; name: string }
   }
 }
 
-async }
 
 async function adminSitesInsertNames(names: string[]): Promise<void> {
   const cleaned = Array.from(

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getDB } from '../lib/idb';
 import useToast from '../hooks/useToast';
@@ -12,7 +12,20 @@ import useToast from '../hooks/useToast';
  */
 export default function SiteAdminLogin() {
   const nav = useNavigate();
+  const loc = useLocation();
   const { setMsg, Toast } = useToast();
+
+  const nextPath = useMemo(() => {
+    try {
+      const sp = new URLSearchParams(loc.search || '');
+      const n = String(sp.get('next') || '').trim();
+      // Only allow internal navigation
+      if (n.startsWith('/')) return n;
+    } catch {
+      // ignore
+    }
+    return '';
+  }, [loc.search]);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -92,6 +105,13 @@ export default function SiteAdminLogin() {
         );
       } catch {
         // non-fatal
+      }
+
+      // If the user came here from a join QR link (or other flow), go back there.
+      // This login screen is used for both normal users and site admins.
+      if (nextPath) {
+        nav(nextPath, { replace: true });
+        return;
       }
 
       // Server is the only source of truth for SiteAdmin authorization.
