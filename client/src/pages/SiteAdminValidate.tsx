@@ -38,24 +38,6 @@ type FlatKV = { path: string; label: string; value: any; kind: 'primitive' | 'js
 // ----- subtle/pro change indicators for edited cells -----
 function changedCellTdClass(isChanged: boolean) {
   if (!isChanged) return '';
-  // Reference data for validation checklist (locations/equipment)
-  useEffect(() => {
-    if (!site) return;
-    (async () => {
-      try {
-        const [locs, equips] = await Promise.all([
-          api(`/api/site-admin/admin-locations?site=${encodeURIComponent(site)}`),
-          api(`/api/site-admin/admin-equipment?site=${encodeURIComponent(site)}`),
-        ]);
-        setAdminLocRows(locs?.rows || locs || []);
-        setAdminEquipRows(equips?.rows || equips || []);
-      } catch {
-        setAdminLocRows([]);
-        setAdminEquipRows([]);
-      }
-    })();
-  }, [site]);
-
   // Left 3px accent bar + barely-visible tint.
   // Keep it professional: muted amber + slate.
   return [
@@ -431,7 +413,9 @@ export default function SiteAdminValidate() {
 const [pendingOnly, setPendingOnly] = useState<boolean>(true);
   const [softUnlockedDates, setSoftUnlockedDates] = useState<Record<string, boolean>>({});
   const [sites, setSites] = useState<string[]>([]);
-  const [site, setSite] = useState<string>('');
+  const [site, setSite]
+
+ = useState<string>('');
   const [days, setDays] = useState<Record<string, DayStatus>>({});
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [loadingDay, setLoadingDay] = useState(false);
@@ -443,6 +427,25 @@ const [pendingOnly, setPendingOnly] = useState<boolean>(true);
   const [truckOpen, setTruckOpen] = useState<Record<string, boolean>>({});
   const [adminLocRows, setAdminLocRows] = useState<AdminLocationRow[]>([]);
   const [adminEquipRows, setAdminEquipRows] = useState<AdminEquipmentRow[]>([]);
+
+  // Reference data for validation checklist (locations/equipment)
+  useEffect(() => {
+    if (!site) return;
+    (async () => {
+      try {
+        const [locs, equips] = await Promise.all([
+          api(`/api/site-admin/admin-locations?site=${encodeURIComponent(site)}`),
+          api(`/api/site-admin/admin-equipment?site=${encodeURIComponent(site)}`),
+        ]);
+        setAdminLocRows(locs?.rows || locs || []);
+        setAdminEquipRows(equips?.rows || equips || []);
+      } catch {
+        setAdminLocRows([]);
+        setAdminEquipRows([]);
+      }
+    })();
+  }, [site]);
+
 
   const [validatedShifts, setValidatedShifts] = useState<any[]>([]);
   const [validatedActs, setValidatedActs] = useState<any[]>([]);
