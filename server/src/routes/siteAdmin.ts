@@ -2027,6 +2027,120 @@ router.delete('/admin-locations', siteAdminMiddleware, async (req: any, res) => 
   }
 });
 
+// --- EXPECTED WORK (per-site config) ---
+// Used by SiteAdmin Validate to show missing expected activities/sub-activities.
+router.get('/expected-work', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    const site = normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+
+    // Read is allowed for validators and managers.
+    if (!isValidator(req) && !isManager(req)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    if (site === '*') return res.status(400).json({ error: 'site required' });
+    const adminSiteId = await resolveAdminSiteId(pool as any, site);
+    if (!adminSiteId) return res.status(404).json({ rows: [] });
+
+    const r = await pool.query(
+      `SELECT id, dn, dow, activity, sub_activity, enabled, created_at
+         FROM admin_expected_work
+        WHERE admin_site_id=$1
+        ORDER BY enabled DESC, activity ASC, sub_activity ASC, dn ASC, dow ASC, id ASC`,
+      [adminSiteId],
+    );
+    return res.json({ rows: r.rows || [] });
+  } catch (e: any) {
+    return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
+  }
+});
+
+router.post('/expected-work', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+
+    if (site === '*') return res.status(400).json({ error: 'site required' });
+    const adminSiteId = await resolveAdminSiteId(pool as any, site);
+    if (!adminSiteId) return res.status(404).json({ error: 'site not found' });
+
+    const dn = String(req.body?.dn ?? '*').trim() || '*';
+    const dowRaw = req.body?.dow;
+    const dow = Number.isFinite(Number(dowRaw)) ? Number(dowRaw) : -1;
+    const activity = String(req.body?.activity || '').trim();
+    const sub_activity = String(req.body?.sub_activity ?? '*').trim() || '*';
+    const enabled = typeof req.body?.enabled === 'boolean' ? req.body.enabled : true;
+
+    if (!activity) return res.status(400).json({ error: 'missing activity' });
+    const dnNorm = dn === 'D' || dn === 'N' ? dn : '*';
+    const dowNorm = dow === -1 || (dow >= 0 && dow <= 6) ? dow : -1;
+
+    const rr = await pool.query(
+      `INSERT INTO admin_expected_work (admin_site_id, dn, dow, activity, sub_activity, enabled)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (admin_site_id, dn, dow, activity, sub_activity)
+       DO UPDATE SET enabled=EXCLUDED.enabled
+       RETURNING id`,
+      [adminSiteId, dnNorm, dowNorm, activity, sub_activity || '*', enabled],
+    );
+    return res.json({ ok: true, id: rr.rows?.[0]?.id });
+  } catch (e: any) {
+    return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
+  }
+});
+
+router.patch('/expected-work/:id', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+
+    if (site === '*') return res.status(400).json({ error: 'site required' });
+    const adminSiteId = await resolveAdminSiteId(pool as any, site);
+    if (!adminSiteId) return res.status(404).json({ error: 'site not found' });
+
+    const id = Number(req.params?.id);
+    if (!id) return res.status(400).json({ error: 'invalid id' });
+
+    const enabled = typeof req.body?.enabled === 'boolean' ? req.body.enabled : null;
+    if (enabled === null) return res.status(400).json({ error: 'missing enabled' });
+
+    const r = await pool.query(
+      `UPDATE admin_expected_work
+          SET enabled=$1
+        WHERE id=$2 AND admin_site_id=$3
+        RETURNING id`,
+      [enabled, id, adminSiteId],
+    );
+    if (!r.rowCount) return res.status(404).json({ error: 'not found' });
+    return res.json({ ok: true });
+  } catch (e: any) {
+    return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
+  }
+});
+
+router.delete('/expected-work/:id', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertManager(req);
+    const site = String(req.body?.site || '').trim() || normalizeSiteParam(req);
+    assertSiteAccess(req, site);
+
+    if (site === '*') return res.status(400).json({ error: 'site required' });
+    const adminSiteId = await resolveAdminSiteId(pool as any, site);
+    if (!adminSiteId) return res.status(404).json({ error: 'site not found' });
+
+    const id = Number(req.params?.id);
+    if (!id) return res.status(400).json({ error: 'invalid id' });
+
+    await pool.query(`DELETE FROM admin_expected_work WHERE id=$1 AND admin_site_id=$2`, [id, adminSiteId]);
+    return res.json({ ok: true });
+  } catch (e: any) {
+    return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
+  }
+});
+
 // --- CALENDAR STATUS ---
 router.get('/calendar', siteAdminMiddleware, async (req: any, res) => {
   try {

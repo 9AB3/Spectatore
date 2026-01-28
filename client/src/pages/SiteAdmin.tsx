@@ -355,6 +355,14 @@ export default function SiteAdmin() {
           ) : null}
 
           {(canManage || superAdmin) ? (
+            <TvTileButton title="Expected Work" subtitle="Validation rules" tone="neutral" onClick={() => nav('/SiteAdmin/ExpectedWork')}>
+              <div className="text-sm" style={{ color: 'var(--muted)' }}>
+                Configure which activities & sub-activities are expected each day (used on Validate).
+              </div>
+            </TvTileButton>
+          ) : null}
+
+          {(canManage || superAdmin) ? (
             <TvTileButton title="Site Tokens" subtitle="Access" tone="neutral" onClick={() => nav('/SiteAdmin/SiteTokens')}>
               <div className="text-sm" style={{ color: 'var(--muted)' }}>
                 Manage join code + QR tokens used for users to request access to this site.

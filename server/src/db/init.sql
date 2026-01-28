@@ -305,6 +305,28 @@ ALTER TABLE admin_locations ADD COLUMN IF NOT EXISTS admin_site_id INT;
 CREATE INDEX IF NOT EXISTS idx_admin_locations_admin_site_id ON admin_locations(admin_site_id);
 
 
+-- Expected work checklist (site-admin configurable): what activities/sub-activities
+-- are expected for a given day. Used by SiteAdmin Validate checklist.
+--
+-- dn: '*', 'D', 'N' (any/day/night)
+-- dow: -1 = all days, else 0-6 (Sun-Sat)
+-- sub_activity: '*' means any sub-activity for the given activity counts.
+CREATE TABLE IF NOT EXISTS admin_expected_work (
+  id SERIAL PRIMARY KEY,
+  admin_site_id INT NOT NULL REFERENCES admin_sites(id) ON DELETE CASCADE,
+  dn TEXT NOT NULL DEFAULT '*',
+  dow INT NOT NULL DEFAULT -1,
+  activity TEXT NOT NULL,
+  sub_activity TEXT NOT NULL DEFAULT '*',
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(admin_site_id, dn, dow, activity, sub_activity)
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_expected_work_site ON admin_expected_work(admin_site_id);
+CREATE INDEX IF NOT EXISTS idx_admin_expected_work_site_dn_dow ON admin_expected_work(admin_site_id, dn, dow);
+
+
 
 CREATE INDEX IF NOT EXISTS idx_users_site ON users(site);
 

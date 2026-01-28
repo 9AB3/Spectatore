@@ -22,6 +22,15 @@ type ShiftRow = {
 type AdminLocationRow = { id?: number; site: string; name: string; type: 'Heading' | 'Stope' | 'Stockpile' | '' };
 type AdminEquipmentRow = { id?: number; site: string; equipment_id: string; type: string };
 
+type ExpectedWorkRow = {
+  id: number;
+  dn: string; // '*', 'D', 'N'
+  dow: number; // -1 or 0..6
+  activity: string;
+  sub_activity: string; // '*' or concrete
+  enabled: boolean;
+};
+
 type ActRow = {
   id: number;
   shift_id: number;
@@ -427,6 +436,7 @@ const [pendingOnly, setPendingOnly] = useState<boolean>(true);
   const [truckOpen, setTruckOpen] = useState<Record<string, boolean>>({});
   const [adminLocRows, setAdminLocRows] = useState<AdminLocationRow[]>([]);
   const [adminEquipRows, setAdminEquipRows] = useState<AdminEquipmentRow[]>([]);
+  const [expectedWorkRows, setExpectedWorkRows] = useState<ExpectedWorkRow[]>([]);
 
   // Reference data for validation checklist (locations/equipment)
   useEffect(() => {
@@ -442,6 +452,19 @@ const [pendingOnly, setPendingOnly] = useState<boolean>(true);
       } catch {
         setAdminLocRows([]);
         setAdminEquipRows([]);
+      }
+    })();
+  }, [site]);
+
+  // Expected work rules (used in checklist)
+  useEffect(() => {
+    if (!site) return;
+    (async () => {
+      try {
+        const r = await api(`/api/site-admin/expected-work?site=${encodeURIComponent(site)}`);
+        setExpectedWorkRows((r?.rows || []) as any);
+      } catch {
+        setExpectedWorkRows([]);
       }
     })();
   }, [site]);
@@ -1472,16 +1495,53 @@ function isSameMonth(dateStr: string, y: number, m: number) {
   }
 
   const checklist = useMemo(() => {
-    if (!selectedDate) return { unknownLocations: [] as any[], unknownEquipment: [] as any[], missingSub: [] as any[] };
+    if (!selectedDate) {
+      return {
+        unknownLocations: [] as any[],
+        unknownEquipment: [] as any[],
+        missingSub: [] as any[],
+        missingExpected: [] as any[],
+      };
+    }
     const unknownLocations: any[] = [];
     const unknownEquipment: any[] = [];
     const missingSub: any[] = [];
+    const missingExpected: any[] = [];
+
+    const dayDow = (() => {
+      try {
+        // Use midday local-time to avoid UTC day-roll when parsing YYYY-MM-DD
+        return new Date(`${selectedDate}T12:00:00`).getDay();
+      } catch {
+        return -1;
+      }
+    })();
+
+    // Build present sets (by DN + any)
+    const presentAny = new Set<string>();
+    const presentByDn: Record<string, Set<string>> = {
+      D: new Set<string>(),
+      N: new Set<string>(),
+    };
+    const presentAnySubByActAny = new Set<string>();
+    const presentAnySubByActDn: Record<string, Set<string>> = {
+      D: new Set<string>(),
+      N: new Set<string>(),
+    };
+
+    function normDn(v: any): 'D' | 'N' | '*' {
+      const s = String(v || '').trim().toUpperCase();
+      if (s === 'D' || s === 'DS' || s.startsWith('D')) return 'D';
+      if (s === 'N' || s === 'NS' || s.startsWith('N')) return 'N';
+      return '*';
+    }
 
     for (const row of validatedActs as any[]) {
       const objOrig: any = getValidatedActObjOriginal(row) || {};
       const obj: any = getValidatedActObj(row) || objOrig || {};
       const act = getActNameFromObj(row, obj);
       const sub = getSubNameFromObj(row, obj);
+      const dnRow = normDn(row?.dn || obj?.dn || '');
       const groupVal = getGroupValue(act, obj) || '';
 
       const equip = getEquipmentFromObj(obj);
@@ -1496,10 +1556,54 @@ function isSameMonth(dateStr: string, y: number, m: number) {
 
       const subRaw = String(obj?.sub || obj?.sub_activity || row?.sub_activity || '').trim();
       if (!subRaw) missingSub.push({ act, value: '(missing)', id: row?.id });
+
+      // present key for expected checklist
+      if (act) {
+        const key = `${act}|||${String(sub || subRaw || '').trim()}`;
+        presentAny.add(key);
+        presentAnySubByActAny.add(String(act));
+        if (dnRow === 'D' || dnRow === 'N') {
+          presentByDn[dnRow].add(key);
+          presentAnySubByActDn[dnRow].add(String(act));
+        }
+      }
     }
 
-    return { unknownLocations, unknownEquipment, missingSub };
-  }, [selectedDate, validatedActs, editedActs, locSet, equipSet]);
+    // Evaluate expected rules
+    const expectRows = (expectedWorkRows || []).filter((r) => (r as any)?.enabled);
+    const seen = new Set<string>();
+    for (const r of expectRows as any[]) {
+      const act = String(r?.activity || '').trim();
+      const sub = String(r?.sub_activity ?? '*').trim() || '*';
+      const dn = String(r?.dn ?? '*').trim().toUpperCase() || '*';
+      const dow = Number.isFinite(Number(r?.dow)) ? Number(r.dow) : -1;
+      if (!act) continue;
+      if (!(dow === -1 || dow === dayDow)) continue;
+
+      // pick present sets by DN
+      const dnNorm: 'D' | 'N' | '*' = dn === 'D' || dn === 'N' ? (dn as any) : '*';
+      const presentKeySet = dnNorm === '*' ? presentAny : presentByDn[dnNorm];
+      const presentActSet = dnNorm === '*' ? presentAnySubByActAny : presentAnySubByActDn[dnNorm];
+
+      let ok = false;
+      if (sub === '*') {
+        ok = presentActSet.has(act);
+      } else {
+        const key = `${act}|||${sub}`;
+        ok = presentKeySet.has(key);
+      }
+
+      if (!ok) {
+        const uniq = `${dnNorm}|||${dow}|||${act}|||${sub}`;
+        if (!seen.has(uniq)) {
+          seen.add(uniq);
+          missingExpected.push({ dn: dnNorm, dow, act, sub });
+        }
+      }
+    }
+
+    return { unknownLocations, unknownEquipment, missingSub, missingExpected };
+  }, [selectedDate, validatedActs, editedActs, locSet, equipSet, expectedWorkRows]);
 
 const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
   const softUnlocked = selectedDate ? !!softUnlockedDates[selectedDate] : false;
@@ -1778,7 +1882,7 @@ const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
                     
                     <div className="mb-4">
                       <div className="font-bold mb-2">Validation checklist</div>
-                      <div className="grid md:grid-cols-3 gap-2">
+                      <div className="grid md:grid-cols-4 gap-2">
                         <div className="tv-tile p-3">
                           <div className="text-xs opacity-70">Missing / unknown headings / locations</div>
                           <div className="text-2xl font-bold">{checklist.unknownLocations.length}</div>
@@ -1791,28 +1895,67 @@ const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
                           <div className="text-xs opacity-70">Missing required fields (subactivity)</div>
                           <div className="text-2xl font-bold">{checklist.missingSub.length}</div>
                         </div>
+                        <div className="tv-tile p-3">
+                          <div className="text-xs opacity-70">Missing expected work (config)</div>
+                          <div className="text-2xl font-bold">{checklist.missingExpected.length}</div>
+                        </div>
                       </div>
 
-                      {(checklist.unknownLocations.length || checklist.unknownEquipment.length || checklist.missingSub.length) ? (
-                        <div className="mt-3 space-y-2">
-                          {checklist.unknownLocations.slice(0, 6).map((x: any, i: number) => (
-                            <button
-                              key={'loc-' + i}
-                              type="button"
-                              className="tv-tile w-full text-left px-3 py-2"
-                              onClick={() => setMsg(`Unknown location: ${x.value} (${x.act} • ${x.sub})`)}
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="text-sm">
-                                  <span className="font-semibold">{x.act}</span> · {x.sub}
-                                </div>
-                                <div className="text-xs opacity-70">{x.value}</div>
+                      {(checklist.unknownLocations.length || checklist.unknownEquipment.length || checklist.missingSub.length || checklist.missingExpected.length) ? (
+                        <div className="mt-3 space-y-3">
+                          {checklist.missingExpected.length ? (
+                            <div>
+                              <div className="text-xs opacity-70 mb-1">Missing expected (top)</div>
+                              <div className="space-y-2">
+                                {checklist.missingExpected.slice(0, 6).map((x: any, i: number) => (
+                                  <button
+                                    key={'exp-' + i}
+                                    type="button"
+                                    className="tv-tile w-full text-left px-3 py-2"
+                                    onClick={() => setMsg(`Missing expected: ${x.act} • ${x.sub === '*' ? 'Any sub-activity' : x.sub} (${x.dn || '*'} • ${x.dow === -1 ? 'All days' : x.dow})`)}
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="text-sm">
+                                        <span className="font-semibold">{x.act}</span> · {x.sub === '*' ? 'Any sub-activity' : x.sub}
+                                      </div>
+                                      <div className="text-xs opacity-70">
+                                        {x.dn === 'D' ? 'Day' : x.dn === 'N' ? 'Night' : 'Any'}
+                                      </div>
+                                    </div>
+                                  </button>
+                                ))}
+                                {checklist.missingExpected.length > 6 && (
+                                  <div className="text-xs opacity-70">+ {checklist.missingExpected.length - 6} more…</div>
+                                )}
                               </div>
-                            </button>
-                          ))}
-                          {checklist.unknownLocations.length > 6 && (
-                            <div className="text-xs opacity-70">+ {checklist.unknownLocations.length - 6} more…</div>
-                          )}
+                            </div>
+                          ) : null}
+
+                          {checklist.unknownLocations.length ? (
+                            <div>
+                              <div className="text-xs opacity-70 mb-1">Unknown locations (top)</div>
+                              <div className="space-y-2">
+                                {checklist.unknownLocations.slice(0, 6).map((x: any, i: number) => (
+                                  <button
+                                    key={'loc-' + i}
+                                    type="button"
+                                    className="tv-tile w-full text-left px-3 py-2"
+                                    onClick={() => setMsg(`Unknown location: ${x.value} (${x.act} • ${x.sub})`)}
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="text-sm">
+                                        <span className="font-semibold">{x.act}</span> · {x.sub}
+                                      </div>
+                                      <div className="text-xs opacity-70">{x.value}</div>
+                                    </div>
+                                  </button>
+                                ))}
+                                {checklist.unknownLocations.length > 6 && (
+                                  <div className="text-xs opacity-70">+ {checklist.unknownLocations.length - 6} more…</div>
+                                )}
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                     </div>

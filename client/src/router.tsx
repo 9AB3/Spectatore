@@ -40,6 +40,7 @@ import Community from './pages/Community';
 import SiteAdminLogin from './pages/SiteAdminLogin';
 import SiteAdmin from './pages/SiteAdmin';
 import SiteAdminValidate from './pages/SiteAdminValidate';
+import SiteAdminExpectedWork from './pages/SiteAdminExpectedWork';
 import SiteAdminAddActivity from './pages/SiteAdminAddActivity';
 import SiteAdminEquipmentLocations from './pages/SiteAdminEquipmentLocations';
 import SiteAdminMenu from './pages/SiteAdminMenu';
@@ -238,6 +239,7 @@ export default function App() {
         <Route path="People" element={<RequireSiteAdminManage><SiteAdminPeople /></RequireSiteAdminManage>} />
         <Route path="PowerBiTokens" element={<RequireSiteAdminManage><SiteAdminPowerBiTokens /></RequireSiteAdminManage>} />
         <Route path="SiteTokens" element={<RequireSiteAdminManage><SiteAdminSiteTokens /></RequireSiteAdminManage>} />
+        <Route path="ExpectedWork" element={<RequireSiteAdminManage><SiteAdminExpectedWork /></RequireSiteAdminManage>} />
         <Route path="Engagement" element={<RequireSiteAdminSuper><SiteAdminEngagement /></RequireSiteAdminSuper>} />
         <Route path="Support" element={<RequireSiteAdminSuper><SiteAdminSupportSnapshot /></RequireSiteAdminSuper>} />
         {/* Backwards compatible: old settings page is now Site Tokens */}
