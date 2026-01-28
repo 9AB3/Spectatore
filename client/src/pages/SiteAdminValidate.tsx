@@ -1499,13 +1499,11 @@ function isSameMonth(dateStr: string, y: number, m: number) {
       return {
         unknownLocations: [] as any[],
         unknownEquipment: [] as any[],
-        missingSub: [] as any[],
         missingExpected: [] as any[],
       };
     }
     const unknownLocations: any[] = [];
     const unknownEquipment: any[] = [];
-    const missingSub: any[] = [];
     const missingExpected: any[] = [];
 
     const dayDow = (() => {
@@ -1554,12 +1552,9 @@ function isSameMonth(dateStr: string, y: number, m: number) {
       if (!equip) unknownEquipment.push({ act, sub, value: '(blank)', id: row?.id });
       else if (equipSet.size && !equipSet.has(equip)) unknownEquipment.push({ act, sub, value: equip, id: row?.id });
 
-      const subRaw = String(obj?.sub || obj?.sub_activity || row?.sub_activity || '').trim();
-      if (!subRaw) missingSub.push({ act, value: '(missing)', id: row?.id });
-
       // present key for expected checklist
       if (act) {
-        const key = `${act}|||${String(sub || subRaw || '').trim()}`;
+        const key = `${act}|||${String(sub || '').trim()}`;
         presentAny.add(key);
         presentAnySubByActAny.add(String(act));
         if (dnRow === 'D' || dnRow === 'N') {
@@ -1602,7 +1597,7 @@ function isSameMonth(dateStr: string, y: number, m: number) {
       }
     }
 
-    return { unknownLocations, unknownEquipment, missingSub, missingExpected };
+    return { unknownLocations, unknownEquipment, missingExpected };
   }, [selectedDate, validatedActs, editedActs, locSet, equipSet, expectedWorkRows]);
 
 const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
@@ -1882,7 +1877,7 @@ const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
                     
                     <div className="mb-4">
                       <div className="font-bold mb-2">Validation checklist</div>
-                      <div className="grid md:grid-cols-4 gap-2">
+                      <div className="grid md:grid-cols-3 gap-2">
                         <div className="tv-tile p-3">
                           <div className="text-xs opacity-70">Missing / unknown headings / locations</div>
                           <div className="text-2xl font-bold">{checklist.unknownLocations.length}</div>
@@ -1892,16 +1887,12 @@ const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
                           <div className="text-2xl font-bold">{checklist.unknownEquipment.length}</div>
                         </div>
                         <div className="tv-tile p-3">
-                          <div className="text-xs opacity-70">Missing required fields (subactivity)</div>
-                          <div className="text-2xl font-bold">{checklist.missingSub.length}</div>
-                        </div>
-                        <div className="tv-tile p-3">
                           <div className="text-xs opacity-70">Missing expected work (config)</div>
                           <div className="text-2xl font-bold">{checklist.missingExpected.length}</div>
                         </div>
                       </div>
 
-                      {(checklist.unknownLocations.length || checklist.unknownEquipment.length || checklist.missingSub.length || checklist.missingExpected.length) ? (
+                      {(checklist.unknownLocations.length || checklist.unknownEquipment.length || checklist.missingExpected.length) ? (
                         <div className="mt-3 space-y-3">
                           {checklist.missingExpected.length ? (
                             <div>
