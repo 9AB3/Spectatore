@@ -54,11 +54,12 @@ export default function Settings() {
   const [activeSiteIdStr, setActiveSiteIdStr] = useState<string>('0');
 
   // membership / join
-  const [officialSites, setOfficialSites] = useState<Array<{ id: number; name: string }>>([]);
+  const [officialSites, setOfficialSites] = useState<Array<{ id: number; name: string; requires_join_code?: boolean }>>([]);
   const [showAddSite, setShowAddSite] = useState(false);
   const [joinSiteId, setJoinSiteId] = useState<number>(0);
   // Join requests are always "member". Role changes happen after approval.
-  const [siteConsent, setSiteConsent] = useState<{ site_id: number; site: string; role: 'member' | 'validator' | 'admin' } | null>(null);
+  const [siteConsent, setSiteConsent] = useState<{ site_id: number; site: string; role: 'member' | 'validator' | 'admin'; requires_join_code?: boolean } | null>(null);
+  const [joinCode, setJoinCode] = useState('');
   const [siteConsentTick, setSiteConsentTick] = useState(false);
   const [siteConsentScrolled, setSiteConsentScrolled] = useState(false);
   const siteConsentBoxRef = useRef<HTMLDivElement | null>(null);
@@ -315,7 +316,7 @@ export default function Settings() {
       await api('/api/user/site-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ site_id, site_consent_version: consentVersion }),
+        body: JSON.stringify({ site_id, site_consent_version: consentVersion, ...(joinCode.trim() ? { join_code: joinCode.trim() } : {}) }),
       });
       await refreshMe();
       setShowAddSite(false);
@@ -323,7 +324,7 @@ export default function Settings() {
       setMsg('Request sent');
     } catch (e: any) {
       console.error(e);
-      setMsg(e?.message || 'Failed to request access');
+      setMsg(String(e?.message || '').includes('join_code_required') ? 'Join code required (ask your site admin for the site code / QR).' : (e?.message || 'Failed to request access'));
     }
   }
 
@@ -332,10 +333,10 @@ export default function Settings() {
       setMsg('Please select a site');
       return;
     }
-    const site = officialSites.find((s) => Number(s.id) === Number(joinSiteId))?.name || 'Site';
-    setSiteConsent({ site_id: joinSiteId, site, role: 'member' });
-    setSiteConsentTick(false);
-    setSiteConsentScrolled(false);
+    const found = officialSites.find((s) => Number(s.id) === Number(joinSiteId));
+    const site = found?.name || 'Site';
+    setJoinCode('');
+    setSiteConsent({ site_id: joinSiteId, site, role: 'member', requires_join_code: !!found?.requires_join_code });
   }
   async function leaveSite(site_id: number) {
     try {
@@ -441,6 +442,21 @@ export default function Settings() {
                   <div className="mt-3 grid gap-3">
                     <div>
                       <label className="block text-sm mb-1">Full name</label>
+
+
+{siteConsent?.requires_join_code ? (
+  <div className="mt-4 p-3 rounded-2xl border" style={{ borderColor: '#e9d9c3' }}>
+    <div className="text-xs opacity-70 mb-1">Site join code</div>
+    <input
+      className="input w-full"
+      value={joinCode}
+      onChange={(e) => setJoinCode(e.target.value)}
+      placeholder="Enter join code from site admin / QR"
+      autoCapitalize="characters"
+    />
+    <div className="text-[11px] opacity-60 mt-1">Required before we can send the request.</div>
+  </div>
+) : null}
                       <input
                         className="input"
                         value={fullName}
@@ -835,7 +851,7 @@ export default function Settings() {
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={!siteConsentTick || !siteConsentScrolled}
+                disabled={!siteConsentTick || !siteConsentScrolled || (!!siteConsent?.requires_join_code && !joinCode.trim())}
                 onClick={async () => {
                   const c = siteConsent;
                   if (!c) return;

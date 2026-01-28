@@ -29,6 +29,7 @@ import Settings from './pages/Settings';
 import Subscribe from './pages/Subscribe';
 import Subscription from './pages/Subscription';
 import NotificationPreferences from './pages/NotificationPreferences';
+import JoinOfficialSite from './pages/JoinOfficialSite';
 
 import Feedback from './pages/Feedback';
 import Notifications from './pages/Notifications';
@@ -48,6 +49,7 @@ import SiteAdminReconciliation from './pages/SiteAdminReconciliation';
 import SiteAdminPowerBiTokens from './pages/SiteAdminPowerBiTokens';
 import SiteAdminEngagement from './pages/SiteAdminEngagement';
 import SiteAdminSupportSnapshot from './pages/SiteAdminSupportSnapshot';
+import SiteAdminSettings from './pages/SiteAdminSettings';
 import StartupSplash from './components/StartupSplash';
 import { useEffect, useState } from 'react';
 import { getDB } from './lib/idb';

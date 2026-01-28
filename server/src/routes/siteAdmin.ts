@@ -20,6 +20,25 @@ async function hasLegacySiteColumn(pool: any) {
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
+function makeJoinCode(len = 10) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  // group for readability: ABCD-EFGH-IJ
+  return out.replace(/(.{4})/g, '$1-').replace(/-$/, '');
+}
+
+function b64urlEncode(buf: Buffer) {
+  return buf.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function signJoinToken(payload: any) {
+  const payloadJson = Buffer.from(JSON.stringify(payload), 'utf-8');
+  const payloadB64 = b64urlEncode(payloadJson);
+  const sig = require('crypto').createHmac('sha256', JWT_SECRET).update(payloadB64).digest();
+  const sigB64 = b64urlEncode(sig);
+  return `${payloadB64}.${sigB64}`;
+}
 // ---- schema helpers (support older DB variants) ----
 // Some local/dev DBs still use the legacy `site_memberships.site` column (sometimes NOT NULL).
 // If we insert/update memberships without also setting `site`, Postgres will throw:
@@ -536,6 +555,142 @@ router.get('/me', siteAdminMiddleware, async (req: any, res) => {
   }
 });
 
+
+/**
+ * Join code management (per admin site)
+ * - Site admins (and super admin) can rotate/disable join codes
+ * - Join codes are stored hashed; raw code is only returned once on rotate
+ * - QR is a signed token URL (short-lived)
+ */
+router.get('/join-code/status', siteAdminMiddleware, async (req: any, res) => {
+  const site_id = Number(req.query?.site_id || 0);
+  if (!site_id) return res.status(400).json({ ok: false, error: 'site_id required' });
+
+  try {
+    // Determine site name then scope-check
+    const siteName = await adminSitesSelectNameById(site_id);
+    if (!siteName) return res.status(404).json({ ok: false, error: 'site_not_found' });
+    assertSiteAccess(req, siteName);
+
+    const r = await pool.query(
+      `SELECT (join_code_hash IS NOT NULL AND TRIM(join_code_hash) <> '') AS enabled,
+              join_code_updated_at,
+              join_code_expires_at
+         FROM admin_sites
+        WHERE id=$1
+        LIMIT 1`,
+      [site_id],
+    );
+    const row = r.rows?.[0] || {};
+    return res.json({
+      ok: true,
+      enabled: !!row.enabled,
+      join_code_updated_at: row.join_code_updated_at ? String(row.join_code_updated_at) : null,
+      join_code_expires_at: row.join_code_expires_at ? String(row.join_code_expires_at) : null,
+    });
+  } catch (e: any) {
+    if (String(e?.code) === '42703') {
+      // columns not present in this DB
+      return res.json({ ok: true, enabled: false, join_code_updated_at: null, join_code_expires_at: null });
+    }
+    console.error('GET /site-admin/join-code/status failed', e);
+    return res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
+
+router.post('/join-code/rotate', siteAdminMiddleware, async (req: any, res) => {
+  const site_id = Number(req.body?.site_id || 0);
+  const expires_days = req.body?.expires_days != null ? Number(req.body.expires_days) : null;
+
+  if (!site_id) return res.status(400).json({ ok: false, error: 'site_id required' });
+
+  try {
+    const siteName = await adminSitesSelectNameById(site_id);
+    if (!siteName) return res.status(404).json({ ok: false, error: 'site_not_found' });
+    assertSiteAccess(req, siteName);
+
+    const code = makeJoinCode(10);
+    const bcrypt = await import('bcryptjs');
+    const hash = await bcrypt.hash(code, 10);
+
+    const expiresAt =
+      expires_days && expires_days > 0
+        ? new Date(Date.now() + expires_days * 24 * 60 * 60 * 1000).toISOString()
+        : null;
+
+    await pool.query(
+      `UPDATE admin_sites
+          SET join_code_hash=$1,
+              join_code_updated_at=now(),
+              join_code_expires_at=$2
+        WHERE id=$3`,
+      [hash, expiresAt, site_id],
+    );
+
+    // Return code ONCE so admin can copy it / generate QR
+    return res.json({ ok: true, code, join_code_expires_at: expiresAt });
+  } catch (e: any) {
+    if (String(e?.code) === '42703') {
+      return res.status(500).json({ ok: false, error: 'db_missing_join_code_columns' });
+    }
+    console.error('POST /site-admin/join-code/rotate failed', e);
+    return res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
+
+router.delete('/join-code', siteAdminMiddleware, async (req: any, res) => {
+  const site_id = Number(req.body?.site_id || 0);
+  if (!site_id) return res.status(400).json({ ok: false, error: 'site_id required' });
+
+  try {
+    const siteName = await adminSitesSelectNameById(site_id);
+    if (!siteName) return res.status(404).json({ ok: false, error: 'site_not_found' });
+    assertSiteAccess(req, siteName);
+
+    await pool.query(
+      `UPDATE admin_sites
+          SET join_code_hash=NULL,
+              join_code_updated_at=now(),
+              join_code_expires_at=NULL
+        WHERE id=$1`,
+      [site_id],
+    );
+    return res.json({ ok: true });
+  } catch (e: any) {
+    if (String(e?.code) === '42703') {
+      return res.status(500).json({ ok: false, error: 'db_missing_join_code_columns' });
+    }
+    console.error('DELETE /site-admin/join-code failed', e);
+    return res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
+
+// Signed QR join link (no raw join code in URL)
+router.get('/join-qr', siteAdminMiddleware, async (req: any, res) => {
+  const site_id = Number(req.query?.site_id || 0);
+  if (!site_id) return res.status(400).json({ ok: false, error: 'site_id required' });
+
+  try {
+    const siteName = await adminSitesSelectNameById(site_id);
+    if (!siteName) return res.status(404).json({ ok: false, error: 'site_not_found' });
+    assertSiteAccess(req, siteName);
+
+    // Token is short-lived (default 7 days) and signed.
+    const now = Math.floor(Date.now() / 1000);
+    const exp = now + 7 * 24 * 60 * 60;
+    const nonce = require('crypto').randomBytes(8).toString('hex');
+    const token = signJoinToken({ site_id, iat: now, exp, nonce });
+
+    // Prefer the public app URL, else relative path
+    const appUrl = (process.env.APP_PUBLIC_URL || '').replace(/\/$/, '');
+    const joinUrl = `${appUrl || ''}/join?token=${encodeURIComponent(token)}`;
+
+    return res.json({ ok: true, token, join_url: joinUrl, expires_at: new Date(exp * 1000).toISOString() });
+  } catch (e: any) {
+    console.error('GET /site-admin/join-qr failed', e);
+    return res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
 
 // --- DASHBOARD SUMMARY ---
 // Provides site-scoped, admin-relevant counts for the Site Admin home dashboard.

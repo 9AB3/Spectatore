@@ -1075,3 +1075,20 @@ BEGIN
       ON admin_locations (admin_site_id, name);
   END IF;
 END $$;
+
+
+-- ---- Join code / QR gated membership requests ----
+ALTER TABLE admin_sites ADD COLUMN IF NOT EXISTS join_code_hash TEXT;
+ALTER TABLE admin_sites ADD COLUMN IF NOT EXISTS join_code_updated_at TIMESTAMPTZ;
+ALTER TABLE admin_sites ADD COLUMN IF NOT EXISTS join_code_expires_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS join_code_attempts (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT,
+  site_id BIGINT,
+  ok BOOLEAN NOT NULL DEFAULT false,
+  ip TEXT,
+  user_agent TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+

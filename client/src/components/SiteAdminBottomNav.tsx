@@ -159,6 +159,14 @@ export default function SiteAdminBottomNav() {
   }
 
 
+function IconGear({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+      <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" />
+      <path d="M19.4 15a7.9 7.9 0 0 0 .1-1l2-1.2-2-3.4-2.3.6a7.4 7.4 0 0 0-.8-.6l-.3-2.3H10l-.3 2.3c-.3.2-.6.4-.8.6l-2.3-.6-2 3.4 2 1.2a7.9 7.9 0 0 0 .1 1l-2 1.2 2 3.4 2.3-.6c.2.2.5.4.8.6l.3 2.3h4.1l.3-2.3c.3-.2.6-.4.8-.6l2.3.6 2-3.4-2-1.2z" />
+    </svg>
+  );
+}
   return (
     <nav
       className="fixed bottom-0 left-0 right-0 z-40 border-t"
@@ -177,6 +185,9 @@ export default function SiteAdminBottomNav() {
         <Item to="/SiteAdmin" end label="Home" icon={<IconHome className="h-6 w-6" />} />
         {canManageSites && (
           <Item to="/SiteAdmin/Sites" label="Sites" icon={<IconSites className="h-6 w-6" />} />
+        )}
+        {canManageSites && (
+          <Item to="/SiteAdmin/Settings" label="Settings" icon={<IconGear className="h-6 w-6" />} />
         )}
         {canManageMembers && (<Item to="/SiteAdmin/People" label={'People'} icon={<IconUsers className="h-6 w-6" />} />)}
         <Item to="/SiteAdmin/Validate" label="Validate" icon={<IconCheck className="h-6 w-6" />} />

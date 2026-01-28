@@ -7,6 +7,43 @@ import { authMiddleware } from '../lib/auth.js';
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
+function b64urlEncode(buf: Buffer) {
+  return buf.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+function b64urlDecodeToBuffer(s: string) {
+  const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/') + pad;
+  return Buffer.from(b64, 'base64');
+}
+
+type JoinTokenPayload = { site_id: number; iat: number; exp: number; nonce: string };
+
+function verifyJoinToken(token: string): JoinTokenPayload | null {
+  try {
+    const parts = String(token || '').split('.');
+    if (parts.length !== 2) return null;
+    const [payloadB64, sigB64] = parts;
+    const payloadBuf = b64urlDecodeToBuffer(payloadB64);
+    const sigBuf = b64urlDecodeToBuffer(sigB64);
+
+    const expected = require('crypto')
+      .createHmac('sha256', JWT_SECRET)
+      .update(payloadB64)
+      .digest();
+
+    // timing-safe compare
+    if (sigBuf.length !== expected.length) return null;
+    if (!require('crypto').timingSafeEqual(sigBuf, expected)) return null;
+
+    const payload: JoinTokenPayload = JSON.parse(payloadBuf.toString('utf-8'));
+    if (!payload?.site_id || !payload?.exp || !payload?.iat) return null;
+    const now = Math.floor(Date.now() / 1000);
+    if (now > Number(payload.exp)) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
 // ---- schema helpers (support older DB variants) ----
 let _colsCache: Record<string, Set<string>> = {};
 
@@ -90,14 +127,37 @@ async function getAdminSiteNameById(site_id: number): Promise<string> {
   }
 }
 
-async function listAdminSites(): Promise<Array<{ id: number; name: string }>> {
+async function listAdminSites(): Promise<Array<{ id: number; name: string; requires_join_code?: boolean; join_code_expires_at?: string | null }>> {
   try {
-    const r = await pool.query('SELECT id, name FROM admin_sites ORDER BY name ASC');
-    return (r.rows || []).map((x: any) => ({ id: Number(x.id || 0), name: String(x.name || '').trim() }));
+    const r = await pool.query(
+      `SELECT id, name,
+              (join_code_hash IS NOT NULL AND TRIM(join_code_hash) <> '') AS requires_join_code,
+              join_code_expires_at
+         FROM admin_sites
+     ORDER BY name ASC`,
+    );
+    return (r.rows || []).map((x: any) => ({
+      id: Number(x.id || 0),
+      name: String(x.name || '').trim(),
+      requires_join_code: !!x.requires_join_code,
+      join_code_expires_at: x.join_code_expires_at ? String(x.join_code_expires_at) : null,
+    }));
   } catch (e: any) {
     if (String(e?.code) !== '42703') throw e;
-    const r = await pool.query('SELECT id, site AS name FROM admin_sites ORDER BY site ASC');
-    return (r.rows || []).map((x: any) => ({ id: Number(x.id || 0), name: String(x.name || '').trim() }));
+    // legacy schema: `admin_sites.site` instead of `admin_sites.name`
+    const r = await pool.query(
+      `SELECT id, site AS name,
+              (join_code_hash IS NOT NULL AND TRIM(join_code_hash) <> '') AS requires_join_code,
+              join_code_expires_at
+         FROM admin_sites
+     ORDER BY site ASC`,
+    );
+    return (r.rows || []).map((x: any) => ({
+      id: Number(x.id || 0),
+      name: String(x.name || '').trim(),
+      requires_join_code: !!x.requires_join_code,
+      join_code_expires_at: x.join_code_expires_at ? String(x.join_code_expires_at) : null,
+    }));
   }
 }
 
@@ -332,7 +392,7 @@ router.get('/sites', authMiddleware, async (_req: any, res) => {
       await adminSitesInsertNames((seed.rows || []).map((x: any) => String(x.name || '').trim()));
       rows = await listAdminSites();
     }
-    return res.json({ sites: rows.map((x: any) => ({ id: Number(x.id || 0), name: String(x.name) })) });
+    return res.json({ sites: rows.map((x: any) => ({ id: Number(x.id || 0), name: String(x.name), requires_join_code: !!x.requires_join_code, join_code_expires_at: x.join_code_expires_at ?? null })) });
   } catch {
     return res.json({ sites: [] });
   }
@@ -548,16 +608,82 @@ router.get('/site-assets', authMiddleware, async (req: any, res) => {
 // Request to join a site (member by default)
 router.post('/site-requests', authMiddleware, async (req: any, res) => {
   try {
-    const user_id = req.user_id;
-    const site_id = Number(req.body?.site_id || 0);
-    // Requests to join a site are always "member".
-    // Role promotion (validator/admin) is managed by the site's admins after approval.
-    const role = 'member';
-    const consentVersion = String(req.body?.site_consent_version || '').trim();
-    if (!site_id) return res.status(400).json({ error: 'site_id required' });
+const user_id = req.user_id;
+const join_token_raw = req.body?.join_token != null ? String(req.body.join_token).trim() : '';
+const tokenPayload = join_token_raw ? verifyJoinToken(join_token_raw) : null;
+const site_id = Number(req.body?.site_id || (tokenPayload ? tokenPayload.site_id : 0) || 0);
+// Requests to join a site are always "member".
+// Role promotion (validator/admin) is managed by the site's admins after approval.
+const role = 'member';
+const consentVersion = String(req.body?.site_consent_version || '').trim();
+if (!site_id) return res.status(400).json({ error: 'site_id required' });
 
     const siteName = await adminSitesSelectNameById(site_id);
-    if (!siteName) return res.status(400).json({ error: 'site_not_found' });
+if (!siteName) return res.status(400).json({ error: 'site_not_found' });
+
+// ---- Join code / QR gating (optional per admin site) ----
+let joinRequired = false;
+let joinHash: string | null = null;
+let joinExpires: string | null = null;
+try {
+  const jr = await pool.query(
+    `SELECT join_code_hash, join_code_expires_at
+       FROM admin_sites
+      WHERE id=$1
+      LIMIT 1`,
+    [site_id],
+  );
+  joinHash = jr.rows?.[0]?.join_code_hash ? String(jr.rows[0].join_code_hash) : null;
+  joinExpires = jr.rows?.[0]?.join_code_expires_at ? String(jr.rows[0].join_code_expires_at) : null;
+  joinRequired = !!(joinHash && joinHash.trim());
+} catch (e: any) {
+  // If the DB doesn't have join_code columns yet, treat as not required.
+  if (String(e?.code) !== '42703') throw e;
+}
+
+if (joinRequired) {
+  const join_code = req.body?.join_code != null ? String(req.body.join_code).trim() : '';
+  const join_token = req.body?.join_token != null ? String(req.body.join_token).trim() : '';
+
+  let ok = false;
+
+  // Option 1: signed QR token
+  if (join_token) {
+    const p = verifyJoinToken(join_token);
+    if (p && Number(p.site_id) === Number(site_id)) {
+      ok = true;
+    }
+  }
+
+  // Option 2: typed join code
+  if (!ok && join_code) {
+    try {
+      const bcrypt = await import('bcryptjs');
+      ok = await bcrypt.compare(join_code, String(joinHash || ''));
+    } catch {
+      ok = false;
+    }
+  }
+
+  // Log attempt (best effort)
+  try {
+    const ipRaw = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim();
+    const ua = String(req.headers['user-agent'] || '').slice(0, 500);
+    await pool.query(
+      `INSERT INTO join_code_attempts (user_id, site_id, ok, ip, user_agent)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [user_id, site_id, ok, ipRaw || null, ua || null],
+    );
+  } catch {
+    // ignore
+  }
+
+  if (!ok) {
+    return res.status(403).json({ error: 'join_code_required' });
+  }
+}
+
+    return res.status(400).json({ error: 'site_not_found' });
 
     const mcols = await tableColumns('site_memberships');
     // Note: different DBs have different columns on site_memberships.
