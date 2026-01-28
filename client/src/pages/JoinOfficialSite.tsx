@@ -47,6 +47,20 @@ export default function JoinOfficialSite() {
   }, []);
 
 
+  // If we were redirected to login and lost URL params, restore the pending token.
+  useEffect(() => {
+    if (token) return;
+    try {
+      const pending = (sessionStorage.getItem('spectatore-pending-join-token') || '').trim();
+      if (!pending) return;
+      const next = sessionStorage.getItem('spectatore-pending-join-next') || '';
+      // Restore URL so refreshes keep working.
+      nav(`/join?token=${encodeURIComponent(pending)}`, { replace: true });
+    } catch {
+      // ignore
+    }
+  }, [token, nav]);
+
   const [siteName, setSiteName] = useState<string>('');
   const [siteId, setSiteId] = useState<number>(0);
   const [loading, setLoading] = useState(false);
@@ -78,7 +92,10 @@ export default function JoinOfficialSite() {
     if (!token) return setMsg('Missing join token');
     if (loggedIn === false) {
       const next = `${loc.pathname}${loc.search}${loc.hash || ''}`;
-      nav(`/SiteAdminLogin?next=${encodeURIComponent(next)}`);
+      sessionStorage.setItem('spectatore-pending-join-next', next);
+      sessionStorage.setItem('spectatore-pending-join-token', token);
+      nav(`/Home?next=${encodeURIComponent(next)}`);
+
       return;
     }
     if (!tick) return setMsg('Please accept the site consent to continue');

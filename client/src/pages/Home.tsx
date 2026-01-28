@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getDB } from '../lib/idb';
 import useToast from '../hooks/useToast';
@@ -7,6 +7,19 @@ import { track } from '../lib/analytics';
 
 export default function Home() {
   const nav = useNavigate();
+  const loc = useLocation();
+  const nextParam = (() => {
+    try {
+      const p = new URLSearchParams(loc.search);
+      const n = (p.get('next') || '').trim();
+      if (!n) return '';
+      // Only allow in-app paths
+      if (!n.startsWith('/')) return '';
+      return n;
+    } catch {
+      return '';
+    }
+  })();
   const { setMsg, Toast } = useToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -46,7 +59,7 @@ export default function Home() {
         // Offline: if we have a session token, allow continuing into Main (existing behaviour)
         // Online: only auto-continue if the user previously ticked "Remember me"
         if (session.token && (!online || session.remember)) {
-          nav('/Main');
+          nav(nextParam || '/Main');
         }
       }
     })();
@@ -124,7 +137,14 @@ export default function Home() {
       setIsAdmin(isAdminFlag);
       setMsg('Tagged on');
       // Keep toast visible for at least 2s before route change
-      setTimeout(() => nav('/Main'), 2000);
+      try {
+        const pendingNext = nextParam || (sessionStorage.getItem('spectatore-pending-join-next') || '');
+        if (pendingNext) sessionStorage.removeItem('spectatore-pending-join-next');
+        sessionStorage.removeItem('spectatore-pending-join-token');
+        setTimeout(() => nav(pendingNext || '/Main'), 800);
+      } catch {
+        setTimeout(() => nav(nextParam || '/Main'), 800);
+      }
     } catch (e: any) {
       try {
         const msg = JSON.parse(e.message).error;
