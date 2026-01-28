@@ -25,7 +25,8 @@ const EQUIPMENT_ACTIVITY_MAP: Record<string, string[]> = {
 const EQUIP_TYPES = Object.keys(EQUIPMENT_ACTIVITY_MAP);
 
 function isEquipIdValid(s: string) {
-  return /^[A-Za-z]{2}\d{2}$/.test(s);
+  // Equipment IDs are site-specific; allow any non-empty value.
+  return !!String(s || '').trim();
 }
 
 function activityForType(type: string): string {
@@ -274,10 +275,7 @@ export default function EquipmentLocations() {
           setMsg('Enter an Equipment ID');
           return;
         }
-        if (!isEquipIdValid(id)) {
-          setMsg('Equipment ID must be 2 letters + 2 digits (e.g. UJ01)');
-          return;
-        }
+        // Any non-empty ID is allowed.
         if (drawerMode === 'create') {
           const dupSite = (equipRows || []).some((r) => r.is_site_asset && String(r.equipment_id || '').toUpperCase() === id);
           if (dupSite) {
@@ -401,13 +399,7 @@ export default function EquipmentLocations() {
         return;
       }
       if (tab === 'equipment') {
-        for (const raw of lines) {
-          const id = raw.toUpperCase();
-          if (!isEquipIdValid(id)) {
-            setMsg(`Invalid equipment ID: ${id} (must be 2 letters + 2 digits)`);
-            return;
-          }
-        }
+        // Any non-empty ID is allowed.
         for (const raw of lines) {
           const id = raw.toUpperCase();
           const dupSite = (equipRows || []).some((r) => r.is_site_asset && String(r.equipment_id || '').toUpperCase() === id);
@@ -719,7 +711,7 @@ export default function EquipmentLocations() {
                 lists.
               </div>
               <div>
-                Equipment IDs enforce a strict pattern: <strong className="text-slate-800">2 letters + 2 digits</strong>.
+                Equipment IDs are site-specific — you can use <strong className="text-slate-800">any</strong> naming scheme.
               </div>
               <div>
                 Tap a card to <strong className="text-slate-800">edit</strong> or <strong className="text-slate-800">remove</strong>.

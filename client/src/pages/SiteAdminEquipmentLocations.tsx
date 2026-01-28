@@ -20,7 +20,8 @@ const EQUIPMENT_ACTIVITY_MAP: Record<string, string[]> = {
 const EQUIP_TYPES = Object.keys(EQUIPMENT_ACTIVITY_MAP);
 
 function isEquipIdValid(s: string) {
-  return /^[A-Za-z]{2}\d{2}$/.test(s);
+  // Equipment IDs are site-specific; allow any non-empty value.
+  return !!String(s || '').trim();
 }
 
 function activityForType(type: string): string {
@@ -166,10 +167,7 @@ export default function SiteAdminEquipmentLocations() {
           setMsg('Enter equipment ID');
           return;
         }
-        if (!isEquipIdValid(equipId)) {
-          setMsg('Equipment ID must be 2 letters + 2 digits (e.g. UJ01)');
-          return;
-        }
+        // Any non-empty ID is allowed.
         const payload = { site, type: equipType, equipment_id: equipId.toUpperCase() };
         // Edit mode must update the existing row (including renames) instead of inserting a new one.
         if (mode === 'edit' && selectedEquip?.id) {
@@ -462,7 +460,7 @@ export default function SiteAdminEquipmentLocations() {
                       onChange={(e) => setEquipId(e.target.value.toUpperCase())}
                     />
                     <div className="text-xs text-[color:var(--muted)] mt-2">
-                      Format: 2 letters + 2 digits
+                      Site-specific naming — any ID is allowed.
                     </div>
                   </div>
                 </>
@@ -568,7 +566,7 @@ export default function SiteAdminEquipmentLocations() {
                     </select>
                   ) : (
                     <div className="text-xs text-[color:var(--muted)]">
-                      Invalid equipment IDs (not 2 letters + 2 digits) are skipped.
+                      Any non-empty equipment IDs are accepted.
                     </div>
                   )}
                 </div>

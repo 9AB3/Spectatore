@@ -57,6 +57,8 @@ export default function Feedback() {
   const [rows, setRows] = useState<ApprovedFeedbackRow[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const [isSuper, setIsSuper] = useState(false);
+
   const canSend = useMemo(() => message.trim().length >= 5, [message]);
 
   async function submit() {
@@ -109,6 +111,30 @@ export default function Feedback() {
       setMsg(e?.message || 'Failed to upvote');
     }
   }
+
+  async function deleteFeedback(id: number) {
+    try {
+      const res: any = await api(`/api/site-admin/feedback/${id}`, { method: 'DELETE' });
+      if (!res?.ok) throw new Error(res?.error || 'Failed to delete feedback');
+      await loadApproved();
+      setMsg('Deleted');
+    } catch (e: any) {
+      setMsg(e?.message || 'Failed to delete feedback');
+    }
+  }
+
+  // Determine if the current user is a super admin (so we can allow deleting approved feedback)
+  useEffect(() => {
+    (async () => {
+      try {
+        const me: any = await api('/api/site-admin/me');
+        const sites: string[] = Array.isArray(me?.sites) ? me.sites : [];
+        setIsSuper(!!me?.is_super || sites.includes('*'));
+      } catch {
+        setIsSuper(false);
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     if (tab === 'review') loadApproved();
@@ -172,6 +198,16 @@ export default function Feedback() {
                           {(r.user_name || 'User') + (r.site ? ` • ${r.site}` : '')}
                         </div>
                         <div className="flex items-center gap-2">
+                          {isSuper ? (
+                            <button
+                              className="btn btn-outline"
+                              title="Delete"
+                              aria-label="Delete"
+                              onClick={() => deleteFeedback(r.id)}
+                            >
+                              🗑
+                            </button>
+                          ) : null}
                           <div className="text-xs opacity-70">{r.upvotes} upvotes</div>
                           <button className="btn" disabled={r.has_upvoted} onClick={() => upvote(r.id)}>
                             {r.has_upvoted ? 'Upvoted' : 'Upvote'}
