@@ -70,7 +70,17 @@ return (
 
 }
 
-export default function Header({ title, showSync = true, showBell = true }: { title?: string; showSync?: boolean; showBell?: boolean }) {
+export default function Header({
+  title,
+  subtitle,
+  showSync = true,
+  showBell = true,
+}: {
+  title?: string;
+  subtitle?: string;
+  showSync?: boolean;
+  showBell?: boolean;
+}) {
   const [shift, setShift] = useState<{ date?: string; dn?: 'DS' | 'NS' }>({});
   const [unread, setUnread] = useState<number>(0);
   const loc = useLocation();
@@ -150,6 +160,7 @@ export default function Header({ title, showSync = true, showBell = true }: { ti
         <div className="min-w-0">
           <div className="logo-title text-xl truncate">Spectatore</div>
           {title ? <div className="text-xs opacity-70 truncate">{title}</div> : null}
+          {subtitle ? <div className="text-[11px] opacity-60 truncate">{subtitle}</div> : null}
         </div>
       </div>
 
