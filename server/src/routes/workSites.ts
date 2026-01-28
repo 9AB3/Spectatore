@@ -15,14 +15,20 @@ let _adminSitesNameCol: 'name' | 'site' | null = null;
 
 async function tableColumns(table: string): Promise<Set<string>> {
   if (_colsCache[table]) return _colsCache[table];
-  const r = await pool.query(
-    `SELECT column_name
-       FROM information_schema.columns
-      WHERE table_schema='public'
-        AND table_name=$1`,
-    [table],
-  );
-  const set = new Set<string>((r.rows || []).map((x: any) => String(x.column_name)));
+  let set = new Set<string>();
+  try {
+    const r = await pool.query(
+      `SELECT column_name
+         FROM information_schema.columns
+        WHERE table_schema='public'
+          AND table_name=$1`,
+      [table],
+    );
+    set = new Set<string>((r.rows || []).map((x: any) => String(x.column_name)));
+  } catch {
+    // fail soft
+    set = new Set<string>();
+  }
   _colsCache[table] = set;
   return set;
 }
@@ -30,8 +36,25 @@ async function tableColumns(table: string): Promise<Set<string>> {
 async function adminSitesNameColumn(): Promise<'name' | 'site'> {
   if (_adminSitesNameCol) return _adminSitesNameCol;
   const cols = await tableColumns('admin_sites');
-  _adminSitesNameCol = cols.has('name') ? 'name' : 'site';
+  // Default to 'name' if unsure.
+  _adminSitesNameCol = cols.has('site') && !cols.has('name') ? 'site' : 'name';
   return _adminSitesNameCol;
+}
+
+async function tableExists(table: string): Promise<boolean> {
+  try {
+    const r = await pool.query(
+      `SELECT 1
+         FROM information_schema.tables
+        WHERE table_schema='public'
+          AND table_name=$1
+        LIMIT 1`,
+      [table],
+    );
+    return (r.rows || []).length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function getOptionalUserId(req: any): number | null {
@@ -68,77 +91,94 @@ router.get('/', async (req, res) => {
     // - We also include any legacy official entries stored in work_sites (is_official / official_site_id).
     // The dropdowns only really need names, but we still return a numeric id.
 
-    const like = q ? q : '';
-    const params: any[] = [];
-    let where = '';
-
-    if (q) {
-      // Use LIKE against a normalized expression for admin_sites, and name_normalized for work_sites.
-      where = `WHERE (name_normalized LIKE $1 || '%' OR name_normalized LIKE '%' || $1 || '%')`;
-      params.push(like);
-    }
-
-    // Note: admin_sites doesn't have name_normalized in all DBs; we derive it on the fly.
-    // We de-duplicate by normalized name so the same site doesn't appear twice.
-    const userId = authedUserId ? Number(authedUserId) : 0;
-    const includeUser = !!authedUserId;
+    // We intentionally do this in 2 simple queries + JS merge.
+    // Reason: some deployments have subtle schema differences and SQL errors were being swallowed,
+    // leaving the dropdown with only "Not in List".
 
     // admin_sites may have either `name` (newer) or `site` (legacy) as the display column.
-    const adminNameCol = await adminSitesNameColumn();
-    const adminNameExpr = adminNameCol === 'name' ? 'a.name' : 'a.site';
+    // Also: some environments may not have the table (or permissions), so fail soft.
+    const hasAdminSites = await tableExists('admin_sites');
+    const adminNameCol = hasAdminSites ? await adminSitesNameColumn() : 'name';
 
-    const r = await pool.query(
-      `WITH all_sites AS (
-          -- 1) Official sites
-          SELECT (100000000 + a.id)::bigint AS id,
-                 ${adminNameExpr} AS name_display,
-                 LOWER(TRIM(REGEXP_REPLACE(${adminNameExpr}, '\\s+', ' ', 'g'))) AS name_normalized,
-                 TRUE AS is_official
-            FROM admin_sites a
+    let official: any = { rows: [] };
+    if (hasAdminSites) {
+      try {
+        official = await pool.query(
+          `SELECT id, ${adminNameCol} AS name
+             FROM public.admin_sites
+            ORDER BY ${adminNameCol} ASC`,
+        );
+      } catch (e: any) {
+        console.error('[work-sites] admin_sites query failed', e?.message || e);
+        official = { rows: [] };
+      }
+    }
 
-          UNION ALL
+    const userId = authedUserId ? Number(authedUserId) : 0;
+    let createdByMe: any = { rows: [] };
+    if (userId) {
+      try {
+        createdByMe = await pool.query(
+          `SELECT id, name_display AS name
+             FROM public.work_sites
+            WHERE created_by_user_id = $1
+            ORDER BY name_display ASC`,
+          [userId],
+        );
+      } catch (e: any) {
+        console.error('[work-sites] work_sites(created_by_user_id) query failed', e?.message || e);
+        createdByMe = { rows: [] };
+      }
+    }
 
-          -- 2) Legacy official/synced work_sites
-          SELECT ws.id::bigint AS id,
-                 ws.name_display,
-                 ws.name_normalized,
-                 TRUE AS is_official
-            FROM work_sites ws
-           WHERE (ws.is_official = true OR ws.official_site_id IS NOT NULL)
+    let legacyOfficial: any = { rows: [] };
+    try {
+      legacyOfficial = await pool.query(
+        `SELECT id, name_display AS name
+           FROM public.work_sites
+          WHERE (is_official = true OR official_site_id IS NOT NULL)
+          ORDER BY name_display ASC`,
+      );
+    } catch (e: any) {
+      console.error('[work-sites] work_sites(legacy official) query failed', e?.message || e);
+      legacyOfficial = { rows: [] };
+    }
 
-          UNION ALL
+    // Merge + dedupe by normalized name
+    const seen = new Set<string>();
+    const out: Array<{ id: number; name: string; is_official: boolean }> = [];
 
-          -- 3) User-created work sites (only for authenticated users)
-          SELECT ws.id::bigint AS id,
-                 ws.name_display,
-                 ws.name_normalized,
-                 FALSE AS is_official
-            FROM work_sites ws
-           WHERE ($2::int > 0) AND ws.created_by_user_id = $2
-        ),
-        dedup AS (
-          SELECT DISTINCT ON (name_normalized)
-                 id, name_display, name_normalized, is_official
-            FROM all_sites
-           WHERE name_normalized IS NOT NULL AND TRIM(name_normalized) <> ''
-           ORDER BY name_normalized, is_official DESC, name_display ASC, id ASC
-        )
-        SELECT id, name_display, is_official
-          FROM dedup
-          ${where}
-         ORDER BY is_official DESC, name_display ASC
-         LIMIT 400`,
-      q ? [like, userId] : ['', userId],
-    );
+    function add(rows: any[], is_official: boolean) {
+      for (const r of rows || []) {
+        const name = String(r?.name || '').trim();
+        if (!name) continue;
+        const key = normName(name);
+        if (!key) continue;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ id: Number(r.id) || 0, name, is_official });
+      }
+    }
 
-    return res.json({
-      sites: (r.rows || []).map((x: any) => ({
-        id: Number(x.id),
-        name: String(x.name_display),
-        is_official: !!x.is_official,
-      })),
+    add(official.rows, true);
+    add(legacyOfficial.rows, true);
+    add(createdByMe.rows, false);
+
+    // Optional search filter
+    const filtered = q
+      ? out.filter((x) => normName(x.name).includes(q))
+      : out;
+
+    // Ensure official sites appear first
+    filtered.sort((a, b) => {
+      if (a.is_official !== b.is_official) return a.is_official ? -1 : 1;
+      return a.name.localeCompare(b.name);
     });
+
+    return res.json({ sites: filtered.slice(0, 400) });
   } catch (e: any) {
+    // Fail-soft: the UI can still function with manual entry.
+    console.error('[work-sites] failed', e?.message || e);
     return res.json({ sites: [] });
   }
 });
