@@ -21,6 +21,16 @@ export default function JoinOfficialSite() {
 
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
 
+  async function clearSession() {
+    try {
+      const db = await getDB();
+      await db.delete('session', 'auth');
+    } catch {
+      // ignore
+    }
+  }
+
+
   const token = useMemo(() => {
     const fromQuery = String(q.get('token') || q.get('join_token') || q.get('t') || '').trim();
     if (fromQuery) return fromQuery;
@@ -39,7 +49,20 @@ export default function JoinOfficialSite() {
       try {
         const db = await getDB();
         const session = await db.get('session', 'auth');
-        setLoggedIn(!!session?.token);
+        const has = !!session?.token;
+        setLoggedIn(has);
+
+        // HARDEN: confirm session with server (prevents stale cached sessions after deploys)
+        if (has) {
+          try {
+            await api('/api/me');
+          } catch (e: any) {
+            if (e?.status === 401) {
+              await clearSession();
+              setLoggedIn(false);
+            }
+          }
+        }
       } catch {
         setLoggedIn(false);
       }
@@ -107,12 +130,32 @@ export default function JoinOfficialSite() {
         body: JSON.stringify({ join_token: token, site_consent_version: 'v1' }),
       });
       if (r?.ok) {
+        try {
+          sessionStorage.removeItem('spectatore-pending-join-token');
+          sessionStorage.removeItem('spectatore-pending-join-next');
+        } catch {
+          // ignore
+        }
         setMsg('Request sent');
         setTimeout(() => nav('/Settings'), 600);
         return;
       }
       throw new Error(r?.error || 'Failed');
     } catch (e: any) {
+      if ((e as any)?.status === 401) {
+        // Session expired or stale. Force re-login, preserving the join token.
+        await clearSession();
+        setLoggedIn(false);
+        const next = `${loc.pathname}${loc.search}${loc.hash || ''}`;
+        try {
+          sessionStorage.setItem('spectatore-pending-join-next', next);
+          sessionStorage.setItem('spectatore-pending-join-token', token);
+        } catch {
+          // ignore
+        }
+        nav(`/Home?next=${encodeURIComponent(next)}`);
+        return;
+      }
       if (String(e?.message || '').includes('join_code_required')) {
         setMsg('Join link expired or invalid. Ask your site admin for a new QR.');
       } else {

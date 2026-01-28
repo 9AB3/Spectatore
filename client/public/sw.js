@@ -4,7 +4,7 @@
 // - Runtime-caches same-origin GET requests (JS/CSS/images)
 // - Handles Web Push notifications
 
-const CACHE = 'spectatore-static-v4';
+const CACHE = 'spectatore-static-v5';
 
 // Allow the app to force-activate an updated service worker.
 self.addEventListener('message', (event) => {
@@ -93,8 +93,9 @@ self.addEventListener('fetch', (event) => {
 
   // SPA navigation fallback
   if (req.mode === 'navigate') {
+    // HARDEN: network-first for navigations (esp. /join) so stale cached shells don't break flows.
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: 'no-store' })
         .then((res) => {
           const copy = res.clone();
           caches.open(CACHE).then((cache) => cache.put('/index.html', copy));
