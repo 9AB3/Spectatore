@@ -80,14 +80,62 @@ router.post('/register', async (req, res) => {
     const community_state = state ? String(state).trim().toUpperCase() : null;
     const communityStateSafe = community_state && allowedStates.has(community_state) ? community_state : null;
 
-    const inserted = await pool.query(
-      `INSERT INTO users (email, password_hash, site, state, community_state, name, confirm_code, work_site_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       RETURNING id, email, name, is_admin, email_confirmed, work_site_id`,
-      [normEmail, hash, wsName || null, state || null, communityStateSafe, name, code, work_site_id || null],
+    // If the user abandoned a previous signup, allow them to "resume" the flow.
+    // - If email_confirmed = TRUE, block with a specific error.
+    // - If email_confirmed = FALSE, overwrite the in-progress signup and resend a new code.
+    const existing = await pool.query(
+      'SELECT id, email, name, is_admin, email_confirmed, work_site_id FROM users WHERE email = $1',
+      [normEmail],
     );
 
-    const user = inserted.rows[0];
+    let user: any = null;
+    let resumed = false;
+
+    if (existing.rows?.[0]) {
+      user = existing.rows[0];
+      if (user.email_confirmed) {
+        return res.status(409).json({ error: 'EMAIL_ALREADY_REGISTERED' });
+      }
+
+      resumed = true;
+
+      await pool.query(
+        `UPDATE users
+            SET password_hash = $1,
+                site = $2,
+                state = $3,
+                community_state = $4,
+                name = $5,
+                confirm_code = $6,
+                email_confirmed = FALSE,
+                work_site_id = $7
+          WHERE id = $8`,
+        [
+          hash,
+          wsName || null,
+          state || null,
+          communityStateSafe,
+          name,
+          code,
+          work_site_id || null,
+          user.id,
+        ],
+      );
+
+      const r2 = await pool.query(
+        'SELECT id, email, name, is_admin, email_confirmed, work_site_id FROM users WHERE id = $1',
+        [user.id],
+      );
+      user = r2.rows[0];
+    } else {
+      const inserted = await pool.query(
+        `INSERT INTO users (email, password_hash, site, state, community_state, name, confirm_code, work_site_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         RETURNING id, email, name, is_admin, email_confirmed, work_site_id`,
+        [normEmail, hash, wsName || null, state || null, communityStateSafe, name, code, work_site_id || null],
+      );
+      user = inserted.rows[0];
+    }
 
     // Do NOT create a Subscribed Site membership from registration.
     // Subscribed Site access (roles + approval) is an explicit flow in Settings.
@@ -109,8 +157,8 @@ router.post('/register', async (req, res) => {
     // NOTE: this email goes to your support inbox; the sign-up code still goes to the user.
     sendEmail(
       SUPPORT_EMAIL,
-      'Spectatore – New sign up',
-      `A new user signed up.\n\n` +
+      resumed ? 'Spectatore – Signup resumed' : 'Spectatore – New sign up',
+      `A user ${resumed ? 'resumed signup' : 'signed up'}.\n\n` +
         `Name: ${name || ''}\n` +
         `Email: ${normEmail}\n` +
         `Work Site: ${wsName || ''}\n` +
@@ -132,10 +180,8 @@ router.post('/register', async (req, res) => {
     }
 
     // Normal flow: email the confirmation code
-    sendEmail(normEmail, 'Spectatore confirmation code', `Your code is: ${code}`).catch(
-      () => {},
-    );
-    return res.json({ ok: true });
+    sendEmail(normEmail, 'Spectatore confirmation code', `Your code is: ${code}`).catch(() => {});
+    return res.json({ ok: true, resumed });
   } catch (err: any) {
     // 23505 = unique_violation
     if (String(err?.code) === '23505') {
@@ -145,6 +191,7 @@ router.post('/register', async (req, res) => {
     return res.status(500).json({ error: 'register failed' });
   }
 });
+
 
 router.post('/confirm', async (req, res) => {
   try {
@@ -166,6 +213,41 @@ router.post('/confirm', async (req, res) => {
   } catch (err) {
     console.error('confirm failed', err);
     return res.status(500).json({ error: 'confirm failed' });
+  }
+});
+
+router.post('/resend-confirm', async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    const normEmail = normaliseEmail(email);
+    if (!normEmail) return res.status(400).json({ error: 'email required' });
+
+    // Don't leak whether an email exists.
+    const r = await pool.query('SELECT id, email_confirmed FROM users WHERE email = $1', [
+      normEmail,
+    ]);
+    const user = r.rows[0];
+    if (!user) return res.json({ ok: true });
+    if (user.email_confirmed) {
+      return res.status(409).json({ error: 'EMAIL_ALREADY_CONFIRMED' });
+    }
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    await pool.query('UPDATE users SET confirm_code = $1 WHERE id = $2', [code, user.id]);
+
+    if (DEV_SKIP) {
+      await pool.query(
+        'UPDATE users SET email_confirmed = TRUE, confirm_code = NULL WHERE id = $1',
+        [user.id],
+      );
+      return res.json({ ok: true, dev_skip: true });
+    }
+
+    sendEmail(normEmail, 'Spectatore confirmation code', `Your code is: ${code}`).catch(() => {});
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('resend-confirm failed', err);
+    return res.status(500).json({ error: 'resend-confirm failed' });
   }
 });
 
