@@ -388,6 +388,27 @@ router.post('/connections/request', authMiddleware, async (req: any, res) => {
   }
 });
 
+
+router.post('/connections/:id/cancel', authMiddleware, async (req: any, res) => {
+  try {
+    const uid = Number(req.user_id);
+    const id = Number(req.params?.id || 0);
+    if (!id) return res.status(400).json({ error: 'missing id' });
+
+    // requester can cancel only pending outgoing requests
+    const r = await pool.query(
+      `DELETE FROM connections
+        WHERE id=$1 AND requester_id=$2 AND status='pending'
+        RETURNING id`,
+      [id, uid],
+    );
+    if (!r.rowCount) return res.status(404).json({ error: 'not found' });
+    return res.json({ ok: true });
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || 'cancel failed' });
+  }
+});
+
 router.post('/connections/:id/accept', authMiddleware, async (req: any, res) => {
   try {
     const id = Number(req.params.id);

@@ -679,6 +679,7 @@ router.post('/memberships/leave', authMiddleware, async (req: any, res) => {
 router.patch('/me', authMiddleware, async (req: any, res) => {
   const user_id = req.user_id;
   const nextEmail = req.body?.email != null ? normaliseEmail(req.body.email) : null;
+  const nextName = req.body?.name != null ? String(req.body.name).trim() : null;
   const nextSite = req.body?.site != null ? String(req.body.site).trim() : null;
   const nextCommunityState = req.body?.community_state != null ? String(req.body.community_state).trim().toUpperCase() : null;
   const currentPassword = req.body?.current_password ? String(req.body.current_password) : '';
@@ -689,7 +690,7 @@ router.patch('/me', authMiddleware, async (req: any, res) => {
     await client.query('BEGIN');
 
     const u = await client.query(
-      'SELECT id, email, site, password_hash, is_admin FROM users WHERE id=$1 FOR UPDATE',
+      'SELECT id, email, site, name, password_hash, is_admin FROM users WHERE id=$1 FOR UPDATE',
       [user_id],
     );
     const user = u.rows[0];
@@ -747,6 +748,11 @@ router.patch('/me', authMiddleware, async (req: any, res) => {
       params.push(nextSite || null);
     }
 
+    if (nextName !== null) {
+      updates.push(`name=$${i++}`);
+      params.push(nextName || null);
+    }
+
     if (cleanedState !== null) {
       updates.push(`community_state=$${i++}`);
       params.push(cleanedState === 'UNK' ? null : cleanedState);
@@ -761,14 +767,14 @@ router.patch('/me', authMiddleware, async (req: any, res) => {
       await client.query(`UPDATE users SET ${updates.join(', ')} WHERE id=$${i}`, params);
     }
 
-    const fresh = await client.query('SELECT id, email, site, is_admin, community_state FROM users WHERE id=$1', [
+    const fresh = await client.query('SELECT id, email, site, is_admin, name, community_state FROM users WHERE id=$1', [
       user_id,
     ]);
     await client.query('COMMIT');
 
     const f = fresh.rows[0];
     const token = tokenFor(f);
-    return res.json({ ok: true, token, me: { email: f.email, site: f.site || null, community_state: f.community_state || null } });
+    return res.json({ ok: true, token, me: { email: f.email, site: f.site || null, name: f.name || null, community_state: f.community_state || null } });
   } catch (err: any) {
     await client.query('ROLLBACK').catch(() => undefined);
     if (String(err?.code) === '23505') {

@@ -43,6 +43,7 @@ export default function Settings() {
   const [me, setMe] = useState<Me | null>(null);
 
   // profile
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [communityState, setCommunityState] = useState<string>('');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -107,6 +108,7 @@ export default function Settings() {
   async function refreshMe() {
     const res = (await api('/api/user/me')) as Me;
     setMe(res);
+    setFullName((res as any).name || '');
     setEmail(res.email || '');
     setCommunityState((res as any).community_state || '');
     setActiveSiteIdStr(res.subscribedSite?.id ? String(res.subscribedSite.id) : '0');
@@ -119,7 +121,8 @@ export default function Settings() {
         const res = (await api('/api/user/me')) as Me;
         if (cancelled) return;
         setMe(res);
-        setEmail(res.email || '');
+        setFullName((res as any).name || '');
+    setEmail(res.email || '');
         setCommunityState((res as any).community_state || '');
         setActiveSiteIdStr((res as any).subscribedSite?.id ? String((res as any).subscribedSite.id) : '0');
         const wsName = String((res as any).workSite?.name || '').trim();
@@ -219,6 +222,9 @@ export default function Settings() {
     e.preventDefault();
     try {
       const payload: any = { email: email.trim() };
+      const currentName = String((me as any)?.name || '').trim();
+      const desiredName = String(fullName || '').trim();
+      if (desiredName !== currentName) payload.name = desiredName || null;
       const currentCommunityState = String((me as any)?.community_state || '').trim();
       const desiredCommunityState = String(communityState || '').trim().toUpperCase();
       if (desiredCommunityState !== currentCommunityState) {
@@ -424,6 +430,10 @@ export default function Settings() {
                   <div className="text-lg font-semibold mt-1">Profile</div>
 
                   <div className="mt-3 grid gap-3">
+                    <div>
+                      <label className="block text-sm mb-1">Full name</label>
+                      <input className="input" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Your name" />
+                    </div>
                     <div>
                       <label className="block text-sm mb-1">Email</label>
                       <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />

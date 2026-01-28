@@ -91,7 +91,15 @@ export default function Connections() {
     window.dispatchEvent(new Event('spectatore:connections'));
   }
 
-  async function removeAccepted() {
+  
+  async function cancel(id: number) {
+    await api(`/api/connections/${id}/cancel`, { method: 'POST' });
+    setMsg('Request cancelled');
+    await reloadConnections();
+    window.dispatchEvent(new Event('spectatore:connections'));
+  }
+
+async function removeAccepted() {
     if (!removeId) return;
     await api(`/api/connections/${removeId}/remove`, { method: 'POST' });
     setMsg('Removed from your crew');
@@ -284,7 +292,10 @@ export default function Connections() {
                             <div className="text-xs text-slate-500 truncate">{r.work_site_name}</div>
                           ) : null}
                         </div>
-                        <div className="text-xs text-slate-500">Pending</div>
+                        <div className="flex items-center gap-2">
+                          <div className="text-xs text-slate-500">Pending</div>
+                          <button className="btn btn-xs" type="button" onClick={() => cancel(r.id)}>Cancel</button>
+                        </div>
                       </li>
                     ))}
                   </ul>

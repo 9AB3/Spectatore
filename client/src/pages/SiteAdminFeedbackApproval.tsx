@@ -57,6 +57,13 @@ export default function SiteAdminFeedbackApproval() {
     }
   }
 
+  async function del(id: number) {
+    await api(`/api/site-admin/feedback/${id}`, { method: 'DELETE' });
+    setMsg('Feedback deleted');
+    await loadPending();
+  }
+
+
   useEffect(() => {
     loadScope();
     loadPending();
@@ -111,6 +118,9 @@ export default function SiteAdminFeedbackApproval() {
                       </button>
                       <button className="btn" onClick={() => decide(r.id, 'decline')}>
                         ✕
+                      </button>
+                      <button className="btn" onClick={() => del(r.id)} title="Delete">
+                        🗑
                       </button>
                     </div>
                   </div>

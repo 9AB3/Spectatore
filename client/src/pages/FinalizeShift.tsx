@@ -174,7 +174,11 @@ export default function FinalizeShift() {
     })();
   }, []);
 
-  async function handleDelete(id: number) {
+    function handleEdit(id: number) {
+    nav('/Activity', { state: { editActivityId: id, returnTo: '/FinalizeShift' } });
+  }
+
+async function handleDelete(id: number) {
     const db = await getDB();
     await db.delete('activities', id);
     const list = await db.getAll('activities');
@@ -435,7 +439,7 @@ export default function FinalizeShift() {
                                   aria-label="Delete"
                                   title="Delete"
                                   className="ml-auto tv-muted hover:text-red-400 text-lg leading-none px-2"
-                                  onClick={() => handleDelete(it.id)}
+                                  onClick={(e) => { e.stopPropagation(); handleDelete(it.id); }}
                                 >
                                   ×
                                 </button>

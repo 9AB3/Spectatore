@@ -795,6 +795,20 @@ router.get('/feedback/pending', siteAdminMiddleware, async (req: any, res) => {
   }
 });
 
+
+router.delete('/feedback/:id', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    const sites = allowedSites(req);
+    if (!sites.includes('*')) return res.status(403).json({ ok: false, error: 'forbidden' });
+    const id = Number(req.params?.id || 0);
+    if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
+    await pool.query('DELETE FROM user_feedback WHERE id=$1', [id]);
+    return res.json({ ok: true });
+  } catch (e: any) {
+    return res.status(500).json({ ok: false, error: e?.message || 'Failed to delete feedback' });
+  }
+});
+
 router.post('/feedback/decision', siteAdminMiddleware, async (req: any, res) => {
   const id = Number(req.body?.id || 0);
   const decision = String(req.body?.decision || '').toLowerCase();
@@ -1758,13 +1772,26 @@ router.post('/admin-locations', siteAdminMiddleware, async (req: any, res) => {
     const name = String(req.body?.name || '').trim();
     const type = String(req.body?.type || '').trim();
     if (!site || !name) return res.status(400).json({ error: 'missing site or name' });
-    await pool.query(
-      `INSERT INTO admin_locations (admin_site_id, name, type)
-       VALUES ($1,$2,$3)
-       ON CONFLICT (admin_site_id, name)
-       DO UPDATE SET type=EXCLUDED.type`,
-      [siteId, name, type || null],
-    );
+    try {
+      await pool.query(
+        `INSERT INTO admin_locations (admin_site_id, name, type)
+         VALUES ($1,$2,$3)
+         ON CONFLICT (admin_site_id, name)
+         DO UPDATE SET type=EXCLUDED.type`,
+        [siteId, name, type || null],
+      );
+    } catch (e: any) {
+      // Legacy schema fallback: some older DBs used a text "site" column instead of admin_site_id.
+      if (String(e?.code) === '42703') {
+        await pool.query(
+          `INSERT INTO admin_locations (site, name, type)
+           VALUES ($1,$2,$3)`,
+          [site, name, type || null],
+        );
+      } else {
+        throw e;
+      }
+    }
     return res.json({ ok: true });
   } catch (e) {
     return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
