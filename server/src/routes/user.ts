@@ -669,7 +669,8 @@ if (joinRequired) {
   // Option 2: typed join code
   if (!ok && join_code) {
     try {
-      const bcrypt = await import('bcryptjs');
+      const bcryptMod: any = await import('bcryptjs');
+      const bcrypt: any = (bcryptMod as any)?.default || bcryptMod;
       ok = await bcrypt.compare(join_code, String(joinHash || ''));
     } catch {
       ok = false;
@@ -693,8 +694,6 @@ if (joinRequired) {
     return res.status(403).json({ error: 'join_code_required' });
   }
 }
-
-    return res.status(400).json({ error: 'site_not_found' });
 
     const mcols = await tableColumns('site_memberships');
     // Note: different DBs have different columns on site_memberships.
