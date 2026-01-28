@@ -403,6 +403,9 @@ export default function SiteAdminValidate() {
 
   const { setMsg, Toast } = useToast();
   const [year, setYear] = useState<number>(new Date().getFullYear());
+  const [focusMonth, setFocusMonth] = useState<number>(new Date().getMonth());
+  const [pendingOnly, setPendingOnly] = useState<boolean>(true);
+  const [softUnlockedDates, setSoftUnlockedDates] = useState<Record<string, boolean>>({});
   const [sites, setSites] = useState<string[]>([]);
   const [site, setSite] = useState<string>('');
   const [days, setDays] = useState<Record<string, DayStatus>>({});
@@ -420,7 +423,6 @@ export default function SiteAdminValidate() {
   const [validatedShifts, setValidatedShifts] = useState<any[]>([]);
   const [validatedActs, setValidatedActs] = useState<any[]>([]);
   const [dayStatus, setDayStatus] = useState<DayStatus>('none');
-  const [calendarOpen, setCalendarOpen] = useState<boolean>(true);
 
   // Allow deep-linking back to a specific date (e.g. after adding an activity)
   useEffect(() => {
@@ -429,6 +431,19 @@ export default function SiteAdminValidate() {
     const s = String(qs.get('site') || '').trim();
     if (s) setSite(s);
   }, [qs]);
+
+  // Keep focused month/year in sync with selected date (e.g. deep links)
+  useEffect(() => {
+    if (!selectedDate) return;
+    const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(selectedDate);
+    if (!m) return;
+    const y = parseInt(m[1], 10);
+    const mo = parseInt(m[2], 10) - 1;
+    if (Number.isFinite(y) && Number.isFinite(mo) && mo >= 0 && mo <= 11) {
+      if (y !== year) setYear(y);
+      if (mo !== focusMonth) setFocusMonth(mo);
+    }
+  }, [selectedDate]);
 
   // Ensure logged in
   useEffect(() => {
@@ -1290,6 +1305,61 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
   const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const week = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
+  function monthKey(y: number, m: number) {
+    return `${y}-${String(m + 1).padStart(2, '0')}`;
+  }
+  function isSameMonth(dateStr: string, y: number, m: number) {
+    return dateStr.startsWith(monthKey(y, m));
+  }
+  function isSoftLockedDate(dateStr: string) {
+    // Soft lock anything outside the currently focused month (UI-only)
+    return !isSameMonth(dateStr, year, focusMonth);
+  }
+
+  const monthDates = useMemo(() => {
+    const prefix = monthKey(year, focusMonth);
+    const items = Object.entries(days)
+      .filter(([dateStr]) => dateStr.startsWith(prefix))
+      .map(([dateStr, st]) => ({ dateStr, st }));
+
+    const visible = items.filter((x) => x.st !== 'none');
+
+    visible.sort((a, b) => {
+      const pa = a.st === 'red' ? 0 : 1;
+      const pb = b.st === 'red' ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+      return a.dateStr.localeCompare(b.dateStr);
+    });
+
+    return pendingOnly ? visible.filter((x) => x.st === 'red') : visible;
+  }, [days, year, focusMonth, pendingOnly]);
+
+  const monthStats = useMemo(() => {
+    const prefix = monthKey(year, focusMonth);
+    let withData = 0;
+    let pending = 0;
+    let validated = 0;
+
+    for (const [d, st] of Object.entries(days)) {
+      if (!d.startsWith(prefix)) continue;
+      if (st !== 'none') withData++;
+      if (st === 'red') pending++;
+      if (st === 'green') validated++;
+    }
+
+    return { withData, pending, validated };
+  }, [days, year, focusMonth]);
+
+  function openNextPending() {
+    const next = monthDates.find((d) => d.st === 'red');
+    if (next) loadDate(next.dateStr);
+    else setMsg('No pending days in this month.');
+  }
+
+  const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
+  const softUnlocked = selectedDate ? !!softUnlockedDates[selectedDate] : false;
+  const allowEdits = !softLocked || softUnlocked;
+
   return (
     <div className="min-h-screen">
       <div className="max-w-7xl mx-auto p-4 space-y-4">
@@ -1307,79 +1377,142 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
         </div>
 
         <div className="card">
-          <div className="flex items-center justify-between mb-2">
-            <div className="font-bold">Calendar</div>
+          <div className="flex flex-wrap items-center gap-2 justify-between">
+            <div className="flex items-center gap-2">
+              <div className="text-xs opacity-70">Site</div>
+              <select className="input" value={site} onChange={(e) => setSite(e.target.value)}>
+                {sites.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                className="tv-pill"
+                type="button"
+                onClick={() => {
+                  const d = new Date(year, focusMonth - 1, 1);
+                  setYear(d.getFullYear());
+                  setFocusMonth(d.getMonth());
+                }}
+                aria-label="Previous month"
+                title="Previous month"
+              >
+                ‹
+              </button>
+              <div className="font-semibold text-lg px-1">
+                {monthNames[focusMonth]} {year}
+              </div>
+              <button
+                className="tv-pill"
+                type="button"
+                onClick={() => {
+                  const d = new Date(year, focusMonth + 1, 1);
+                  setYear(d.getFullYear());
+                  setFocusMonth(d.getMonth());
+                }}
+                aria-label="Next month"
+                title="Next month"
+              >
+                ›
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={pendingOnly} onChange={(e) => setPendingOnly(e.target.checked)} />
+                Pending only
+              </label>
+              <button className="tv-pill" type="button" onClick={openNextPending}>
+                Next pending
+              </button>
+            </div>
           </div>
 
-          {calendarOpen && (
-            <>
-              <div className="flex flex-wrap gap-2 items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <button
-                    className="tv-pill"
-                    onClick={() => setYear((y) => y - 1)}
-                    type="button"
-                  >
-                    ‹
-                  </button>
-                  <div className="font-semibold text-lg px-1">{year}</div>
-                  <button
-                    className="tv-pill"
-                    onClick={() => setYear((y) => y + 1)}
-                    type="button"
-                  >
-                    ›
-                  </button>
-                </div>
+          <div className="mt-2 text-xs opacity-70">
+            {monthStats.withData} days with data · {monthStats.pending} pending · {monthStats.validated} validated
+          </div>
+        </div>
 
-                <div className="flex items-center gap-2">
-                  <div className="text-xs opacity-70">Site</div>
-                  <select className="input" value={site} onChange={(e) => setSite(e.target.value)}>
-                    {sites.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+        <div className="grid lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 space-y-4">
+            <div className="card">
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-bold">Month queue</div>
+                <div className="text-xs opacity-70">Click a day to review and validate</div>
               </div>
 
-              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
-                {Array.from({ length: 12 }).map((_, mi) => {
-                  const cells = monthGrid(year, mi);
-                  const mm = String(mi + 1).padStart(2, '0');
+              <div className="space-y-2">
+                {monthDates.length === 0 && <div className="text-sm opacity-70">No days to show for this month.</div>}
+
+                {monthDates.map(({ dateStr, st }) => {
+                  const locked = isSoftLockedDate(dateStr);
                   return (
-                    <div key={mi} className="tv-tile">
-                      <div className="font-bold mb-1">{monthNames[mi]}</div>
-                      <div className="grid grid-cols-7 text-[11px] opacity-70 mb-1">
-                        {week.map((w) => (
-                          <div key={w} className="text-center">
-                            {w}
-                          </div>
-                        ))}
+                    <button
+                      key={dateStr}
+                      type="button"
+                      onClick={() => loadDate(dateStr)}
+                      className={`tv-tile w-full text-left flex items-center justify-between ${
+                        selectedDate === dateStr ? 'ring-2 ring-slate-400' : ''
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="font-semibold">{dateStr}</div>
+
+                        {st === 'red' && (
+                          <span className="px-2 py-1 rounded-full text-xs bg-rose-500 text-white">Pending</span>
+                        )}
+                        {st === 'green' && (
+                          <span className="px-2 py-1 rounded-full text-xs bg-emerald-600 text-white">Validated</span>
+                        )}
+
+                        {locked && (
+                          <span className="px-2 py-1 rounded-full text-xs bg-slate-200 text-slate-700">Soft lock</span>
+                        )}
                       </div>
-                      <div className="grid grid-cols-7 gap-1">
-                        {cells.map((d, idx) => {
-                          if (d == null) return <div key={idx} className="h-6" />;
-                          const dd = String(d).padStart(2, '0');
-                          const dateStr = `${year}-${mm}-${dd}`;
-                          const st = days[dateStr] || 'none';
-                          const isSel = selectedDate === dateStr;
-                          return (
-                            <button
-                              key={idx}
-                              className={`h-6 rounded-md text-[11px] ${dayClass(st)} ${
-                                isSel ? 'ring-2 ring-slate-400' : ''
-                              }`}
-                              onClick={() => loadDate(dateStr)}
-                              type="button"
-                            >
-                              {d}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+
+                      <div className="text-xs opacity-60">›</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="card">
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-bold">Month</div>
+              </div>
+
+              <div className="grid grid-cols-7 text-[11px] opacity-70 mb-1">
+                {week.map((w) => (
+                  <div key={w} className="text-center">
+                    {w}
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-7 gap-1">
+                {monthGrid(year, focusMonth).map((d, idx) => {
+                  if (d == null) return <div key={idx} className="h-8" />;
+                  const dd = String(d).padStart(2, '0');
+                  const mm = String(focusMonth + 1).padStart(2, '0');
+                  const dateStr = `${year}-${mm}-${dd}`;
+                  const st = days[dateStr] || 'none';
+                  const isSel = selectedDate === dateStr;
+                  return (
+                    <button
+                      key={idx}
+                      className={`h-8 rounded-md text-[12px] ${dayClass(st)} ${isSel ? 'ring-2 ring-slate-400' : ''}`}
+                      onClick={() => loadDate(dateStr)}
+                      type="button"
+                    >
+                      {d}
+                    </button>
                   );
                 })}
               </div>
@@ -1394,37 +1527,10 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                   Unvalidated
                 </div>
               </div>
-
-              <div className="flex justify-center mt-2">
-                <button
-                  className="tv-pill"
-                  type="button"
-                  onClick={() => setCalendarOpen((o) => !o)}
-                  aria-label="Collapse calendar"
-                  title="Collapse calendar"
-                >
-                  −
-                </button>
-              </div>
-            </>
-          )}
-
-          {!calendarOpen && (
-            <div className="flex justify-center">
-              <button
-                className="tv-pill"
-                type="button"
-                onClick={() => setCalendarOpen(true)}
-                aria-label="Expand calendar"
-                title="Expand calendar"
-              >
-                +
-              </button>
             </div>
-          )}
+          </div>
         </div>
-
-        {selectedDate && (
+{selectedDate && (
           <div className="card">
             <div className="flex items-center justify-between mb-2">
               <div className="font-bold">{selectedDate}</div>
@@ -1432,7 +1538,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                 <button
                   className="px-4 py-2 rounded-xl bg-sky-600 text-white shadow-sm hover:bg-sky-700 disabled:opacity-50"
                   onClick={saveEdits}
-                  disabled={loadingDay}
+                  disabled={loadingDay || !allowEdits}
                   type="button"
                 >
                   Save edits
@@ -1440,7 +1546,7 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                 <button
                   className="px-4 py-2 rounded-xl bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
                   onClick={validate}
-                  disabled={loadingDay}
+                  disabled={loadingDay || !allowEdits}
                   type="button"
                 >
                   Validate shift
@@ -1452,11 +1558,30 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                     if (!selectedDate) return;
                     nav(`/SiteAdmin/AddActivity?date=${encodeURIComponent(selectedDate)}&site=${encodeURIComponent(site)}`);
                   }}
+                  disabled={loadingDay || !allowEdits}
                 >
                   + Add activity
                 </button>
               </div>
             </div>
+
+            {softLocked && !softUnlocked && selectedDate && (
+              <div className="mb-3 p-3 rounded-xl bg-slate-100 border border-slate-200">
+                <div className="font-semibold">Soft locked period</div>
+                <div className="text-sm opacity-70">
+                  This date is outside the selected month. Editing is disabled until you unlock it, to prevent accidental changes.
+                </div>
+                <div className="mt-2">
+                  <button
+                    className="tv-pill"
+                    type="button"
+                    onClick={() => setSoftUnlockedDates((m) => ({ ...m, [selectedDate]: true }))}
+                  >
+                    Unlock editing
+                  </button>
+                </div>
+              </div>
+            )}
 
             {loadingDay ? (
               <div className="p-4 opacity-70">Loading...</div>
