@@ -9,6 +9,31 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
 const router = express.Router();
 
+// ---- schema helpers (support older DB variants) ----
+let _colsCache: Record<string, Set<string>> = {};
+let _adminSitesNameCol: 'name' | 'site' | null = null;
+
+async function tableColumns(table: string): Promise<Set<string>> {
+  if (_colsCache[table]) return _colsCache[table];
+  const r = await pool.query(
+    `SELECT column_name
+       FROM information_schema.columns
+      WHERE table_schema='public'
+        AND table_name=$1`,
+    [table],
+  );
+  const set = new Set<string>((r.rows || []).map((x: any) => String(x.column_name)));
+  _colsCache[table] = set;
+  return set;
+}
+
+async function adminSitesNameColumn(): Promise<'name' | 'site'> {
+  if (_adminSitesNameCol) return _adminSitesNameCol;
+  const cols = await tableColumns('admin_sites');
+  _adminSitesNameCol = cols.has('name') ? 'name' : 'site';
+  return _adminSitesNameCol;
+}
+
 function getOptionalUserId(req: any): number | null {
   const h = req.headers['authorization'] || '';
   const m = /^Bearer\s+(.+)$/.exec(String(h));
@@ -58,12 +83,16 @@ router.get('/', async (req, res) => {
     const userId = authedUserId ? Number(authedUserId) : 0;
     const includeUser = !!authedUserId;
 
+    // admin_sites may have either `name` (newer) or `site` (legacy) as the display column.
+    const adminNameCol = await adminSitesNameColumn();
+    const adminNameExpr = adminNameCol === 'name' ? 'a.name' : 'a.site';
+
     const r = await pool.query(
       `WITH all_sites AS (
           -- 1) Official sites
           SELECT (100000000 + a.id)::bigint AS id,
-                 a.name AS name_display,
-                 LOWER(TRIM(REGEXP_REPLACE(a.name, '\\s+', ' ', 'g'))) AS name_normalized,
+                 ${adminNameExpr} AS name_display,
+                 LOWER(TRIM(REGEXP_REPLACE(${adminNameExpr}, '\\s+', ' ', 'g'))) AS name_normalized,
                  TRUE AS is_official
             FROM admin_sites a
 
