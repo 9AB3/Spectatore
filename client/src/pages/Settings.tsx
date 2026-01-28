@@ -86,6 +86,13 @@ export default function Settings() {
   const [workSiteSelect, setWorkSiteSelect] = useState<string>('Not in List');
   const [workSiteManual, setWorkSiteManual] = useState<string>('');
 
+  // If the select is temporarily out-of-sync (e.g. options not loaded yet),
+  // the browser can show the first/only option while React state still holds
+  // a non-matching value (often ''), which would hide the manual input.
+  const workSiteIsManual =
+    workSiteSelect === 'Not in List' ||
+    !workSiteOptions.includes(String(workSiteSelect || '').trim());
+
   // push notifications
   const [pushSupported, setPushSupported] = useState<boolean>(false);
   const [pushEnabled, setPushEnabled] = useState<boolean>(false);
@@ -237,8 +244,7 @@ export default function Settings() {
 
       // Apply Work Site change (separate from memberships / Subscribed Site)
       const currentWorkSite = String((me as any)?.workSite?.name || '').trim();
-      const desiredWorkSite =
-        (workSiteSelect === 'Not in List' ? workSiteManual : workSiteSelect).trim();
+      const desiredWorkSite = (workSiteIsManual ? workSiteManual : workSiteSelect).trim();
       const workSiteDirty = !!desiredWorkSite && desiredWorkSite !== currentWorkSite;
 
       // Apply Subscribed Site change (requires active membership)
@@ -513,13 +519,26 @@ export default function Settings() {
                   <div className="mt-3 grid gap-3">
                     <div>
                       <label className="block text-sm mb-1">Work Site</label>
-                      <select className="input" value={workSiteSelect} onChange={(e) => setWorkSiteSelect(e.target.value)}>
+                      <select
+                        className="input"
+                        value={workSiteSelect}
+                        onChange={(e) => {
+                          const v = String(e.target.value || '').trim();
+                          if (!v || v === 'Not in List') {
+                            setWorkSiteSelect('Not in List');
+                            // keep manual value
+                          } else {
+                            setWorkSiteSelect(v);
+                            setWorkSiteManual('');
+                          }
+                        }}
+                      >
                         {workSiteOptions.map((name) => (
                           <option key={name} value={name}>{name}</option>
                         ))}
                         <option value="Not in List">Not in List</option>
                       </select>
-                      {workSiteSelect === 'Not in List' ? (
+                      {workSiteIsManual ? (
                         <input className="input mt-2" value={workSiteManual} onChange={(e) => setWorkSiteManual(e.target.value)} placeholder="Enter Work Site name" />
                       ) : null}
                       <div className="text-xs opacity-60 mt-1">
