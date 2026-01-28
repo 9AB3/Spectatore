@@ -475,22 +475,26 @@ export default function SiteAdminValidate() {
     })();
   }, []); // intentionally once
 
-  // Load calendar status
-  useEffect(() => {
+  
+  async function refreshCalendar(y?: number) {
+    const y2 = typeof y === 'number' ? y : year;
     if (!site) return;
-    (async () => {
-      try {
-        const res = await api(`/api/site-admin/calendar?year=${year}&site=${encodeURIComponent(site)}`);
-        const map: Record<string, DayStatus> = {};
-        for (const d of res?.days || []) map[String(d.date)] = d.status as DayStatus;
-        setDays(map);
-      } catch {
-        setDays({});
-      }
-    })();
+    try {
+      const res = await api(`/api/site-admin/calendar?year=${y2}&site=${encodeURIComponent(site)}`);
+      const map: Record<string, DayStatus> = {};
+      for (const d of res?.days || []) map[String(d.date)] = d.status as DayStatus;
+      setDays(map);
+    } catch {
+      setDays({});
+    }
+  }
+
+// Load calendar status
+  useEffect(() => {
+    refreshCalendar();
   }, [year, site]);
 
-  // Load SiteAdmin master location list (per-site)
+// Load SiteAdmin master location list (per-site)
   useEffect(() => {
     if (!site) return;
     (async () => {
@@ -680,6 +684,28 @@ export default function SiteAdminValidate() {
       setDays(map);
     } catch {
       setMsg('Failed to validate');
+    }
+  }
+
+
+  async function unvalidateDay() {
+    if (!selectedDate) return;
+    if (!site) return;
+    if (!confirm(`Unlock ${selectedDate}? This will mark the day as UNVALIDATED so edits can be made.`)) return;
+    try {
+      setLoadingDay(true);
+      await api('/api/site-admin/unvalidate', {
+        method: 'POST',
+        body: JSON.stringify({ site, date: selectedDate }),
+      });
+      // refresh calendar/day
+      await refreshCalendar();
+      await loadDate(selectedDate);
+      setMsg('Day unlocked (unvalidated). You can now edit and re-validate.');
+    } catch (e: any) {
+      setMsg(e?.message || 'Failed to unlock day');
+    } finally {
+      setLoadingDay(false);
     }
   }
 
@@ -1358,7 +1384,8 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
 
   const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
   const softUnlocked = selectedDate ? !!softUnlockedDates[selectedDate] : false;
-  const allowEdits = !softLocked || softUnlocked;
+  const isValidatedDay = selectedDate ? days[selectedDate] === 'green' : false;
+  const allowEdits = (!softLocked || softUnlocked) && !isValidatedDay;
 
   return (
     <div className="min-h-screen">
@@ -1564,6 +1591,21 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                 </button>
               </div>
             </div>
+
+            {isValidatedDay && selectedDate && (
+              <div className="mb-3 p-3 rounded-xl bg-amber-50 border border-amber-200">
+                <div className="font-semibold">Day is validated</div>
+                <div className="text-sm opacity-70">
+                  Validated shifts are immutable. To make changes, unlock (unvalidate) the day first.
+                </div>
+                <div className="mt-2">
+                  <button className="tv-pill" type="button" onClick={unvalidateDay} disabled={loadingDay}>
+                    Unlock day
+                  </button>
+                </div>
+              </div>
+            )}
+
 
             {softLocked && !softUnlocked && selectedDate && (
               <div className="mb-3 p-3 rounded-xl bg-slate-100 border border-slate-200">
