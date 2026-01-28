@@ -38,6 +38,26 @@ type FlatKV = { path: string; label: string; value: any; kind: 'primitive' | 'js
 // ----- subtle/pro change indicators for edited cells -----
 function changedCellTdClass(isChanged: boolean) {
   if (!isChanged) return '';
+
+  // Reference data for validation checklist (locations/equipment)
+  useEffect(() => {
+    if (!site) return;
+    (async () => {
+      try {
+        const [locs, equips] = await Promise.all([
+          api(`/api/site-admin/admin-locations?site=${encodeURIComponent(site)}`),
+          api(`/api/site-admin/admin-equipment?site=${encodeURIComponent(site)}`),
+        ]);
+        setAdminLocRows(locs?.rows || locs || []);
+        setAdminEquipRows(equips?.rows || equips || []);
+      } catch {
+        setAdminLocRows([]);
+        setAdminEquipRows([]);
+      }
+    })();
+  }, [site]);
+
+
   // Left 3px accent bar + barely-visible tint.
   // Keep it professional: muted amber + slate.
   return [
@@ -404,7 +424,13 @@ export default function SiteAdminValidate() {
   const { setMsg, Toast } = useToast();
   const [year, setYear] = useState<number>(new Date().getFullYear());
   const [focusMonth, setFocusMonth] = useState<number>(new Date().getMonth());
-  const [pendingOnly, setPendingOnly] = useState<boolean>(true);
+  
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchScope, setSearchScope] = useState<'all' | 'operator' | 'equipment' | 'heading'>('all');
+  const [searching, setSearching] = useState<boolean>(false);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+
+const [pendingOnly, setPendingOnly] = useState<boolean>(true);
   const [softUnlockedDates, setSoftUnlockedDates] = useState<Record<string, boolean>>({});
   const [sites, setSites] = useState<string[]>([]);
   const [site, setSite] = useState<string>('');
@@ -493,6 +519,39 @@ export default function SiteAdminValidate() {
   useEffect(() => {
     refreshCalendar();
   }, [year, site]);
+
+  // Month search (operators/equipment/headings)
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!site) return;
+    if (!q) {
+      setSearchResults([]);
+      return;
+    }
+    let alive = true;
+    setSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const month = monthStr(year, focusMonth);
+        const res = await api(
+          `/api/site-admin/validation/search?site=${encodeURIComponent(site)}&month=${encodeURIComponent(month)}&query=${encodeURIComponent(q)}&scope=${encodeURIComponent(searchScope)}`,
+        );
+        if (!alive) return;
+        setSearchResults(res?.results || []);
+      } catch {
+        if (!alive) return;
+        setSearchResults([]);
+      } finally {
+        if (!alive) return;
+        setSearching(false);
+      }
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [searchQuery, searchScope, site, year, focusMonth]);
+
 
 // Load SiteAdmin master location list (per-site)
   useEffect(() => {
@@ -1334,7 +1393,8 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
   function monthKey(y: number, m: number) {
     return `${y}-${String(m + 1).padStart(2, '0')}`;
   }
-  function isSameMonth(dateStr: string, y: number, m: number) {
+    function monthStr(y: number, m: number) { return monthKey(y, m); }
+function isSameMonth(dateStr: string, y: number, m: number) {
     return dateStr.startsWith(monthKey(y, m));
   }
   function isSoftLockedDate(dateStr: string) {
@@ -1360,6 +1420,20 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
     return pendingOnly ? visible.filter((x) => x.st === 'red') : visible;
   }, [days, year, focusMonth, pendingOnly]);
 
+  const queueItems = useMemo(() => {
+    const q = searchQuery.trim();
+    if (!q) return monthDates;
+    // Convert server results -> {dateStr, st, n, scopes}
+    const out = (searchResults || []).map((r: any) => {
+      const dateStr = String(r?.date || '');
+      const st = (days as any)[dateStr] || 'none';
+      return { dateStr, st, n: Number(r?.n || 0), scopes: r?.scopes || {} };
+    });
+    out.sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+    return out;
+  }, [searchQuery, searchResults, monthDates, days]);
+
+
   const monthStats = useMemo(() => {
     const prefix = monthKey(year, focusMonth);
     let withData = 0;
@@ -1382,7 +1456,55 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
     else setMsg('No pending days in this month.');
   }
 
-  const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
+  
+  const locSet = useMemo(() => new Set((adminLocRows || []).map((r: any) => String(r?.name || '').trim()).filter(Boolean)), [adminLocRows]);
+  const equipSet = useMemo(
+    () => new Set((adminEquipRows || []).map((r: any) => String(r?.equipment_id || '').trim()).filter(Boolean)),
+    [adminEquipRows],
+  );
+
+  function getEquipmentFromObj(obj: any) {
+    const values = obj?.values && typeof obj.values === 'object' ? obj.values : obj;
+    return String(values?.Equipment ?? values?.equipment ?? values?.equipment_id ?? values?.EquipmentId ?? obj?.equipment_id ?? '').trim();
+  }
+
+  const checklist = useMemo(() => {
+    if (!selectedDate) return { unknownLocations: [] as any[], unknownEquipment: [] as any[], missingSub: [] as any[] };
+    const unknownLocations: any[] = [];
+    const unknownEquipment: any[] = [];
+    const missingSub: any[] = [];
+
+    for (const row of validatedActs as any[]) {
+      const objOrig: any = getValidatedActObjOriginal(row) || {};
+      const obj: any = getValidatedActObj(row) || objOrig || {};
+      const act = getActNameFromObj(row, obj);
+      const sub = getSubNameFromObj(row, obj);
+      const groupVal = getGroupValue(act, obj) || '';
+
+      const equip = getEquipmentFromObj(obj);
+      // Flag unknown location/source/to for activities that use grouping (ignore hoisting)
+      if (act && String(act).toLowerCase() !== 'hoisting') {
+        if (groupVal && locSet.size && !locSet.has(groupVal)) {
+          unknownLocations.push({ act, sub, value: groupVal, id: row?.id });
+        } else if (!groupVal) {
+          unknownLocations.push({ act, sub, value: '(blank)', id: row?.id });
+        }
+      }
+      if (equip) {
+        if (equipSet.size && !equipSet.has(equip)) unknownEquipment.push({ act, sub, value: equip, id: row?.id });
+      } else {
+        unknownEquipment.push({ act, sub, value: '(blank)', id: row?.id });
+      }
+
+      // Missing subactivity (generic): if sub is blank/no-sub
+      const subRaw = String(obj?.sub || obj?.sub_activity || row?.sub_activity || '').trim();
+      if (!subRaw) missingSub.push({ act, value: '(missing)', id: row?.id });
+    }
+
+    return { unknownLocations, unknownEquipment, missingSub };
+  }, [selectedDate, validatedActs, editedActs, locSet, equipSet]);
+
+const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
   const softUnlocked = selectedDate ? !!softUnlockedDates[selectedDate] : false;
   const isValidatedDay = selectedDate ? days[selectedDate] === 'green' : false;
   const allowEdits = (!softLocked || softUnlocked) && !isValidatedDay;
@@ -1417,6 +1539,29 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
             </div>
 
             <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2">
+                <input
+                  className="input"
+                  style={{ minWidth: 220 }}
+                  placeholder="Search month…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                <div className="flex items-center gap-1">
+                  {(['all','operator','equipment','heading'] as const).map((sc) => (
+                    <button
+                      key={sc}
+                      type="button"
+                      className={\`tv-pill \${searchScope===sc ? 'ring-2 ring-slate-400' : ''}\`}
+                      onClick={() => setSearchScope(sc)}
+                      title={sc}
+                    >
+                      {sc === 'all' ? 'All' : sc === 'operator' ? 'Op' : sc === 'equipment' ? 'Equip' : 'Heading'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <button
                 className="tv-pill"
                 type="button"
@@ -1469,13 +1614,14 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
             <div className="card">
               <div className="flex items-center justify-between mb-2">
                 <div className="font-bold">Month queue</div>
-                <div className="text-xs opacity-70">Click a day to review and validate</div>
+                <div className="text-xs opacity-70">{searchQuery.trim() ? (searching ? 'Searching…' : `Results for “${searchQuery.trim()}”`) : 'Click a day to review and validate'}</div>
               </div>
 
               <div className="space-y-2">
                 {monthDates.length === 0 && <div className="text-sm opacity-70">No days to show for this month.</div>}
 
-                {monthDates.map(({ dateStr, st }) => {
+                {queueItems.map((item: any) => {
+          const { dateStr, st } = item;
                   const locked = isSoftLockedDate(dateStr);
                   return (
                     <button
@@ -1501,7 +1647,8 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
                         )}
                       </div>
 
-                      <div className="text-xs opacity-60">›</div>
+                      {searchQuery.trim() && item?.n ? <div className="text-xs opacity-70 mr-2">{item.n} match{item.n===1?'':'es'}</div> : null}
+              <div className="text-xs opacity-60">›</div>
                     </button>
                   );
                 })}
@@ -1631,7 +1778,55 @@ function uniqueLocCountForDevSub(payloads: any[], subWanted: string) {
               <div className="space-y-4">
                 <div>
                   <div>
-                    <div className="font-bold mb-2">Shift Totals</div>
+                    
+                    <div className="mb-4">
+                      <div className="font-bold mb-2">Validation checklist</div>
+                      <div className="grid md:grid-cols-3 gap-2">
+                        <div className="tv-tile p-3">
+                          <div className="text-xs opacity-70">Missing / unknown headings / locations</div>
+                          <div className="text-2xl font-bold">{checklist.unknownLocations.length}</div>
+                          {checklist.unknownLocations.length > 0 && (
+                            <div className="text-xs opacity-70 mt-1">Tap a row below to review</div>
+                          )}
+                        </div>
+                        <div className="tv-tile p-3">
+                          <div className="text-xs opacity-70">Unknown equipment IDs</div>
+                          <div className="text-2xl font-bold">{checklist.unknownEquipment.length}</div>
+                        </div>
+                        <div className="tv-tile p-3">
+                          <div className="text-xs opacity-70">Missing required fields (subactivity)</div>
+                          <div className="text-2xl font-bold">{checklist.missingSub.length}</div>
+                        </div>
+                      </div>
+
+                      {(checklist.unknownLocations.length || checklist.unknownEquipment.length || checklist.missingSub.length) ? (
+                        <div className="mt-3 space-y-2">
+                          {checklist.unknownLocations.slice(0, 6).map((x: any, i: number) => (
+                            <button
+                              key={'loc-'+i}
+                              type="button"
+                              className="tv-tile w-full text-left px-3 py-2"
+                              onClick={() => {
+                                // simple: no deep scroll yet
+                                setMsg(`Unknown location: ${x.value} (${x.act} • ${x.sub})`);
+                              }}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-sm">
+                                  <span className="font-semibold">{x.act}</span> · {x.sub}
+                                </div>
+                                <div className="text-xs opacity-70">{x.value}</div>
+                              </div>
+                            </button>
+                          ))}
+                          {checklist.unknownLocations.length > 6 && (
+                            <div className="text-xs opacity-70">+ {checklist.unknownLocations.length - 6} more…</div>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+
+<div className="font-bold mb-2">Shift Totals</div>
 
                     {totalRows.length ? (
                       <div className="space-y-3">

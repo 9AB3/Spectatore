@@ -2202,6 +2202,130 @@ router.get('/day', siteAdminMiddleware, async (req: any, res) => {
 });
 
 
+// --- VALIDATION SEARCH (month scope) ---
+router.get('/validation/search', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertValidator(req);
+  } catch (e: any) {
+    return res.status(e?.status || 403).json({ error: e?.message || 'forbidden' });
+  }
+
+  const site = String(req.query.site || '').trim() || '*';
+  assertSiteAccess(req, site);
+  if (site === '*') return res.status(400).json({ error: 'site required' });
+
+  const month = String(req.query.month || '').trim(); // YYYY-MM
+  if (!/^[0-9]{4}-[0-9]{2}$/.test(month)) return res.status(400).json({ error: 'invalid month' });
+
+  const query = String(req.query.query || '').trim();
+  if (!query) return res.json({ ok: true, results: [] });
+
+  const scope = String(req.query.scope || 'all').trim().toLowerCase(); // operator|equipment|heading|all
+  const q = query.toLowerCase();
+
+  const adminSiteId = await resolveAdminSiteId(pool as any, site);
+  if (!adminSiteId) return res.json({ ok: true, results: [] });
+
+  const client = await pool.connect();
+  try {
+    const rows = await client.query(
+      `SELECT vs.date::text as date,
+              COUNT(*)::int as n
+         FROM validated_shift_activities vsa
+         JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        WHERE vs.admin_site_id=$1
+          AND to_char(vs.date, 'YYYY-MM')=$2
+          AND (
+            $3='all' OR $3='operator' OR $3='equipment' OR $3='heading'
+          )
+      `,
+      [adminSiteId, month, scope],
+    );
+
+    // NOTE: We do filtering in JS to avoid brittle SQL across payload schemas.
+    // Pull candidate rows for month and filter by payload/user/equipment/location keywords.
+    const cand = await client.query(
+      `SELECT vs.date::text as date,
+              vs.user_name,
+              vs.user_email,
+              vsa.payload_json
+         FROM validated_shift_activities vsa
+         JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
+        WHERE vs.admin_site_id=$1
+          AND to_char(vs.date, 'YYYY-MM')=$2`,
+      [adminSiteId, month],
+    );
+
+    const byDate: Record<string, { date: string; n: number; scopes: Record<string, number> }> = {};
+
+    function asObj(v: any) {
+      if (!v) return {};
+      if (typeof v === 'object') return v;
+      try {
+        return JSON.parse(String(v));
+      } catch {
+        return {};
+      }
+    }
+
+    for (const r of cand.rows || []) {
+      const date = String(r.date);
+      const payload = asObj(r.payload_json);
+      const values = payload?.values && typeof payload.values === 'object' ? payload.values : payload;
+
+      const userName = String(r.user_name || '').toLowerCase();
+      const userEmail = String(r.user_email || '').toLowerCase();
+
+      const equipment = String(
+        values?.Equipment ?? values?.equipment ?? values?.equipment_id ?? values?.EquipmentId ?? payload?.equipment_id ?? '',
+      ).toLowerCase();
+
+      const heading = String(
+        values?.Location ?? values?.location ?? values?.Heading ?? values?.heading ?? values?.To ?? values?.to ?? payload?.location ?? '',
+      ).toLowerCase();
+
+      const hitOperator = userName.includes(q) || userEmail.includes(q);
+      const hitEquip = equipment.includes(q);
+      const hitHeading = heading.includes(q);
+
+      let ok = false;
+      if (scope === 'operator') ok = hitOperator;
+      else if (scope === 'equipment') ok = hitEquip;
+      else if (scope === 'heading') ok = hitHeading;
+      else ok = hitOperator || hitEquip || hitHeading;
+
+      if (!ok) continue;
+
+      if (!byDate[date]) byDate[date] = { date, n: 0, scopes: { operator: 0, equipment: 0, heading: 0 } };
+      byDate[date].n += 1;
+      if (hitOperator) byDate[date].scopes.operator += 1;
+      if (hitEquip) byDate[date].scopes.equipment += 1;
+      if (hitHeading) byDate[date].scopes.heading += 1;
+    }
+
+    const results = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
+    return res.json({ ok: true, results });
+  } catch (err) {
+    console.error('validation search failed', err);
+    return res.status(500).json({ error: 'validation search failed' });
+  } finally {
+    client.release();
+  }
+});
+
+// --- VALIDATION BASELINE (stub) ---
+router.get('/validation/baseline', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    assertValidator(req);
+  } catch (e: any) {
+    return res.status(e?.status || 403).json({ error: e?.message || 'forbidden' });
+  }
+  // Stub for future rolling baselines (median/p90). Return empty for now.
+  return res.json({ ok: true, baselines: {} });
+});
+
+
+
 
 // --- VALIDATE ---
 // --- UPDATE VALIDATED (edits only; does NOT set validated=1) ---
