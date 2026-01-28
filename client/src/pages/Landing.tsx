@@ -187,6 +187,7 @@ useEffect(() => {
 
       <div className="flex items-center gap-2">
         <a className="tv-pill" href="/how-to" onClick={(e) => { e.preventDefault(); track.clickNavigate('landing_howto', '/how-to'); }}>How-to</a>
+
         <a
           className="tv-pill"
           href={`${appUrl}/Register`}
@@ -361,8 +362,7 @@ useEffect(() => {
                             ['4', 'A. Lee', '179 GS'],
                           ].map(([rank, who, val]) => (
                             <div key={rank} className="flex items-center justify-between text-xs">
-                              <div className="flex items-center gap-2">
-        
+                    <div className="flex items-center gap-2">
                                 <div className="w-5 tv-muted">{rank}</div>
                                 <div className={who === 'You' ? 'font-semibold text-slate-900' : 'tv-muted'}>{who}</div>
                               </div>
@@ -429,7 +429,6 @@ useEffect(() => {
 
                   <div className="mt-3 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-        
                       {[
                         ['you', 'You vs You'],
                         ['network', 'You vs Crew'],

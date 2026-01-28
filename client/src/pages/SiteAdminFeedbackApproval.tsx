@@ -57,12 +57,17 @@ export default function SiteAdminFeedbackApproval() {
     }
   }
 
-  async function del(id: number) {
-    await api(`/api/site-admin/feedback/${id}`, { method: 'DELETE' });
-    setMsg('Feedback deleted');
-    await loadPending();
+  async function deleteFeedback(id: number) {
+    try {
+      const res: any = await api(`/api/site-admin/feedback/${id}`, {
+        method: 'DELETE',
+      });
+      if (!res?.ok) throw new Error(res?.error || 'Failed to delete feedback');
+      setRows((prev) => prev.filter((r) => r.id !== id));
+    } catch (e: any) {
+      setMsg(e?.message || 'Failed to delete feedback');
+    }
   }
-
 
   useEffect(() => {
     loadScope();
@@ -113,14 +118,19 @@ export default function SiteAdminFeedbackApproval() {
                       {(r.user_name || 'User') + (r.user_email ? ` • ${r.user_email}` : '') + (r.site ? ` • ${r.site}` : '')}
                     </div>
                     <div className="flex gap-2">
+                      <button
+                        className="btn btn-outline"
+                        title="Delete"
+                        aria-label="Delete"
+                        onClick={() => deleteFeedback(r.id)}
+                      >
+                        🗑
+                      </button>
                       <button className="btn" onClick={() => decide(r.id, 'approve')}>
                         ✓
                       </button>
                       <button className="btn" onClick={() => decide(r.id, 'decline')}>
                         ✕
-                      </button>
-                      <button className="btn" onClick={() => del(r.id)} title="Delete">
-                        🗑
                       </button>
                     </div>
                   </div>

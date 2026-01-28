@@ -388,27 +388,6 @@ router.post('/connections/request', authMiddleware, async (req: any, res) => {
   }
 });
 
-
-router.post('/connections/:id/cancel', authMiddleware, async (req: any, res) => {
-  try {
-    const uid = Number(req.user_id);
-    const id = Number(req.params?.id || 0);
-    if (!id) return res.status(400).json({ error: 'missing id' });
-
-    // requester can cancel only pending outgoing requests
-    const r = await pool.query(
-      `DELETE FROM connections
-        WHERE id=$1 AND requester_id=$2 AND status='pending'
-        RETURNING id`,
-      [id, uid],
-    );
-    if (!r.rowCount) return res.status(404).json({ error: 'not found' });
-    return res.json({ ok: true });
-  } catch (err: any) {
-    return res.status(400).json({ error: err?.message || 'cancel failed' });
-  }
-});
-
 router.post('/connections/:id/accept', authMiddleware, async (req: any, res) => {
   try {
     const id = Number(req.params.id);
@@ -465,6 +444,26 @@ router.post('/connections/:id/decline', authMiddleware, async (req: any, res) =>
   try {
     const id = Number(req.params.id);
     await pool.query('UPDATE connections SET status=$1 WHERE id=$2', ['declined', id]);
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(400).json({ error: 'update failed' });
+  }
+});
+
+// Requester can cancel an outgoing pending request
+router.post('/connections/:id/cancel', authMiddleware, async (req: any, res) => {
+  try {
+    const id = Number(req.params?.id || 0);
+    if (!id) return res.status(400).json({ error: 'invalid id' });
+
+    const uid = Number(req.user_id);
+    const r = await pool.query('SELECT requester_id, status FROM connections WHERE id=$1', [id]);
+    const row = r.rows?.[0];
+    if (!row) return res.status(404).json({ error: 'not found' });
+    if (Number(row.requester_id) !== uid) return res.status(403).json({ error: 'forbidden' });
+    if (String(row.status) !== 'pending') return res.status(400).json({ error: 'not pending' });
+
+    await pool.query('UPDATE connections SET status=$2 WHERE id=$1', [id, 'cancelled']);
     return res.json({ ok: true });
   } catch (err) {
     return res.status(400).json({ error: 'update failed' });

@@ -3002,7 +3002,10 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
       ) : null}
 
       {!pickerOpen && (
-      <div className="sticky left-0 right-0 tv-surface tv-border border-t" style={{ bottom: 'calc(env(safe-area-inset-bottom) + 72px)' }}>
+      <div
+        className="sticky left-0 right-0 tv-surface tv-border border-t"
+        style={{ bottom: 'calc(env(safe-area-inset-bottom) + 72px)' }}
+      >
         <div className="max-w-2xl mx-auto p-4 flex gap-2">
           <button className="btn btn-primary flex-1" onClick={finishTask} disabled={!canFinish}>
             FINISH TASK

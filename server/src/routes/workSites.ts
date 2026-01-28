@@ -7,20 +7,6 @@ import { authMiddleware } from '../lib/auth.js';
 dotenv.config();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
-function tryGetUserId(req: any): number | null {
-  try {
-    const h = String(req.headers?.authorization || '');
-    if (!h.toLowerCase().startsWith('bearer ')) return null;
-    const token = h.slice(7).trim();
-    const decoded: any = jwt.verify(token, JWT_SECRET);
-    const id = Number(decoded?.user_id || decoded?.id || 0);
-    return id || null;
-  } catch {
-    return null;
-  }
-}
-
-
 const router = express.Router();
 
 function getOptionalUserId(req: any): number | null {
@@ -51,33 +37,52 @@ router.get('/', async (req, res) => {
     const q = normName(qRaw);
     const authedUserId = getOptionalUserId(req);
 
+    // For signed-in users, show:
+    //  - official sites, and
+    //  - work sites previously created by that user
+    // For unauthenticated users, show official/synced sites only.
     let r;
     if (q) {
-      // Authenticated users can search all work sites; unauthenticated only see official/synced ones.
-      const where = authedUserId
-        ? `WHERE (is_official = true OR created_by_user_id = $2) AND (name_normalized LIKE $1 || '%' OR name_normalized LIKE '%' || $1 || '%')`
-        : `WHERE (is_official = true OR official_site_id IS NOT NULL)
-             AND (name_normalized LIKE $1 || '%' OR name_normalized LIKE '%' || $1 || '%')`;
-      r = await pool.query(
-        `SELECT id, name_display, is_official, official_site_id, created_by_user_id
-           FROM work_sites
-          ${where}
-          ORDER BY is_official DESC, name_display ASC
-          LIMIT 200`,
-        authedUserId ? [q, authedUserId] : [q],
-      );
+      if (authedUserId) {
+        r = await pool.query(
+          `SELECT id, name_display, is_official, official_site_id
+             FROM work_sites
+            WHERE (is_official = true OR official_site_id IS NOT NULL OR created_by_user_id = $2)
+              AND (name_normalized LIKE $1 || '%' OR name_normalized LIKE '%' || $1 || '%')
+            ORDER BY is_official DESC, name_display ASC
+            LIMIT 200`,
+          [q, authedUserId],
+        );
+      } else {
+        r = await pool.query(
+          `SELECT id, name_display, is_official, official_site_id
+             FROM work_sites
+            WHERE (is_official = true OR official_site_id IS NOT NULL)
+              AND (name_normalized LIKE $1 || '%' OR name_normalized LIKE '%' || $1 || '%')
+            ORDER BY is_official DESC, name_display ASC
+            LIMIT 200`,
+          [q],
+        );
+      }
     } else {
-      // No query: authenticated users get broader list; unauthenticated get curated official list.
-      const where = authedUserId
-        ? 'WHERE (is_official = true OR created_by_user_id = $1)'
-        : 'WHERE (is_official = true OR official_site_id IS NOT NULL)';
-      r = await pool.query(
-        `SELECT id, name_display, is_official, official_site_id, created_by_user_id
-           FROM work_sites
-          ${where}
-          ORDER BY is_official DESC, name_display ASC
-          LIMIT 200`,
-      );
+      if (authedUserId) {
+        r = await pool.query(
+          `SELECT id, name_display, is_official, official_site_id
+             FROM work_sites
+            WHERE (is_official = true OR official_site_id IS NOT NULL OR created_by_user_id = $1)
+            ORDER BY is_official DESC, name_display ASC
+            LIMIT 200`,
+          [authedUserId],
+        );
+      } else {
+        r = await pool.query(
+          `SELECT id, name_display, is_official, official_site_id
+             FROM work_sites
+            WHERE (is_official = true OR official_site_id IS NOT NULL)
+            ORDER BY is_official DESC, name_display ASC
+            LIMIT 200`,
+        );
+      }
     }
     return res.json({ sites: (r.rows || []).map((x: any) => ({ id: Number(x.id), name: String(x.name_display), is_official: !!x.is_official })) });
   } catch (e: any) {

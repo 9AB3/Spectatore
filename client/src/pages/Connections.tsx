@@ -84,6 +84,16 @@ export default function Connections() {
     window.dispatchEvent(new Event('spectatore:connections'));
   }
 
+  async function cancel(id: number) {
+    try {
+      await api(`/api/connections/${id}/cancel`, { method: 'POST' });
+      // remove locally
+      setOutgoing((prev) => prev.filter((x) => x.id !== id));
+    } catch (e: any) {
+      setMsg(e?.message || 'Failed to cancel request');
+    }
+  }
+
   async function decline(id: number) {
     await api(`/api/connections/${id}/decline`, { method: 'POST' });
     setMsg('Request declined');
@@ -91,15 +101,7 @@ export default function Connections() {
     window.dispatchEvent(new Event('spectatore:connections'));
   }
 
-  
-  async function cancel(id: number) {
-    await api(`/api/connections/${id}/cancel`, { method: 'POST' });
-    setMsg('Request cancelled');
-    await reloadConnections();
-    window.dispatchEvent(new Event('spectatore:connections'));
-  }
-
-async function removeAccepted() {
+  async function removeAccepted() {
     if (!removeId) return;
     await api(`/api/connections/${removeId}/remove`, { method: 'POST' });
     setMsg('Removed from your crew');
@@ -292,10 +294,13 @@ async function removeAccepted() {
                             <div className="text-xs text-slate-500 truncate">{r.work_site_name}</div>
                           ) : null}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div className="text-xs text-slate-500">Pending</div>
-                          <button className="btn btn-xs" type="button" onClick={() => cancel(r.id)}>Cancel</button>
-                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-outline text-xs"
+                          onClick={() => cancel(r.id)}
+                        >
+                          Cancel
+                        </button>
                       </li>
                     ))}
                   </ul>

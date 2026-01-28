@@ -678,8 +678,8 @@ router.post('/memberships/leave', authMiddleware, async (req: any, res) => {
 
 router.patch('/me', authMiddleware, async (req: any, res) => {
   const user_id = req.user_id;
-  const nextEmail = req.body?.email != null ? normaliseEmail(req.body.email) : null;
   const nextName = req.body?.name != null ? String(req.body.name).trim() : null;
+  const nextEmail = req.body?.email != null ? normaliseEmail(req.body.email) : null;
   const nextSite = req.body?.site != null ? String(req.body.site).trim() : null;
   const nextCommunityState = req.body?.community_state != null ? String(req.body.community_state).trim().toUpperCase() : null;
   const currentPassword = req.body?.current_password ? String(req.body.current_password) : '';
@@ -743,14 +743,16 @@ router.patch('/me', authMiddleware, async (req: any, res) => {
       updates.push(`email=$${i++}`);
       params.push(nextEmail);
     }
+    if (nextName !== null) {
+      const cleaned = String(nextName || '').trim();
+      if (cleaned !== String(user.name || '')) {
+        updates.push(`name=$${i++}`);
+        params.push(cleaned || null);
+      }
+    }
     if (nextSite !== null) {
       updates.push(`site=$${i++}`);
       params.push(nextSite || null);
-    }
-
-    if (nextName !== null) {
-      updates.push(`name=$${i++}`);
-      params.push(nextName || null);
     }
 
     if (cleanedState !== null) {
@@ -767,7 +769,7 @@ router.patch('/me', authMiddleware, async (req: any, res) => {
       await client.query(`UPDATE users SET ${updates.join(', ')} WHERE id=$${i}`, params);
     }
 
-    const fresh = await client.query('SELECT id, email, site, is_admin, name, community_state FROM users WHERE id=$1', [
+    const fresh = await client.query('SELECT id, email, site, name, is_admin, community_state FROM users WHERE id=$1', [
       user_id,
     ]);
     await client.query('COMMIT');

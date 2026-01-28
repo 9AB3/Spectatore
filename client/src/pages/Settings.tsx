@@ -108,7 +108,7 @@ export default function Settings() {
   async function refreshMe() {
     const res = (await api('/api/user/me')) as Me;
     setMe(res);
-    setFullName((res as any).name || '');
+    setFullName(String(res.name || ''));
     setEmail(res.email || '');
     setCommunityState((res as any).community_state || '');
     setActiveSiteIdStr(res.subscribedSite?.id ? String(res.subscribedSite.id) : '0');
@@ -121,8 +121,8 @@ export default function Settings() {
         const res = (await api('/api/user/me')) as Me;
         if (cancelled) return;
         setMe(res);
-        setFullName((res as any).name || '');
-    setEmail(res.email || '');
+        setFullName(String((res as any).name || ''));
+        setEmail(res.email || '');
         setCommunityState((res as any).community_state || '');
         setActiveSiteIdStr((res as any).subscribedSite?.id ? String((res as any).subscribedSite.id) : '0');
         const wsName = String((res as any).workSite?.name || '').trim();
@@ -222,9 +222,12 @@ export default function Settings() {
     e.preventDefault();
     try {
       const payload: any = { email: email.trim() };
+
+      // Full name (optional)
       const currentName = String((me as any)?.name || '').trim();
       const desiredName = String(fullName || '').trim();
-      if (desiredName !== currentName) payload.name = desiredName || null;
+      if (desiredName !== currentName) payload.name = desiredName;
+
       const currentCommunityState = String((me as any)?.community_state || '').trim();
       const desiredCommunityState = String(communityState || '').trim().toUpperCase();
       if (desiredCommunityState !== currentCommunityState) {
@@ -432,7 +435,12 @@ export default function Settings() {
                   <div className="mt-3 grid gap-3">
                     <div>
                       <label className="block text-sm mb-1">Full name</label>
-                      <input className="input" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Your name" />
+                      <input
+                        className="input"
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        placeholder="Your name"
+                      />
                     </div>
                     <div>
                       <label className="block text-sm mb-1">Email</label>

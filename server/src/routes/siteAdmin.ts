@@ -795,20 +795,6 @@ router.get('/feedback/pending', siteAdminMiddleware, async (req: any, res) => {
   }
 });
 
-
-router.delete('/feedback/:id', siteAdminMiddleware, async (req: any, res) => {
-  try {
-    const sites = allowedSites(req);
-    if (!sites.includes('*')) return res.status(403).json({ ok: false, error: 'forbidden' });
-    const id = Number(req.params?.id || 0);
-    if (!id) return res.status(400).json({ ok: false, error: 'missing id' });
-    await pool.query('DELETE FROM user_feedback WHERE id=$1', [id]);
-    return res.json({ ok: true });
-  } catch (e: any) {
-    return res.status(500).json({ ok: false, error: e?.message || 'Failed to delete feedback' });
-  }
-});
-
 router.post('/feedback/decision', siteAdminMiddleware, async (req: any, res) => {
   const id = Number(req.body?.id || 0);
   const decision = String(req.body?.decision || '').toLowerCase();
@@ -830,6 +816,22 @@ router.post('/feedback/decision', siteAdminMiddleware, async (req: any, res) => 
     return res.json({ ok: true });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e?.message || 'Failed to update feedback' });
+  }
+});
+
+// Super-admin only: hard delete feedback row
+router.delete('/feedback/:id', siteAdminMiddleware, async (req: any, res) => {
+  try {
+    const sites = allowedSites(req);
+    if (!sites.includes('*')) return res.status(403).json({ ok: false, error: 'forbidden' });
+
+    const id = Number(req.params?.id || 0);
+    if (!id) return res.status(400).json({ ok: false, error: 'invalid id' });
+
+    await pool.query('DELETE FROM user_feedback WHERE id=$1', [id]);
+    return res.json({ ok: true });
+  } catch (e: any) {
+    return res.status(500).json({ ok: false, error: e?.message || 'Failed to delete feedback' });
   }
 });
 
@@ -1712,16 +1714,27 @@ router.get('/admin-locations', siteAdminMiddleware, async (req: any, res) => {
     if (site === '*') return res.status(400).json({ error: 'site required' });
     const siteId = await resolveAdminSiteId(pool as any, site);
     if (!siteId) return res.status(404).json({ rows: [] });
-    // NOTE: admin_locations does not have a "site" column. Join admin_sites to return a stable site label.
+    // Some legacy DBs include admin_locations.site (NOT NULL). Newer schemas derive site label
+    // from admin_sites. Support both safely.
+    const hasLegacySiteCol = await hasColumn('admin_locations', 'site');
     const r = await pool.query(
-      `SELECT l.id,
-              COALESCE(s.name, '') AS site,
-              l.name,
-              l.type
-         FROM admin_locations l
-         JOIN admin_sites s ON s.id = l.admin_site_id
-        WHERE l.admin_site_id = $1
-        ORDER BY l.type, l.name`,
+      hasLegacySiteCol
+        ? `SELECT l.id,
+                COALESCE(NULLIF(l.site,''), COALESCE(s.name,'')) AS site,
+                l.name,
+                l.type
+           FROM admin_locations l
+           LEFT JOIN admin_sites s ON s.id = l.admin_site_id
+          WHERE l.admin_site_id = $1
+          ORDER BY l.type, l.name`
+        : `SELECT l.id,
+                COALESCE(s.name, '') AS site,
+                l.name,
+                l.type
+           FROM admin_locations l
+           JOIN admin_sites s ON s.id = l.admin_site_id
+          WHERE l.admin_site_id = $1
+          ORDER BY l.type, l.name`,
       [siteId],
     );
     return res.json({ rows: r.rows || [] });
@@ -1745,13 +1758,21 @@ router.patch('/admin-locations/:id', siteAdminMiddleware, async (req: any, res) 
     const type = String(req.body?.type || '').trim();
     if (!id || !name) return res.status(400).json({ error: 'missing id or name' });
 
+    const hasLegacySiteCol = await hasColumn('admin_locations', 'site');
     const r = await pool.query(
-      `UPDATE admin_locations
-          SET name=$1,
-              type=$2
-        WHERE id=$3 AND admin_site_id=$4
-        RETURNING id`,
-      [name, type || null, id, siteId],
+      hasLegacySiteCol
+        ? `UPDATE admin_locations
+              SET name=$1,
+                  type=$2,
+                  site=$3
+            WHERE id=$4 AND admin_site_id=$5
+            RETURNING id`
+        : `UPDATE admin_locations
+              SET name=$1,
+                  type=$2
+            WHERE id=$3 AND admin_site_id=$4
+            RETURNING id`,
+      hasLegacySiteCol ? [name, type || null, site, id, siteId] : [name, type || null, id, siteId],
     );
     if (!r.rowCount) return res.status(404).json({ error: 'not found' });
     return res.json({ ok: true, id: r.rows[0]?.id || id });
@@ -1772,26 +1793,19 @@ router.post('/admin-locations', siteAdminMiddleware, async (req: any, res) => {
     const name = String(req.body?.name || '').trim();
     const type = String(req.body?.type || '').trim();
     if (!site || !name) return res.status(400).json({ error: 'missing site or name' });
-    try {
-      await pool.query(
-        `INSERT INTO admin_locations (admin_site_id, name, type)
-         VALUES ($1,$2,$3)
-         ON CONFLICT (admin_site_id, name)
-         DO UPDATE SET type=EXCLUDED.type`,
-        [siteId, name, type || null],
-      );
-    } catch (e: any) {
-      // Legacy schema fallback: some older DBs used a text "site" column instead of admin_site_id.
-      if (String(e?.code) === '42703') {
-        await pool.query(
-          `INSERT INTO admin_locations (site, name, type)
-           VALUES ($1,$2,$3)`,
-          [site, name, type || null],
-        );
-      } else {
-        throw e;
-      }
-    }
+    const hasLegacySiteCol = await hasColumn('admin_locations', 'site');
+    await pool.query(
+      hasLegacySiteCol
+        ? `INSERT INTO admin_locations (admin_site_id, site, name, type)
+           VALUES ($1,$2,$3,$4)
+           ON CONFLICT (admin_site_id, name)
+           DO UPDATE SET type=EXCLUDED.type, site=EXCLUDED.site`
+        : `INSERT INTO admin_locations (admin_site_id, name, type)
+           VALUES ($1,$2,$3)
+           ON CONFLICT (admin_site_id, name)
+           DO UPDATE SET type=EXCLUDED.type`,
+      hasLegacySiteCol ? [siteId, site, name, type || null] : [siteId, name, type || null],
+    );
     return res.json({ ok: true });
   } catch (e) {
     return res.status(e?.status || 500).json({ error: e?.message || 'failed' });
