@@ -161,6 +161,9 @@ export default function App() {
       <Route path="/Landing" element={<Navigate to="/landing" replace />} />
       <Route path="/how-to" element={<HowTo />} />
       <Route path="/howto" element={<Navigate to="/how-to" replace />} />
+      {/* QR/site join links (public route; server enforces auth when submitting) */}
+      <Route path="/join" element={<JoinOfficialSite />} />
+      <Route path="/Join" element={<Navigate to="/join" replace />} />
       <Route path="/SiteAdminLogin" element={<SiteAdminLogin />} />
       <Route path="/Register" element={<Register />} />
       <Route path="/ConfirmEmail" element={<ConfirmEmail />} />

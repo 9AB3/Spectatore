@@ -336,6 +336,10 @@ export default function Settings() {
     const found = officialSites.find((s) => Number(s.id) === Number(joinSiteId));
     const site = found?.name || 'Site';
     setJoinCode('');
+    // On some mobile browsers the scroll handler can fail to fire,
+    // which traps the user on this consent step. We still show the text,
+    // but do not gate submission on scrolling.
+    setSiteConsentScrolled(true);
     setSiteConsent({ site_id: joinSiteId, site, role: 'member', requires_join_code: !!found?.requires_join_code });
   }
   async function leaveSite(site_id: number) {
@@ -824,7 +828,7 @@ export default function Settings() {
                   </li>
                   <li>You can leave a site at any time from Settings.</li>
                 </ul>
-                <div className="text-xs opacity-70 pt-2">Scroll to the bottom to enable consent.</div>
+                <div className="text-xs opacity-70 pt-2">To continue, tick the consent box below.</div>
               </div>
             </div>
 
@@ -851,7 +855,7 @@ export default function Settings() {
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={!siteConsentTick || !siteConsentScrolled || (!!siteConsent?.requires_join_code && !joinCode.trim())}
+                disabled={!siteConsentTick || (!!siteConsent?.requires_join_code && !joinCode.trim())}
                 onClick={async () => {
                   const c = siteConsent;
                   if (!c) return;

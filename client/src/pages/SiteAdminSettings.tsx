@@ -48,17 +48,18 @@ export default function SiteAdminSiteTokens() {
     const sid = Number(nextSiteId || siteId || 0);
     if (!sid) return;
     setStatusLoading(true);
-    setLastCode(null);
     setQrUrl(null);
     try {
       const r: any = await api(`/api/site-admin/join-code/status?site_id=${sid}`);
       if (!r?.ok) throw new Error(r?.error || 'Failed to load status');
       setEnabled(!!r.enabled);
+      setLastCode(r.code ? String(r.code) : null);
       setUpdatedAt(r.join_code_updated_at || null);
       setExpiresAt(r.join_code_expires_at || null);
     } catch (e: any) {
       setMsg(e?.message || 'Failed to load join code status');
       setEnabled(false);
+      setLastCode(null);
       setUpdatedAt(null);
       setExpiresAt(null);
     } finally {
@@ -80,7 +81,6 @@ export default function SiteAdminSiteTokens() {
     const sid = Number(siteId || 0);
     if (!sid) return setMsg('Select a site');
     setRotating(true);
-    setLastCode(null);
     setQrUrl(null);
     try {
       const days = expiresDays.trim() ? Number(expiresDays.trim()) : null;
@@ -91,7 +91,7 @@ export default function SiteAdminSiteTokens() {
       });
       if (!r?.ok) throw new Error(r?.error || 'Failed to rotate');
       setLastCode(String(r.code || ''));
-      setMsg('Join code generated (shown once)');
+      setMsg('Join code rotated');
       await loadStatus(sid);
     } catch (e: any) {
       setMsg(e?.message || 'Failed to rotate join code');
@@ -226,7 +226,7 @@ export default function SiteAdminSiteTokens() {
 
           {lastCode && (
             <div className="mt-4 p-3 rounded-xl" style={{ background: 'rgba(0,0,0,0.04)' }}>
-              <div className="text-xs opacity-70 mb-1">New join code (shown once)</div>
+              <div className="text-xs opacity-70 mb-1">Current join code</div>
               <div className="flex items-center justify-between gap-2">
                 <div className="font-mono text-base">{lastCode}</div>
                 <button

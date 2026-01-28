@@ -599,6 +599,7 @@ router.get('/join-code/status', siteAdminMiddleware, async (req: any, res) => {
 
     const r = await pool.query(
       `SELECT (join_code_hash IS NOT NULL AND TRIM(join_code_hash) <> '') AS enabled,
+              join_code_plain,
               join_code_updated_at,
               join_code_expires_at
          FROM admin_sites
@@ -610,13 +611,14 @@ router.get('/join-code/status', siteAdminMiddleware, async (req: any, res) => {
     return res.json({
       ok: true,
       enabled: !!row.enabled,
+      code: row.join_code_plain ? String(row.join_code_plain) : null,
       join_code_updated_at: row.join_code_updated_at ? String(row.join_code_updated_at) : null,
       join_code_expires_at: row.join_code_expires_at ? String(row.join_code_expires_at) : null,
     });
   } catch (e: any) {
     if (String(e?.code) === '42703') {
       // columns not present in this DB
-      return res.json({ ok: true, enabled: false, join_code_updated_at: null, join_code_expires_at: null });
+      return res.json({ ok: true, enabled: false, code: null, join_code_updated_at: null, join_code_expires_at: null });
     }
     console.error('GET /site-admin/join-code/status failed', e);
     return res.status(500).json({ ok: false, error: 'Internal server error' });
@@ -651,10 +653,11 @@ router.post('/join-code/rotate', siteAdminMiddleware, async (req: any, res) => {
     await pool.query(
       `UPDATE admin_sites
           SET join_code_hash=$1,
+              join_code_plain=$4,
               join_code_updated_at=now(),
               join_code_expires_at=$2
         WHERE id=$3`,
-      [hash, expiresAt, site_id],
+      [hash, expiresAt, site_id, code],
     );
 
     // Return code ONCE so admin can copy it / generate QR
@@ -680,6 +683,7 @@ router.delete('/join-code', siteAdminMiddleware, async (req: any, res) => {
     await pool.query(
       `UPDATE admin_sites
           SET join_code_hash=NULL,
+              join_code_plain=NULL,
               join_code_updated_at=now(),
               join_code_expires_at=NULL
         WHERE id=$1`,
@@ -713,8 +717,15 @@ router.get('/join-qr', siteAdminMiddleware, async (req: any, res) => {
 	    const nonce = randomBytes(8).toString('hex');
     const token = signJoinToken({ site_id, iat: now, exp, nonce });
 
-    // Prefer the public app URL, else relative path
-    const appUrl = (process.env.APP_PUBLIC_URL || '').replace(/\/$/, '');
+    // Prefer the public app URL (so installed PWA opens), else fall back to relative path.
+    // IMPORTANT: set APP_PUBLIC_URL to your client origin (e.g. https://spectatore.com or https://app.spectatore.com).
+    const appUrl = String(
+      process.env.APP_PUBLIC_URL ||
+        process.env.PUBLIC_APP_URL ||
+        process.env.CLIENT_URL ||
+        process.env.WEB_PUBLIC_URL ||
+        ''
+    ).replace(/\/$/, '');
     const joinUrl = `${appUrl || ''}/join?token=${encodeURIComponent(token)}`;
 
     return res.json({ ok: true, token, join_url: joinUrl, expires_at: new Date(exp * 1000).toISOString() });

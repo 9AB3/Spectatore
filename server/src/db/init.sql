@@ -1079,6 +1079,9 @@ END $$;
 
 -- ---- Join code / QR gated membership requests ----
 ALTER TABLE admin_sites ADD COLUMN IF NOT EXISTS join_code_hash TEXT;
+-- Store the current join code in plaintext for Site Admin display.
+-- This is admin-only data used to show the active code until it is rotated or disabled.
+ALTER TABLE admin_sites ADD COLUMN IF NOT EXISTS join_code_plain TEXT;
 ALTER TABLE admin_sites ADD COLUMN IF NOT EXISTS join_code_updated_at TIMESTAMPTZ;
 ALTER TABLE admin_sites ADD COLUMN IF NOT EXISTS join_code_expires_at TIMESTAMPTZ;
 
