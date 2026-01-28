@@ -3,6 +3,8 @@ import Stripe from 'stripe';
 import { pool } from '../lib/pg.js';
 import { authMiddleware } from '../lib/auth.js';
 import { auditLog } from '../lib/audit.js';
+import { sendSms } from "../lib/sms.js";
+
 
 const router = express.Router();
 
@@ -533,6 +535,69 @@ export async function handleStripeWebhook(rawBody: Buffer, sig: string | string[
   };
 
   const eventType = String((event as any).type || '');
+    const superAdminTo = (process.env.SUPER_ADMIN_SMS_TO || '').trim();
+  const smsEnabled = String(process.env.SMS_ALERTS_ENABLED || '1') === '1';
+
+  const notifyPaymentSms = async (obj: any) => {
+    if (!smsEnabled) return;
+    if (!superAdminTo) return;
+
+    let invoice: Stripe.Invoice | null = null;
+    if (obj?.object === 'invoice') {
+      invoice = obj as Stripe.Invoice;
+    } else if (obj?.object === 'invoice_payment' && obj?.invoice) {
+      try {
+        invoice = await stripe.invoices.retrieve(String(obj.invoice));
+      } catch {
+        invoice = null;
+      }
+    }
+
+    if (!invoice) return;
+
+    const amountPaid = Number(invoice.amount_paid || 0);
+    if (amountPaid <= 0) return;
+
+    const customerId = typeof invoice.customer === 'string'
+      ? invoice.customer
+      : invoice.customer?.id;
+
+    let who = customerId || 'unknown';
+    if (customerId) {
+      try {
+        const r = await pool.query(
+          `SELECT name, email FROM users WHERE stripe_customer_id=$1 LIMIT 1`,
+          [customerId]
+        );
+        const u = r.rows?.[0];
+        who = u?.name || u?.email || customerId;
+      } catch {}
+    }
+
+    const currency = String(invoice.currency || 'usd').toUpperCase();
+    const dollars = (amountPaid / 100).toFixed(2);
+
+    const body =
+      `💰 Spectatore payment received\n` +
+      `User: ${who}\n` +
+      `Amount: ${currency} ${dollars}\n` +
+      `Invoice: ${invoice.id}`;
+
+    try {
+      await sendSms(superAdminTo, body);
+      await auditLog('billing.sms.sent', {
+        user_id: null,
+        meta: { invoice_id: invoice.id, to: superAdminTo }
+      });
+    } catch (e: any) {
+      console.error('[billing] sms failed', e?.message || e);
+      await auditLog('billing.sms.failed', {
+        user_id: null,
+        meta: { error: e?.message || String(e) }
+      });
+    }
+  };
+
 
   switch (eventType) {
     case 'checkout.session.completed': {
@@ -577,16 +642,17 @@ export async function handleStripeWebhook(rawBody: Buffer, sig: string | string[
     // signal to refresh the user's subscription state.
     case 'invoice.paid':
     case 'invoice.payment_succeeded':
-    // Newer event naming seen in Workbench/Event Destinations (snapshot payload)
     case 'invoice_payment.paid':
     case 'invoice_payment.succeeded': {
       const obj: any = event.data.object as any;
       await upsertUserFromInvoiceLike(obj);
+
+      // 🔔 SEND SMS ALERT
+      await notifyPaymentSms(obj);
+
       break;
     }
-    default:
-      break;
-  }
+
 
   await auditLog('billing.webhook.processed', { meta: { id: event.id, type: eventType } });
 
