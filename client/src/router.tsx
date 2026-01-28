@@ -30,6 +30,9 @@ import Subscribe from './pages/Subscribe';
 import Subscription from './pages/Subscription';
 import NotificationPreferences from './pages/NotificationPreferences';
 import JoinOfficialSite from './pages/JoinOfficialSite';
+import WhatsNew from './pages/WhatsNew';
+import AdminAnnouncements from './pages/AdminAnnouncements';
+import SWUpdateToast from './components/SWUpdateToast';
 
 import Feedback from './pages/Feedback';
 import Notifications from './pages/Notifications';
@@ -140,6 +143,7 @@ export default function App() {
   return (
     <>
       <StartupSplash />
+      <SWUpdateToast />
       <Routes>
       <Route path="/r/:key" element={<RedirectTrack />} />
       <Route
@@ -297,6 +301,8 @@ export default function App() {
         <Route path="/AddConnection" element={<AddConnection />} />
         <Route path="/ViewConnections" element={<ViewConnections />} />
         <Route path="/AdminUsers" element={<AdminUsers />} />
+        <Route path="/AdminAnnouncements" element={<AdminAnnouncements />} />
+        <Route path="/WhatsNew" element={<RequireAuth><WhatsNew /></RequireAuth>} />
       </Route>
 
       <Route

@@ -749,6 +749,7 @@ export default function Settings() {
           <div className="flex gap-2 flex-wrap mt-3">
             <button type="button" className="btn btn-outline" onClick={() => nav('/Terms')}>Terms &amp; Conditions</button>
             <button type="button" className="btn btn-outline" onClick={() => nav('/Privacy')}>Privacy &amp; Data Use</button>
+            <button type="button" className="btn btn-outline" onClick={() => nav('/WhatsNew')}>What&apos;s New</button>
           </div>
         </div>
       </div>

@@ -57,6 +57,8 @@ export default function Main() {
   const nav = useNavigate();
   const location = useLocation();
   const { setMsg, Toast } = useToast();
+  const [whatsNew, setWhatsNew] = useState<any | null>(null);
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
   const [open, setOpen] = useState(false);
   const [calendarAutoOpen, setCalendarAutoOpen] = useState(false);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -99,6 +101,24 @@ export default function Main() {
         setIsAdmin(!!session?.is_admin);
       } catch {}
     })();
+  }, []);
+
+  // Show "What's New" on login (unseen announcements)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api('/api/user/announcements/unseen?limit=1');
+        const a = (r?.announcements || [])[0];
+        if (!cancelled && a) {
+          setWhatsNew(a);
+          setShowWhatsNew(true);
+        }
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -195,6 +215,74 @@ export default function Main() {
   return (
     <div>
       <Toast />
+
+      {showWhatsNew && whatsNew ? (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.55)',
+            zIndex: 9998,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+          onClick={() => {}}
+        >
+          <div className="card p-4" style={{ maxWidth: 720, width: '100%' }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <div style={{ fontSize: 18, fontWeight: 900, flex: 1 }}>{whatsNew.title}</div>
+              <button
+                className="btn btn-secondary"
+                onClick={async () => {
+                  try {
+                    await api(`/api/user/announcements/${whatsNew.id}/seen`, { method: 'POST' });
+                  } catch {}
+                  setShowWhatsNew(false);
+                }}
+              >
+                CLOSE
+              </button>
+            </div>
+
+            {whatsNew.version ? (
+              <div style={{ marginTop: 6, opacity: 0.8, fontSize: 12 }}>Version: {whatsNew.version}</div>
+            ) : null}
+
+            {whatsNew.body_md ? (
+              <div style={{ marginTop: 12, whiteSpace: 'pre-wrap', lineHeight: 1.4 }}>{whatsNew.body_md}</div>
+            ) : null}
+
+            <div style={{ marginTop: 14, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                className="btn btn-outline"
+                onClick={async () => {
+                  try {
+                    await api(`/api/user/announcements/${whatsNew.id}/seen`, { method: 'POST' });
+                  } catch {}
+                  setShowWhatsNew(false);
+                  nav('/WhatsNew');
+                }}
+              >
+                VIEW ALL
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={async () => {
+                  try {
+                    await api(`/api/user/announcements/${whatsNew.id}/seen`, { method: 'POST' });
+                  } catch {}
+                  setShowWhatsNew(false);
+                }}
+              >
+                GOT IT
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <Header />
       <div className="p-4 max-w-5xl mx-auto space-y-5">
         <div className="card">

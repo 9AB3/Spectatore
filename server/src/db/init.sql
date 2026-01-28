@@ -1095,3 +1095,31 @@ CREATE TABLE IF NOT EXISTS join_code_attempts (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+
+
+-- === Announcements / What's New ===
+CREATE TABLE IF NOT EXISTS announcements (
+  id BIGSERIAL PRIMARY KEY,
+  title TEXT NOT NULL,
+  body_md TEXT NOT NULL DEFAULT '',
+  version TEXT NULL,
+  audience TEXT NOT NULL DEFAULT 'all', -- all | admins | site_admins | validators | members
+  audience_site_id INT NULL,
+  is_pinned BOOLEAN NOT NULL DEFAULT false,
+  is_urgent BOOLEAN NOT NULL DEFAULT false,
+  created_by BIGINT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS announcements_created_at_idx ON announcements(created_at DESC);
+CREATE INDEX IF NOT EXISTS announcements_audience_idx ON announcements(audience, audience_site_id);
+
+CREATE TABLE IF NOT EXISTS announcement_seen (
+  user_id BIGINT NOT NULL,
+  announcement_id BIGINT NOT NULL,
+  seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, announcement_id)
+);
+
+CREATE INDEX IF NOT EXISTS announcement_seen_user_idx ON announcement_seen(user_id, seen_at DESC);
+

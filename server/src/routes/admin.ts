@@ -180,4 +180,69 @@ router.post('/seed', authMiddleware, requireAdmin, async (req: any, res) => {
   }
 });
 
+
+// === Announcements (Admin) ===
+
+// GET /api/admin/announcements
+router.get('/announcements', authMiddleware, requireAdmin, async (_req: any, res: any) => {
+  try {
+    const r = await pool.query(
+      `SELECT a.*,
+              u.email AS created_by_email
+       FROM announcements a
+       LEFT JOIN users u ON u.id = a.created_by
+       ORDER BY a.created_at DESC
+       LIMIT 500`,
+    );
+    res.json({ announcements: r.rows || [] });
+  } catch (e: any) {
+    console.warn('[admin] announcements list failed', e?.message || e);
+    res.status(500).json({ error: 'failed' });
+  }
+});
+
+// POST /api/admin/announcements
+router.post('/announcements', authMiddleware, requireAdmin, async (req: any, res: any) => {
+  try {
+    const userId = Number(req.user_id);
+    const title = String(req.body?.title || '').trim();
+    const body_md = String(req.body?.body_md || '').trim();
+    const version = String(req.body?.version || '').trim() || null;
+    const audience = String(req.body?.audience || 'all').trim() || 'all';
+    const audience_site_id = req.body?.audience_site_id != null && String(req.body.audience_site_id).trim() !== '' ? Number(req.body.audience_site_id) : null;
+    const is_pinned = !!req.body?.is_pinned;
+    const is_urgent = !!req.body?.is_urgent;
+
+    if (!title) return res.status(400).json({ error: 'missing title' });
+
+    const r = await pool.query(
+      `INSERT INTO announcements(title, body_md, version, audience, audience_site_id, is_pinned, is_urgent, created_by, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
+       RETURNING *`,
+      [title, body_md || '', version, audience, audience_site_id, is_pinned, is_urgent, userId],
+    );
+    res.json({ ok: true, announcement: r.rows[0] });
+  } catch (e: any) {
+    console.warn('[admin] announcements create failed', e?.message || e);
+    res.status(500).json({ error: 'failed' });
+  }
+});
+
+// DELETE /api/admin/announcements/:id
+router.delete('/announcements/:id', authMiddleware, requireAdmin, async (req: any, res: any) => {
+  try {
+    const id = Number(req.params?.id);
+    if (!id) return res.status(400).json({ error: 'missing id' });
+
+    await pool.query('DELETE FROM announcements WHERE id = $1', [id]);
+    // also clear seen rows to keep db tidy
+    await pool.query('DELETE FROM announcement_seen WHERE announcement_id = $1', [id]).catch(() => {});
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.warn('[admin] announcements delete failed', e?.message || e);
+    res.status(500).json({ error: 'failed' });
+  }
+});
+
+
 export default router;

@@ -1123,4 +1123,166 @@ router.post('/onboarding/complete', authMiddleware, async (req: any, res: any) =
 });
 
 
+
+// === Announcements / What's New ===
+
+// GET /api/user/announcements  -> visible announcements (+ seen flag)
+router.get('/announcements', authMiddleware, async (req: any, res: any) => {
+  try {
+    const userId = Number(req.user_id);
+    const isAdmin = !!req.is_admin;
+
+    const limit = Math.min(200, Math.max(1, Number(req.query?.limit || 50)));
+
+    const sql = `
+      WITH visible AS (
+        SELECT a.*
+        FROM announcements a
+        WHERE
+          (
+            a.audience = 'all'
+            AND (
+              a.audience_site_id IS NULL OR EXISTS (
+                SELECT 1 FROM site_memberships sm
+                WHERE sm.user_id = $1 AND sm.status = 'approved' AND sm.site_id = a.audience_site_id
+              )
+            )
+          )
+          OR (
+            a.audience = 'admins' AND $2::boolean = true
+          )
+          OR (
+            a.audience = 'site_admins'
+            AND EXISTS (
+              SELECT 1 FROM site_memberships sm
+              WHERE sm.user_id = $1 AND sm.status = 'approved'
+                AND sm.role IN ('admin','super-admin')
+                AND (a.audience_site_id IS NULL OR sm.site_id = a.audience_site_id)
+            )
+          )
+          OR (
+            a.audience = 'validators'
+            AND EXISTS (
+              SELECT 1 FROM site_memberships sm
+              WHERE sm.user_id = $1 AND sm.status = 'approved'
+                AND sm.role IN ('validator','admin','super-admin')
+                AND (a.audience_site_id IS NULL OR sm.site_id = a.audience_site_id)
+            )
+          )
+          OR (
+            a.audience = 'members'
+            AND EXISTS (
+              SELECT 1 FROM site_memberships sm
+              WHERE sm.user_id = $1 AND sm.status = 'approved'
+                AND sm.role IN ('member','validator','admin','super-admin')
+                AND (a.audience_site_id IS NULL OR sm.site_id = a.audience_site_id)
+            )
+          )
+      )
+      SELECT
+        v.*,
+        (s.user_id IS NOT NULL) AS seen,
+        s.seen_at
+      FROM visible v
+      LEFT JOIN announcement_seen s
+        ON s.announcement_id = v.id AND s.user_id = $1
+      ORDER BY v.is_pinned DESC, v.created_at DESC
+      LIMIT $3
+    `;
+    const r = await pool.query(sql, [userId, isAdmin, limit]);
+    res.json({ announcements: r.rows || [] });
+  } catch (e: any) {
+    console.warn('[announcements] list failed', e?.message || e);
+    res.status(500).json({ error: 'failed' });
+  }
+});
+
+// GET /api/user/announcements/unseen -> top unseen announcements (for modal/banner)
+router.get('/announcements/unseen', authMiddleware, async (req: any, res: any) => {
+  try {
+    const userId = Number(req.user_id);
+    const isAdmin = !!req.is_admin;
+    const limit = Math.min(10, Math.max(1, Number(req.query?.limit || 3)));
+
+    const sql = `
+      WITH visible AS (
+        SELECT a.*
+        FROM announcements a
+        WHERE
+          (
+            a.audience = 'all'
+            AND (
+              a.audience_site_id IS NULL OR EXISTS (
+                SELECT 1 FROM site_memberships sm
+                WHERE sm.user_id = $1 AND sm.status = 'approved' AND sm.site_id = a.audience_site_id
+              )
+            )
+          )
+          OR (a.audience = 'admins' AND $2::boolean = true)
+          OR (
+            a.audience = 'site_admins'
+            AND EXISTS (
+              SELECT 1 FROM site_memberships sm
+              WHERE sm.user_id = $1 AND sm.status = 'approved'
+                AND sm.role IN ('admin','super-admin')
+                AND (a.audience_site_id IS NULL OR sm.site_id = a.audience_site_id)
+            )
+          )
+          OR (
+            a.audience = 'validators'
+            AND EXISTS (
+              SELECT 1 FROM site_memberships sm
+              WHERE sm.user_id = $1 AND sm.status = 'approved'
+                AND sm.role IN ('validator','admin','super-admin')
+                AND (a.audience_site_id IS NULL OR sm.site_id = a.audience_site_id)
+            )
+          )
+          OR (
+            a.audience = 'members'
+            AND EXISTS (
+              SELECT 1 FROM site_memberships sm
+              WHERE sm.user_id = $1 AND sm.status = 'approved'
+                AND sm.role IN ('member','validator','admin','super-admin')
+                AND (a.audience_site_id IS NULL OR sm.site_id = a.audience_site_id)
+            )
+          )
+      )
+      SELECT v.*
+      FROM visible v
+      WHERE NOT EXISTS (
+        SELECT 1 FROM announcement_seen s
+        WHERE s.user_id = $1 AND s.announcement_id = v.id
+      )
+      ORDER BY v.is_urgent DESC, v.is_pinned DESC, v.created_at DESC
+      LIMIT $3
+    `;
+    const r = await pool.query(sql, [userId, isAdmin, limit]);
+    res.json({ announcements: r.rows || [] });
+  } catch (e: any) {
+    console.warn('[announcements] unseen failed', e?.message || e);
+    res.status(500).json({ error: 'failed' });
+  }
+});
+
+// POST /api/user/announcements/:id/seen
+router.post('/announcements/:id/seen', authMiddleware, async (req: any, res: any) => {
+  try {
+    const userId = Number(req.user_id);
+    const id = Number(req.params?.id);
+    if (!id) return res.status(400).json({ error: 'missing id' });
+
+    await pool.query(
+      `INSERT INTO announcement_seen(user_id, announcement_id, seen_at)
+       VALUES ($1,$2,now())
+       ON CONFLICT (user_id, announcement_id) DO UPDATE SET seen_at=EXCLUDED.seen_at`,
+      [userId, id],
+    );
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.warn('[announcements] seen failed', e?.message || e);
+    res.status(500).json({ error: 'failed' });
+  }
+});
+
+
 export default router;

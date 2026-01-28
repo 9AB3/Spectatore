@@ -27,6 +27,13 @@ export function registerSW() {
           }
         } catch {}
       });
+      // When the new SW takes control, notify the app so we can show a refresh prompt
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        try {
+          window.dispatchEvent(new CustomEvent('spectatore:sw-update'));
+        } catch {}
+      });
+
     } catch (e) {
       console.error(e);
     }
