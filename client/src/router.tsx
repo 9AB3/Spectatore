@@ -49,7 +49,7 @@ import SiteAdminReconciliation from './pages/SiteAdminReconciliation';
 import SiteAdminPowerBiTokens from './pages/SiteAdminPowerBiTokens';
 import SiteAdminEngagement from './pages/SiteAdminEngagement';
 import SiteAdminSupportSnapshot from './pages/SiteAdminSupportSnapshot';
-import SiteAdminSettings from './pages/SiteAdminSettings';
+import SiteAdminSiteTokens from './pages/SiteAdminSettings';
 import StartupSplash from './components/StartupSplash';
 import { useEffect, useState } from 'react';
 import { getDB } from './lib/idb';
@@ -229,8 +229,11 @@ export default function App() {
         <Route path="Sites" element={<RequireSiteAdminSuper><SiteAdminSites /></RequireSiteAdminSuper>} />
         <Route path="People" element={<RequireSiteAdminManage><SiteAdminPeople /></RequireSiteAdminManage>} />
         <Route path="PowerBiTokens" element={<RequireSiteAdminManage><SiteAdminPowerBiTokens /></RequireSiteAdminManage>} />
+        <Route path="SiteTokens" element={<RequireSiteAdminManage><SiteAdminSiteTokens /></RequireSiteAdminManage>} />
         <Route path="Engagement" element={<RequireSiteAdminSuper><SiteAdminEngagement /></RequireSiteAdminSuper>} />
         <Route path="Support" element={<RequireSiteAdminSuper><SiteAdminSupportSnapshot /></RequireSiteAdminSuper>} />
+        {/* Backwards compatible: old settings page is now Site Tokens */}
+        <Route path="Settings" element={<Navigate to="/SiteAdmin/SiteTokens" replace />} />
         
         {/* allow lowercase for convenience */}
         <Route path="members" element={<Navigate to="/SiteAdmin/Members" replace />} />
@@ -247,6 +250,9 @@ export default function App() {
         />
         <Route path="Menu" element={<SiteAdminMenu />} />
       </Route>
+
+      {/* Explicit /SiteAdmin/Settings fallback (in case nesting breaks) */}
+      <Route path="/SiteAdmin/Settings" element={<Navigate to="/SiteAdmin/SiteTokens" replace />} />
 
       {/* Protected */}
       <Route

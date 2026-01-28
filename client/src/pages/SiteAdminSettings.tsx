@@ -12,7 +12,7 @@ function cx(...xs: Array<string | false | undefined | null>) {
   return xs.filter(Boolean).join(' ');
 }
 
-export default function SiteAdminSettings() {
+export default function SiteAdminSiteTokens() {
   const { setMsg, Toast } = useToast();
   const [siteRows, setSiteRows] = useState<SiteRow[]>([]);
   const [siteId, setSiteId] = useState<number>(0);
@@ -153,8 +153,8 @@ export default function SiteAdminSettings() {
         <div className="flex items-center gap-3 mb-4">
           <img src="/logo.png" alt="Spectatore" className="w-12 h-12 object-contain" />
           <div>
-            <div className="text-xl font-semibold">Site Admin Settings</div>
-            <div className="text-sm opacity-70">Manage join codes + QR access for official sites.</div>
+            <div className="text-xl font-semibold">Site Tokens</div>
+            <div className="text-sm opacity-70">Manage join codes + QR tokens used for users to request access.</div>
           </div>
         </div>
 

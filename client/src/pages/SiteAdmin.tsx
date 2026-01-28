@@ -354,6 +354,14 @@ export default function SiteAdmin() {
             </TvTileButton>
           ) : null}
 
+          {(canManage || superAdmin) ? (
+            <TvTileButton title="Site Tokens" subtitle="Access" tone="neutral" onClick={() => nav('/SiteAdmin/SiteTokens')}>
+              <div className="text-sm" style={{ color: 'var(--muted)' }}>
+                Manage join code + QR tokens used for users to request access to this site.
+              </div>
+            </TvTileButton>
+          ) : null}
+
           {superAdmin ? (
             <TvTileButton title="Power BI Tokens" subtitle="Integrations" tone="neutral" onClick={() => nav('/SiteAdmin/PowerBiTokens')}>
               <div className="text-sm" style={{ color: 'var(--muted)' }}>

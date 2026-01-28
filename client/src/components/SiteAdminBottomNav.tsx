@@ -187,7 +187,7 @@ function IconGear({ className }: { className?: string }) {
           <Item to="/SiteAdmin/Sites" label="Sites" icon={<IconSites className="h-6 w-6" />} />
         )}
         {canManageSites && (
-          <Item to="/SiteAdmin/Settings" label="Settings" icon={<IconGear className="h-6 w-6" />} />
+          {/* Settings removed: Site Tokens now live under the Configuration tiles */}
         )}
         {canManageMembers && (<Item to="/SiteAdmin/People" label={'People'} icon={<IconUsers className="h-6 w-6" />} />)}
         <Item to="/SiteAdmin/Validate" label="Validate" icon={<IconCheck className="h-6 w-6" />} />
