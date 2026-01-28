@@ -35,7 +35,8 @@ function b64urlEncode(buf: Buffer) {
 function signJoinToken(payload: any) {
   const payloadJson = Buffer.from(JSON.stringify(payload), 'utf-8');
   const payloadB64 = b64urlEncode(payloadJson);
-  const sig = require('crypto').createHmac('sha256', JWT_SECRET).update(payloadB64).digest();
+  // ESM-safe: use imported crypto (no `require` on Render)
+  const sig = crypto.createHmac('sha256', JWT_SECRET).update(payloadB64).digest();
   const sigB64 = b64urlEncode(sig);
   return `${payloadB64}.${sigB64}`;
 }
@@ -634,8 +635,13 @@ router.post('/join-code/rotate', siteAdminMiddleware, async (req: any, res) => {
     assertSiteAccess(req, siteName);
 
     const code = makeJoinCode(10);
-    const bcrypt = await import('bcryptjs');
-    const hash = await bcrypt.hash(code, 10);
+	    // bcryptjs is CommonJS; in ESM builds the functions are usually under `.default`.
+	    const bcryptMod: any = await import('bcryptjs');
+	    const bcrypt: any = bcryptMod?.default || bcryptMod;
+	    if (!bcrypt?.hash) {
+	      throw new Error('bcryptjs import failed (hash missing)');
+	    }
+	    const hash = await bcrypt.hash(code, 10);
 
     const expiresAt =
       expires_days && expires_days > 0
@@ -702,7 +708,9 @@ router.get('/join-qr', siteAdminMiddleware, async (req: any, res) => {
     // Token is short-lived (default 7 days) and signed.
     const now = Math.floor(Date.now() / 1000);
     const exp = now + 7 * 24 * 60 * 60;
-    const nonce = require('crypto').randomBytes(8).toString('hex');
+	    // `require` is not available in ESM builds on Render; use dynamic import.
+	    const { randomBytes } = await import('node:crypto');
+	    const nonce = randomBytes(8).toString('hex');
     const token = signJoinToken({ site_id, iat: now, exp, nonce });
 
     // Prefer the public app URL, else relative path
