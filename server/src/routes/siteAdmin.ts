@@ -71,6 +71,30 @@ async function hasColumn(table: string, col: string): Promise<boolean> {
   return cols.has(col);
 }
 
+// ---- admin_sites schema compatibility ----
+// Some earlier databases have admin_sites.site (TEXT) instead of admin_sites.name (TEXT).
+// We avoid referencing a non-existent column by detecting which column exists and then
+// using dynamic SQL with a safe, whitelisted column name.
+let _adminSitesNameCol: 'name' | 'site' | null = null;
+
+async function detectAdminSitesNameColumn(): Promise<'name' | 'site'> {
+  if (_adminSitesNameCol) return _adminSitesNameCol;
+  const hasName = await hasColumn('admin_sites', 'name');
+  if (hasName) {
+    _adminSitesNameCol = 'name';
+    return _adminSitesNameCol;
+  }
+  const hasSite = await hasColumn('admin_sites', 'site');
+  _adminSitesNameCol = hasSite ? 'site' : 'name';
+  return _adminSitesNameCol;
+}
+
+async function adminSitesSelectNameByIdSafe(site_id: number): Promise<string> {
+  const col = await detectAdminSitesNameColumn();
+  const r = await pool.query(`SELECT ${col} AS name FROM admin_sites WHERE id=$1`, [site_id]);
+  return String(r.rows?.[0]?.name || '').trim();
+}
+
 function makePowerBiToken() {
   // Short, URL-safe token.
   const rand = crypto.randomBytes(18).toString('base64url');
@@ -568,7 +592,7 @@ router.get('/join-code/status', siteAdminMiddleware, async (req: any, res) => {
 
   try {
     // Determine site name then scope-check
-    const siteName = await adminSitesSelectNameById(site_id);
+    const siteName = await adminSitesSelectNameByIdSafe(site_id);
     if (!siteName) return res.status(404).json({ ok: false, error: 'site_not_found' });
     assertSiteAccess(req, siteName);
 
@@ -605,7 +629,7 @@ router.post('/join-code/rotate', siteAdminMiddleware, async (req: any, res) => {
   if (!site_id) return res.status(400).json({ ok: false, error: 'site_id required' });
 
   try {
-    const siteName = await adminSitesSelectNameById(site_id);
+    const siteName = await adminSitesSelectNameByIdSafe(site_id);
     if (!siteName) return res.status(404).json({ ok: false, error: 'site_not_found' });
     assertSiteAccess(req, siteName);
 
@@ -643,7 +667,7 @@ router.delete('/join-code', siteAdminMiddleware, async (req: any, res) => {
   if (!site_id) return res.status(400).json({ ok: false, error: 'site_id required' });
 
   try {
-    const siteName = await adminSitesSelectNameById(site_id);
+    const siteName = await adminSitesSelectNameByIdSafe(site_id);
     if (!siteName) return res.status(404).json({ ok: false, error: 'site_not_found' });
     assertSiteAccess(req, siteName);
 
@@ -671,7 +695,7 @@ router.get('/join-qr', siteAdminMiddleware, async (req: any, res) => {
   if (!site_id) return res.status(400).json({ ok: false, error: 'site_id required' });
 
   try {
-    const siteName = await adminSitesSelectNameById(site_id);
+    const siteName = await adminSitesSelectNameByIdSafe(site_id);
     if (!siteName) return res.status(404).json({ ok: false, error: 'site_not_found' });
     assertSiteAccess(req, siteName);
 
