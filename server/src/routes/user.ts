@@ -3,9 +3,32 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool } from '../lib/pg.js';
 import { authMiddleware } from '../lib/auth.js';
+import crypto from 'node:crypto';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
+
+async function detectAdminSitesNameColumn(): Promise<'name' | 'site'> {
+  try {
+    const r = await pool.query(
+      `SELECT 1 FROM information_schema.columns WHERE table_name='admin_sites' AND column_name='name' LIMIT 1`
+    );
+    return r.rowCount ? 'name' : 'site';
+  } catch {
+    return 'name';
+  }
+}
+
+async function adminSitesSelectNameByIdSafe(site_id: number): Promise<string> {
+  try {
+    const col = await detectAdminSitesNameColumn();
+    const r = await pool.query(`SELECT ${col} AS name FROM admin_sites WHERE id=$1`, [site_id]);
+    return String(r.rows?.[0]?.name || '');
+  } catch {
+    return '';
+  }
+}
+
 
 function b64urlEncode(buf: Buffer) {
   return buf.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
@@ -26,14 +49,11 @@ function verifyJoinToken(token: string): JoinTokenPayload | null {
     const payloadBuf = b64urlDecodeToBuffer(payloadB64);
     const sigBuf = b64urlDecodeToBuffer(sigB64);
 
-    const expected = require('crypto')
-      .createHmac('sha256', JWT_SECRET)
-      .update(payloadB64)
-      .digest();
+    const expected = crypto.createHmac('sha256', JWT_SECRET).update(payloadB64).digest();
 
     // timing-safe compare
     if (sigBuf.length !== expected.length) return null;
-    if (!require('crypto').timingSafeEqual(sigBuf, expected)) return null;
+    if (!crypto.timingSafeEqual(sigBuf, expected)) return null;
 
     const payload: JoinTokenPayload = JSON.parse(payloadBuf.toString('utf-8'));
     if (!payload?.site_id || !payload?.exp || !payload?.iat) return null;
@@ -82,15 +102,7 @@ async function adminSitesSelectAll(): Promise<Array<{ id: number; name: string }
   }
 }
 
-async function adminSitesSelectNameById(site_id: number): Promise<string> {
-  try {
-    const r = await pool.query('SELECT name FROM admin_sites WHERE id=$1', [site_id]);
-    return String(r.rows?.[0]?.name || '').trim();
-  } catch (e: any) {
-    const r = await pool.query('SELECT site AS name FROM admin_sites WHERE id=$1', [site_id]);
-    return String(r.rows?.[0]?.name || '').trim();
-  }
-}
+async }
 
 async function adminSitesInsertNames(names: string[]): Promise<void> {
   const cleaned = Array.from(
@@ -618,7 +630,7 @@ const role = 'member';
 const consentVersion = String(req.body?.site_consent_version || '').trim();
 if (!site_id) return res.status(400).json({ error: 'site_id required' });
 
-    const siteName = await adminSitesSelectNameById(site_id);
+    const siteName = await adminSitesSelectNameByIdSafe(site_id);
 if (!siteName) return res.status(400).json({ error: 'site_not_found' });
 
 // ---- Join code / QR gating (optional per admin site) ----
@@ -784,7 +796,7 @@ router.post('/memberships/leave', authMiddleware, async (req: any, res) => {
     const site_id = Number(req.body?.site_id || 0);
     if (!site_id) return res.status(400).json({ error: 'site_id required' });
 
-    const siteName = await adminSitesSelectNameById(site_id);
+    const siteName = await adminSitesSelectNameByIdSafe(site_id);
     if (!siteName) return res.status(400).json({ error: 'site_not_found' });
 
 

@@ -13,11 +13,24 @@ function useQuery() {
 }
 
 export default function JoinOfficialSite() {
+  const loc = useLocation();
   const q = useQuery();
   const nav = useNavigate();
   const { setMsg, Toast } = useToast();
 
-  const token = String(q.get('token') || '').trim();
+  const token = useMemo(() => {
+    const fromQuery = String(q.get('token') || q.get('join_token') || q.get('t') || '').trim();
+    if (fromQuery) return fromQuery;
+    const hash = String(loc.hash || '').replace(/^#/, '');
+    if (hash.includes('=')) {
+      const hp = new URLSearchParams(hash);
+      const ht = String(hp.get('token') || hp.get('join_token') || '').trim();
+      if (ht) return ht;
+    }
+    const m = String(loc.pathname || '').match(/\/join\/(.+)$/i);
+    return m ? String(m[1] || '').trim() : '';
+  }, [q, loc.hash, loc.pathname]);
+
 
   const [siteName, setSiteName] = useState<string>('');
   const [siteId, setSiteId] = useState<number>(0);

@@ -844,7 +844,26 @@ export default function Settings() {
               </span>
             </label>
 
-            <div className="mt-4 flex justify-end gap-2">
+            
+            {siteConsent?.requires_join_code ? (
+              <div className="mt-4">
+                <div className="text-sm font-semibold">Join code required</div>
+                <div className="text-xs opacity-70 mt-1">
+                  This site requires a join code from a site admin (or scan a QR join link).
+                </div>
+                <input
+                  className="input w-full mt-2"
+                  placeholder="Enter join code"
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(String(e.target.value || ''))}
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+              </div>
+            ) : null}
+
+<div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
                 className="btn btn-outline"

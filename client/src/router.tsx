@@ -163,6 +163,7 @@ export default function App() {
       <Route path="/howto" element={<Navigate to="/how-to" replace />} />
       {/* QR/site join links (public route; server enforces auth when submitting) */}
       <Route path="/join" element={<JoinOfficialSite />} />
+      <Route path="/join/:token" element={<JoinOfficialSite />} />
       <Route path="/Join" element={<Navigate to="/join" replace />} />
       <Route path="/SiteAdminLogin" element={<SiteAdminLogin />} />
       <Route path="/Register" element={<Register />} />
