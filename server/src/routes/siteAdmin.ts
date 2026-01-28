@@ -2228,22 +2228,6 @@ router.get('/validation/search', siteAdminMiddleware, async (req: any, res) => {
 
   const client = await pool.connect();
   try {
-    const rows = await client.query(
-      `SELECT vs.date::text as date,
-              COUNT(*)::int as n
-         FROM validated_shift_activities vsa
-         JOIN validated_shifts vs ON vs.id = vsa.validated_shift_id
-        WHERE vs.admin_site_id=$1
-          AND to_char(vs.date, 'YYYY-MM')=$2
-          AND (
-            $3='all' OR $3='operator' OR $3='equipment' OR $3='heading'
-          )
-      `,
-      [adminSiteId, month, scope],
-    );
-
-    // NOTE: We do filtering in JS to avoid brittle SQL across payload schemas.
-    // Pull candidate rows for month and filter by payload/user/equipment/location keywords.
     const cand = await client.query(
       `SELECT vs.date::text as date,
               vs.user_name,
@@ -2320,7 +2304,6 @@ router.get('/validation/baseline', siteAdminMiddleware, async (req: any, res) =>
   } catch (e: any) {
     return res.status(e?.status || 403).json({ error: e?.message || 'forbidden' });
   }
-  // Stub for future rolling baselines (median/p90). Return empty for now.
   return res.json({ ok: true, baselines: {} });
 });
 

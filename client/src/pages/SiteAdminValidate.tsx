@@ -38,7 +38,6 @@ type FlatKV = { path: string; label: string; value: any; kind: 'primitive' | 'js
 // ----- subtle/pro change indicators for edited cells -----
 function changedCellTdClass(isChanged: boolean) {
   if (!isChanged) return '';
-
   // Reference data for validation checklist (locations/equipment)
   useEffect(() => {
     if (!site) return;
@@ -56,7 +55,6 @@ function changedCellTdClass(isChanged: boolean) {
       }
     })();
   }, [site]);
-
 
   // Left 3px accent bar + barely-visible tint.
   // Keep it professional: muted amber + slate.
@@ -1422,8 +1420,7 @@ function isSameMonth(dateStr: string, y: number, m: number) {
 
   const queueItems = useMemo(() => {
     const q = searchQuery.trim();
-    if (!q) return monthDates;
-    // Convert server results -> {dateStr, st, n, scopes}
+    if (!q) return monthDates as any[];
     const out = (searchResults || []).map((r: any) => {
       const dateStr = String(r?.date || '');
       const st = (days as any)[dateStr] || 'none';
@@ -1457,7 +1454,10 @@ function isSameMonth(dateStr: string, y: number, m: number) {
   }
 
   
-  const locSet = useMemo(() => new Set((adminLocRows || []).map((r: any) => String(r?.name || '').trim()).filter(Boolean)), [adminLocRows]);
+  const locSet = useMemo(
+    () => new Set((adminLocRows || []).map((r: any) => String(r?.name || '').trim()).filter(Boolean)),
+    [adminLocRows],
+  );
   const equipSet = useMemo(
     () => new Set((adminEquipRows || []).map((r: any) => String(r?.equipment_id || '').trim()).filter(Boolean)),
     [adminEquipRows],
@@ -1482,21 +1482,15 @@ function isSameMonth(dateStr: string, y: number, m: number) {
       const groupVal = getGroupValue(act, obj) || '';
 
       const equip = getEquipmentFromObj(obj);
-      // Flag unknown location/source/to for activities that use grouping (ignore hoisting)
+
       if (act && String(act).toLowerCase() !== 'hoisting') {
-        if (groupVal && locSet.size && !locSet.has(groupVal)) {
-          unknownLocations.push({ act, sub, value: groupVal, id: row?.id });
-        } else if (!groupVal) {
-          unknownLocations.push({ act, sub, value: '(blank)', id: row?.id });
-        }
-      }
-      if (equip) {
-        if (equipSet.size && !equipSet.has(equip)) unknownEquipment.push({ act, sub, value: equip, id: row?.id });
-      } else {
-        unknownEquipment.push({ act, sub, value: '(blank)', id: row?.id });
+        if (!groupVal) unknownLocations.push({ act, sub, value: '(blank)', id: row?.id });
+        else if (locSet.size && !locSet.has(groupVal)) unknownLocations.push({ act, sub, value: groupVal, id: row?.id });
       }
 
-      // Missing subactivity (generic): if sub is blank/no-sub
+      if (!equip) unknownEquipment.push({ act, sub, value: '(blank)', id: row?.id });
+      else if (equipSet.size && !equipSet.has(equip)) unknownEquipment.push({ act, sub, value: equip, id: row?.id });
+
       const subRaw = String(obj?.sub || obj?.sub_activity || row?.sub_activity || '').trim();
       if (!subRaw) missingSub.push({ act, value: '(missing)', id: row?.id });
     }
@@ -1543,16 +1537,16 @@ const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
                 <input
                   className="input"
                   style={{ minWidth: 220 }}
-                  placeholder="Search month…"
+                  placeholder="Search month..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
                 <div className="flex items-center gap-1">
-                  {(['all','operator','equipment','heading'] as const).map((sc) => (
+                  {(['all', 'operator', 'equipment', 'heading'] as const).map((sc) => (
                     <button
                       key={sc}
                       type="button"
-                      className={\`tv-pill \${searchScope===sc ? 'ring-2 ring-slate-400' : ''}\`}
+                      className={`tv-pill ${searchScope === sc ? 'ring-2 ring-slate-400' : ''}`}
                       onClick={() => setSearchScope(sc)}
                       title={sc}
                     >
@@ -1614,7 +1608,7 @@ const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
             <div className="card">
               <div className="flex items-center justify-between mb-2">
                 <div className="font-bold">Month queue</div>
-                <div className="text-xs opacity-70">{searchQuery.trim() ? (searching ? 'Searching…' : `Results for “${searchQuery.trim()}”`) : 'Click a day to review and validate'}</div>
+                <div className="text-xs opacity-70">Click a day to review and validate</div>
               </div>
 
               <div className="space-y-2">
@@ -1785,9 +1779,6 @@ const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
                         <div className="tv-tile p-3">
                           <div className="text-xs opacity-70">Missing / unknown headings / locations</div>
                           <div className="text-2xl font-bold">{checklist.unknownLocations.length}</div>
-                          {checklist.unknownLocations.length > 0 && (
-                            <div className="text-xs opacity-70 mt-1">Tap a row below to review</div>
-                          )}
                         </div>
                         <div className="tv-tile p-3">
                           <div className="text-xs opacity-70">Unknown equipment IDs</div>
@@ -1803,13 +1794,10 @@ const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
                         <div className="mt-3 space-y-2">
                           {checklist.unknownLocations.slice(0, 6).map((x: any, i: number) => (
                             <button
-                              key={'loc-'+i}
+                              key={'loc-' + i}
                               type="button"
                               className="tv-tile w-full text-left px-3 py-2"
-                              onClick={() => {
-                                // simple: no deep scroll yet
-                                setMsg(`Unknown location: ${x.value} (${x.act} • ${x.sub})`);
-                              }}
+                              onClick={() => setMsg(`Unknown location: ${x.value} (${x.act} • ${x.sub})`)}
                             >
                               <div className="flex items-center justify-between gap-2">
                                 <div className="text-sm">
