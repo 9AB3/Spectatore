@@ -280,9 +280,12 @@ app.post(
   express.raw({ type: 'application/json' }),
   async (req: any, res: any) => {
     try {
-      const out = await handleStripeWebhook(req.body, req.headers['stripe-signature']);
+      console.log("isBuffer", Buffer.isBuffer(req.body), "len", req.body?.length);
+      const out = await handleStripeWebhook(req.body, req.header('stripe-signature'));
       return res.json(out);
     } catch (e: any) {
+       console.error("[stripe webhook] error message:", e?.message);
+      console.error("[stripe webhook] full error:", e);
       return res.status(400).send(`Webhook Error: ${e?.message || 'unknown'}`);
     }
   },
