@@ -83,7 +83,7 @@ export default function Settings() {
 
   // Work Site
   const [workSiteOptions, setWorkSiteOptions] = useState<string[]>([]);
-  const [workSiteSelect, setWorkSiteSelect] = useState<string>('');
+  const [workSiteSelect, setWorkSiteSelect] = useState<string>('Not in List');
   const [workSiteManual, setWorkSiteManual] = useState<string>('');
 
   // push notifications
