@@ -640,7 +640,7 @@ export async function handleStripeWebhook(rawBody: Buffer, sig: string | string[
 
     // Live mode often emits invoice/invoice_payment events; treat them as a reliable
     // signal to refresh the user's subscription state.
-    case 'invoice.paid':
+       case 'invoice.paid':
     case 'invoice.payment_succeeded':
     case 'invoice_payment.paid':
     case 'invoice_payment.succeeded': {
@@ -653,10 +653,14 @@ export async function handleStripeWebhook(rawBody: Buffer, sig: string | string[
       break;
     }
 
+    default:
+      break;
+  } // <-- CLOSE SWITCH HERE
 
   await auditLog('billing.webhook.processed', { meta: { id: event.id, type: eventType } });
 
   return { ok: true };
 }
+
 
 export default router;
