@@ -396,15 +396,15 @@ export default function ProtectedLayout() {
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 md:p-5"><TermsContent /></div>
               </div>
 
-              <div className="bg-white rounded-2xl shadow-xl p-4">
-                <label className="flex gap-3 items-start text-sm">
+              <div className="bg-white rounded-2xl shadow-xl p-5 md:p-6 space-y-3">
+                <label className="flex gap-3 items-start text-[15px] leading-relaxed text-slate-900">
                   <input
                     type="checkbox"
                     className="mt-1"
                     checked={termsTick}
                     onChange={(e) => setTermsTick(e.target.checked)}
                   />
-                  <span>I have read and agree to the Terms &amp; Conditions.</span>
+                  <span className="select-none">I have read and agree to the <b>Terms &amp; Conditions</b>.</span>
                 </label>
 
                 {err && <div className="text-sm text-red-600 mt-2">{err}</div>}
@@ -418,7 +418,7 @@ export default function ProtectedLayout() {
                   {busy ? 'Saving…' : 'Accept & Continue'}
                 </button>
 
-                <div className="text-xs text-slate-500 mt-2">Version: v1</div>
+                <div className="text-xs text-slate-600 mt-2">Version: v1</div>
               </div>
             </div>
           </div>
