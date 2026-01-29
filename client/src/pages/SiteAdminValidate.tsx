@@ -2247,7 +2247,7 @@ const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
                                                               ? (objOrig as any).loads
                                                               : [];
                                                           loads.forEach((l: any, idx: number) =>
-                                                            flat.push({ _act_id: (rr as any).id, _idx: idx, weight: l?.weight ?? l?.Weight ?? '' }),
+                                                            flat.push({ ...(l || {}), _act_id: (rr as any).id, _idx: idx, weight: (l as any)?.weight ?? (l as any)?.Weight ?? '' }),
                                                           );
                                                         }
 
