@@ -740,7 +740,6 @@ useEffect(() => {
 
 	                  const end = Date.now();
 	                  const endIso = new Date(end).toISOString();
-	    const endIso = new Date(end).toISOString();
     const deltaS = Math.max(0, Math.round((end - haulTimingStartMs) / 1000));
     const elapsedS = Math.max(0, (haulTimingElapsedS || 0) + deltaS);
     const idx = haulTimingLoadIndex;
@@ -2240,6 +2239,7 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                   }
 
                   const end = Date.now();
+                  const endIso = new Date(end).toISOString();
                   const deltaS = Math.max(0, Math.round((end - haulTimingStartMs) / 1000));
                   const elapsedS = Math.max(0, (haulTimingElapsedS || 0) + deltaS);
                   const idx = haulTimingLoadIndex;
