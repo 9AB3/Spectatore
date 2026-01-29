@@ -471,19 +471,16 @@ export async function handleStripeWebhook(rawBody: Buffer, sig: string | string[
       id TEXT PRIMARY KEY,
       type TEXT,
       created_at TIMESTAMPTZ DEFAULT now()
-    );
-    await pool.query(`CREATE TABLE IF NOT EXISTS stripe_invoice_sms (
+    )`
+  );
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS stripe_invoice_sms (
       invoice_id TEXT PRIMARY KEY,
       created_at TIMESTAMPTZ DEFAULT now()
-    );`);
-
-    CREATE TABLE IF NOT EXISTS stripe_webhook_events (
-        id TEXT PRIMARY KEY,
-        type TEXT,
-        created_at TIMESTAMPTZ DEFAULT now()
-      )`,
+    )`
   );
-  const already = await pool.query(`SELECT 1 FROM stripe_webhook_events WHERE id=$1`, [event.id]);
+
+const already = await pool.query(`SELECT 1 FROM stripe_webhook_events WHERE id=$1`, [event.id]);
   if (already.rowCount) {
     await auditLog('billing.webhook.skipped', { meta: { id: event.id, type: String((event as any).type || '') } });
     return { ok: true, skipped: true };
