@@ -468,6 +468,16 @@ export async function handleStripeWebhook(rawBody: Buffer, sig: string | string[
   // Idempotency: store processed events
   await pool.query(
     `CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+      id TEXT PRIMARY KEY,
+      type TEXT,
+      created_at TIMESTAMPTZ DEFAULT now()
+    );
+    await pool.query(`CREATE TABLE IF NOT EXISTS stripe_invoice_sms (
+      invoice_id TEXT PRIMARY KEY,
+      created_at TIMESTAMPTZ DEFAULT now()
+    );`);
+
+    CREATE TABLE IF NOT EXISTS stripe_webhook_events (
         id TEXT PRIMARY KEY,
         type TEXT,
         created_at TIMESTAMPTZ DEFAULT now()
@@ -577,11 +587,39 @@ export async function handleStripeWebhook(rawBody: Buffer, sig: string | string[
     const currency = String(invoice.currency || 'usd').toUpperCase();
     const dollars = (amountPaid / 100).toFixed(2);
 
+    // De-dupe by invoice id
+    const already = await pool.query(
+      `SELECT 1 FROM stripe_invoice_sms WHERE invoice_id=$1`,
+      [invoice.id]
+    );
+    if (already.rowCount) return;
+
+    let name = who;
+    let state = '';
+    let site = '';
+    if (customerId) {
+      try {
+        const r2 = await pool.query(
+          `SELECT name, state, site FROM users WHERE stripe_customer_id=$1 LIMIT 1`,
+          [customerId]
+        );
+        const u2 = r2.rows?.[0];
+        name = u2?.name || name;
+        state = u2?.state || '';
+        site = u2?.site || '';
+      } catch {}
+    }
+
     const body =
-      `💰 Spectatore payment received\n` +
-      `User: ${who}\n` +
-      `Amount: ${currency} ${dollars}\n` +
-      `Invoice: ${invoice.id}`;
+      `Payment received.\n` +
+      `Name: ${name}\n` +
+      `State: ${state}\n` +
+      `Site: ${site}`;
+
+    await pool.query(
+      `INSERT INTO stripe_invoice_sms(invoice_id) VALUES ($1)`,
+      [invoice.id]
+    );
 
     try {
       await sendSms(superAdminTo, body);
