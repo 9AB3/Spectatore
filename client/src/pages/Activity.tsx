@@ -412,13 +412,32 @@ export default function Activity() {
 
   const [pdLastDiameter, setPdLastDiameter] = useState<string>('102mm');
 
-// Hauling: allow per-load weights
-type HaulLoad = { id: string; weight: string; time_s: number | null; kind: 'manual' | 'timed' };
-const mkHaulLoad = (kind: 'manual' | 'timed', weight: string, time_s: number | null = null): HaulLoad => ({
+// Hauling: allow per-load weights (+ optional timing)
+// NOTE: timed loads may be paused/resumed via "Continue load".
+// We record the wall-clock start when the user clicks "Start new load" and
+// the latest wall-clock end whenever the user clicks "Dump load".
+// If the user continues and dumps again, end_iso will be updated to the latest dump.
+type HaulLoad = {
+  id: string;
+  weight: string;
+  time_s: number | null; // active time accumulated by the timer (excludes paused time)
+  kind: 'manual' | 'timed';
+  start_iso?: string | null;
+  end_iso?: string | null;
+};
+
+const mkHaulLoad = (
+  kind: 'manual' | 'timed',
+  weight: string,
+  time_s: number | null = null,
+  start_iso: string | null = null,
+): HaulLoad => ({
   id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
   kind,
   weight,
   time_s,
+  start_iso,
+  end_iso: null,
 });
 const [haulSameWeight, setHaulSameWeight] = useState<boolean>(true);
 const [haulDefaultWeight, setHaulDefaultWeight] = useState<string>('');
@@ -694,17 +713,18 @@ useEffect(() => {
     setHaulLastDumpedIndex(-1);
     setHaulLastDumpedAtMs(0);
 
-    const start = Date.now();
+	    const start = Date.now();
+	    const startIso = new Date(start).toISOString();
     setHaulTimingElapsedS(0);
     setHaulTimingStartMs(start);
     setHaulTimingNowMs(start);
     setHaulTimingRunning(true);
     setHaulTimingPaused(false);
 
-    setHaulLoads((prev) => {
+	    setHaulLoads((prev) => {
       const weight =
         '0';
-      const next = [...prev, mkHaulLoad('timed', weight, null)];
+	      const next = [...prev, mkHaulLoad('timed', weight, null, startIso)];
       setHaulTimingLoadIndex(next.length - 1);
       return next;
     });
@@ -718,7 +738,9 @@ useEffect(() => {
 
     stopWeightHold();
 
-    const end = Date.now();
+	                  const end = Date.now();
+	                  const endIso = new Date(end).toISOString();
+	    const endIso = new Date(end).toISOString();
     const deltaS = Math.max(0, Math.round((end - haulTimingStartMs) / 1000));
     const elapsedS = Math.max(0, (haulTimingElapsedS || 0) + deltaS);
     const idx = haulTimingLoadIndex;
@@ -729,10 +751,10 @@ useEffect(() => {
     setHaulTimingStartMs(0);
     setHaulTimingNowMs(0);
 
-    // Persist the paused time onto the load so the form list shows it immediately.
+	    // Persist the paused time + latest dump timestamp onto the load so the form list shows it immediately.
     setHaulLoads((prev) => {
       if (idx < 0 || idx >= prev.length) return prev;
-      return prev.map((l, i) => (i === idx ? { ...l, time_s: elapsedS } : l));
+	      return prev.map((l, i) => (i === idx ? { ...l, time_s: elapsedS, end_iso: endIso } : l));
     });
 
     // Keep focus for clicker
@@ -1110,6 +1132,8 @@ if (activity === 'Production Drilling') {
       .map((l) => ({
         weight: Number(String(l.weight || '').replace(/[^0-9.]/g, '')),
         time_s: (l as any)?.time_s ?? null,
+	        start_iso: (l as any)?.start_iso ?? null,
+	        end_iso: (l as any)?.end_iso ?? null,
         kind: (l as any)?.kind || (typeof (l as any)?.time_s === 'number' ? 'timed' : 'manual'),
       }))
       .filter((l) => Number.isFinite(l.weight) && l.weight > 0);
@@ -1987,14 +2011,15 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
             // Before closing, persist any running timer onto the active load so the form shows time.
             if (haulTimingRunning && haulTimingLoadIndex >= 0) {
               const end = Date.now();
+	              const endIso = new Date(end).toISOString();
               const deltaS = Math.max(0, Math.round((end - haulTimingStartMs) / 1000));
               const elapsedS = Math.max(0, (haulTimingElapsedS || 0) + deltaS);
               const idx = haulTimingLoadIndex;
 
-              setHaulLoads((prev) => {
-                if (idx < 0 || idx >= prev.length) return prev;
-                return prev.map((l, i) => (i === idx ? { ...l, time_s: elapsedS } : l));
-              });
+	    setHaulLoads((prev) => {
+	      if (idx < 0 || idx >= prev.length) return prev;
+	      return prev.map((l, i) => (i === idx ? { ...l, time_s: elapsedS, end_iso: endIso } : l));
+	    });
             }
 
             setHaulLogTimesOpen(false);
@@ -2225,10 +2250,10 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                   setHaulTimingStartMs(0);
                   setHaulTimingNowMs(0);
 
-                  setHaulLoads((prev) => {
-                    if (idx < 0 || idx >= prev.length) return prev;
-                    return prev.map((l, i) => (i === idx ? { ...l, time_s: elapsedS } : l));
-                  });
+	                  setHaulLoads((prev) => {
+	                    if (idx < 0 || idx >= prev.length) return prev;
+	                    return prev.map((l, i) => (i === idx ? { ...l, time_s: elapsedS, end_iso: endIso } : l));
+	                  });
 
                   window.setTimeout(() => truckKeyCaptureRef.current?.focus(), 0);
                 }}
@@ -2243,16 +2268,17 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                 type="button"
                 className="btn w-full h-20 md:h-24 rounded-3xl text-2xl md:text-4xl font-extrabold shadow-xl"
                 onClick={() => {
-                  const start = Date.now();
+	                  const start = Date.now();
+	                  const startIso = new Date(start).toISOString();
                   setHaulTimingElapsedS(0);
                   setHaulTimingStartMs(start);
                   setHaulTimingNowMs(start);
                   setHaulTimingRunning(true);
                   setHaulTimingPaused(false);
 
-                  setHaulLoads((prev) => {
+	                  setHaulLoads((prev) => {
                     const weight = '0';
-                    const next = [...prev, mkHaulLoad('timed', weight, null)];
+	                    const next = [...prev, mkHaulLoad('timed', weight, null, startIso)];
                     setHaulTimingLoadIndex(next.length - 1);
                     return next;
                   });
@@ -2287,16 +2313,17 @@ if (activity === 'Hauling' && f.field === 'Trucks') {
                   className="w-full h-16 md:h-20 rounded-3xl tv-surface border border-white/15 text-[color:var(--text)] text-2xl md:text-3xl font-extrabold shadow active:translate-y-[1px]"
                   onClick={() => {
                     // Finalize paused load as-is, and start a new one immediately
-                    const start = Date.now();
+	                    const start = Date.now();
+	                    const startIso = new Date(start).toISOString();
                     setHaulTimingElapsedS(0);
                     setHaulTimingStartMs(start);
                     setHaulTimingNowMs(start);
                     setHaulTimingRunning(true);
                     setHaulTimingPaused(false);
 
-                    setHaulLoads((prev) => {
+	                    setHaulLoads((prev) => {
                       const weight = '0';
-                      const next = [...prev, mkHaulLoad('timed', weight, null)];
+	                      const next = [...prev, mkHaulLoad('timed', weight, null, startIso)];
                       setHaulTimingLoadIndex(next.length - 1);
                       return next;
                     });

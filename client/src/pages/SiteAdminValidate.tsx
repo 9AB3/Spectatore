@@ -2317,9 +2317,10 @@ const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
                                                             <table className="w-full text-xs table-fixed">
                                                               <thead className="bg-[color:var(--surface-2)] border-b">
                                                                 <tr>
-                                                                  <th className="p-1 text-left w-[72px]">Truck #</th>
-                                                                  <th className="p-1 text-left w-[140px]">Weight (t)</th>
-                                                                  <th className="p-1 text-left w-[36px]"></th>
+													<th className="p-1 text-left w-[72px]">Truck #</th>
+													<th className="p-1 text-left w-[140px]">Weight (t)</th>
+													<th className="p-1 text-left w-[70px]">Load time</th>
+													<th className="p-1 text-left w-[36px]"></th>
                                                                 </tr>
                                                               </thead>
                                                               <tbody>
@@ -2343,16 +2344,27 @@ const softLocked = selectedDate ? isSoftLockedDate(selectedDate) : false;
                                                                             onChange={(e) => setTruck(actId, idx, e.target.value)}
                                                                           />
                                                                         </td>
-                                                                    <td className="p-1 text-xs opacity-80">
-                                                                      {(() => {
-                                                                        const ts: any = (t as any).time_s;
-                                                                        const s = typeof ts === 'number' ? ts : parseFloat(String(ts || ''));
-                                                                        if (!Number.isFinite(s)) return <span className="opacity-50">—</span>;
-                                                                        const mm = String(Math.floor(s / 60)).padStart(2, '0');
-                                                                        const ss = String(Math.round(s % 60)).padStart(2, '0');
-                                                                        return `${mm}:${ss}`;
-                                                                      })()}
-                                                                    </td>
+														<td className="p-1 text-xs opacity-80">
+														  {(() => {
+														    // Prefer wall-clock duration if start/end timestamps are present.
+														    const startIso: any = (t as any).start_iso;
+														    const endIso: any = (t as any).end_iso;
+														    const startMs = startIso ? Date.parse(String(startIso)) : NaN;
+														    const endMs = endIso ? Date.parse(String(endIso)) : NaN;
+														    let s: number = NaN;
+														    if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs) {
+														      s = Math.max(0, Math.round((endMs - startMs) / 1000));
+														    } else {
+														      // Fallback to active elapsed seconds captured by the timer.
+														      const ts: any = (t as any).time_s;
+														      s = typeof ts === 'number' ? ts : parseFloat(String(ts || ''));
+														    }
+														    if (!Number.isFinite(s)) return <span className="opacity-50">—</span>;
+														    const mm = String(Math.floor(s / 60)).padStart(2, '0');
+														    const ss = String(Math.round(s % 60)).padStart(2, '0');
+														    return `${mm}:${ss}`;
+														  })()}
+														</td>
                                                                         <td className="p-1">
                                                                           <button
                                                                             type="button"
