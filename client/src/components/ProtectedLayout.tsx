@@ -387,13 +387,13 @@ export default function ProtectedLayout() {
             <div className="px-4 pb-4 flex-1 min-h-0 flex flex-col gap-4">
               <div
                 ref={termsBoxRef}
-                className="bg-white rounded-2xl shadow-xl flex-1 min-h-0 overflow-y-auto p-5"
+                className="bg-white rounded-2xl shadow-xl flex-1 min-h-0 overflow-y-auto p-5 md:p-6"
                 onScroll={(e) => {
                   const el = e.currentTarget;
                   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 8) setTermsScrolled(true);
                 }}
               >
-                <TermsContent />
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 md:p-5"><TermsContent /></div>
               </div>
 
               <div className="bg-white rounded-2xl shadow-xl p-4">
