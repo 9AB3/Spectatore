@@ -264,7 +264,8 @@ export default function Landing() {
           </div>
 
           <div className="lg:col-span-6">
-            <div className="rounded-[28px] border border-black/10 bg-white shadow-[0_18px_40px_rgba(0,0,0,0.12)] overflow-hidden">
+            {/* Constrain screenshot size so it doesn't dominate large desktops */}
+            <div className="mx-auto w-full max-w-[520px] rounded-[28px] border border-black/10 bg-white shadow-[0_18px_40px_rgba(0,0,0,0.12)] overflow-hidden">
               <img
                 src="/landing/shift-portal.png"
                 alt="Spectatore Shift Portal"
@@ -287,7 +288,7 @@ export default function Landing() {
         </div>
 
         <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <figure className="rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
+          <figure className="mx-auto w-full max-w-[520px] rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
             <img
               src="/landing/you-vs-you-trend-cards.png"
               alt="You vs You trend cards"
@@ -297,7 +298,7 @@ export default function Landing() {
             <figcaption className="px-5 py-4 text-sm text-zinc-600">Rolling averages and recent shifts</figcaption>
           </figure>
 
-          <figure className="rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
+          <figure className="mx-auto w-full max-w-[520px] rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
             <img
               src="/landing/you-vs-you-heatmap.png"
               alt="You vs You heatmap"
@@ -318,7 +319,7 @@ export default function Landing() {
           </div>
 
           <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <figure className="rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
+            <figure className="mx-auto w-full max-w-[520px] rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
               <img
                 src="/landing/you-vs-crew-graph.png"
                 alt="You vs Crew comparison"
@@ -328,7 +329,7 @@ export default function Landing() {
               <figcaption className="px-5 py-4 text-sm text-zinc-600">Side-by-side period comparison</figcaption>
             </figure>
 
-            <figure className="rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
+            <figure className="mx-auto w-full max-w-[520px] rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
               <img
                 src="/landing/you-vs-crew-comparison.png"
                 alt="Crew rank"
@@ -389,7 +390,7 @@ export default function Landing() {
 
         {/* Examples */}
         <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <figure className="rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
+          <figure className="mx-auto w-full max-w-[520px] rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
             <img
               src="/landing/site-dev-mtd.png"
               alt="Power BI development MTD example"
@@ -399,7 +400,7 @@ export default function Landing() {
             <figcaption className="px-5 py-4 text-sm text-zinc-600">Example: development month-to-date dashboard</figcaption>
           </figure>
 
-          <figure className="rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
+          <figure className="mx-auto w-full max-w-[520px] rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
             <img
               src="/landing/site-ore-mtd1.png"
               alt="Power BI ore tonnes MTD example"
