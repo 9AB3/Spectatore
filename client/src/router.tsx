@@ -160,8 +160,29 @@ export default function App() {
         }
       />
       {/* Public */}
-      <Route path="/Home" element={<Home />} />
-      {/* Marketing landing page (always accessible, even on localhost) */}
+      <Route
+        path="/Home"
+        element={
+          (() => {
+            const host = typeof window !== 'undefined' ? window.location.hostname : '';
+            const isLocal = host === 'localhost' || host.includes('127.0.0.1');
+            const isAppHost = host.startsWith('app.') || isLocal;
+            return isAppHost ? <Home /> : <Navigate to="/landing" replace />;
+          })()
+        }
+      />
+      {<Route
+        path="/home"
+        element={
+          (() => {
+            const host = typeof window !== 'undefined' ? window.location.hostname : '';
+            const isLocal = host === 'localhost' || host.includes('127.0.0.1');
+            const isAppHost = host.startsWith('app.') || isLocal;
+            return isAppHost ? <Navigate to="/Home" replace /> : <Navigate to="/landing" replace />;
+          })()
+        }
+      />
+      /* Marketing landing page (always accessible, even on localhost) */}
       <Route path="/landing" element={<Landing />} />
       <Route path="/Landing" element={<Navigate to="/landing" replace />} />
       <Route path="/how-to" element={<HowTo />} />
