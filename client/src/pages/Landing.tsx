@@ -27,6 +27,8 @@ function scrollToEl(el: HTMLElement | null) {
 export default function Landing() {
   const appUrl = useMemo(() => getAppUrl(), []);
 
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
   const featuresRef = useRef<HTMLDivElement | null>(null);
   const contactRef = useRef<HTMLDivElement | null>(null);
 
@@ -76,7 +78,8 @@ export default function Landing() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap justify-end">
+          {/* Desktop nav */}
+          <div className="hidden sm:flex items-center gap-2 justify-end">
             <button
               type="button"
               className="px-3 py-2 rounded-xl text-sm hover:bg-black/5 transition"
@@ -129,7 +132,83 @@ export default function Landing() {
               Open app
             </a>
           </div>
+
+          {/* Mobile nav toggle */}
+          <button
+            type="button"
+            className="sm:hidden inline-flex items-center justify-center h-10 w-10 rounded-xl border border-black/10 hover:bg-black/5 transition"
+            aria-label={mobileNavOpen ? 'Close menu' : 'Open menu'}
+            onClick={() => setMobileNavOpen((v) => !v)}
+          >
+            <span className="text-xl leading-none">{mobileNavOpen ? '×' : '≡'}</span>
+          </button>
         </div>
+
+        {/* Mobile dropdown */}
+        {mobileNavOpen && (
+          <div className="sm:hidden border-t border-black/10 bg-white">
+            <div className="mx-auto max-w-6xl px-4 py-3 grid gap-2">
+              <button
+                type="button"
+                className="w-full text-left px-3 py-3 rounded-xl text-sm hover:bg-black/5 transition"
+                onClick={() => {
+                  setMobileNavOpen(false);
+                  track.click('landing_nav_features');
+                  scrollToEl(featuresRef.current);
+                }}
+              >
+                Features
+              </button>
+
+              <a
+                href="/how-to"
+                className="w-full px-3 py-3 rounded-xl text-sm hover:bg-black/5 transition"
+                onClick={() => {
+                  setMobileNavOpen(false);
+                  track.click('landing_nav_tutorials');
+                }}
+              >
+                Tutorials
+              </a>
+
+              <button
+                type="button"
+                className="w-full text-left px-3 py-3 rounded-xl text-sm hover:bg-black/5 transition"
+                onClick={() => {
+                  setMobileNavOpen(false);
+                  track.click('landing_nav_contact');
+                  scrollToEl(contactRef.current);
+                }}
+              >
+                Contact
+              </button>
+
+              <a
+                className="w-full px-3 py-3 rounded-xl text-sm border border-black/10 hover:bg-black/5 transition"
+                href={`${appUrl}/Register`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setMobileNavOpen(false);
+                  track.signupStartNavigate('landing_create_account', `${appUrl}/Register`);
+                }}
+              >
+                Create account
+              </a>
+
+              <a
+                className="w-full px-3 py-3 rounded-xl text-sm bg-black text-white hover:opacity-90 transition"
+                href={appUrl}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setMobileNavOpen(false);
+                  track.clickNavigate('landing_open_app', appUrl);
+                }}
+              >
+                Open app
+              </a>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Hero */}
@@ -189,7 +268,7 @@ export default function Landing() {
               <img
                 src="/landing/shift-portal.png"
                 alt="Spectatore Shift Portal"
-                className="w-full h-auto block"
+                className="w-full block object-contain max-h-[70vh] sm:max-h-none"
                 loading="eager"
               />
             </div>
@@ -209,12 +288,22 @@ export default function Landing() {
 
         <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
           <figure className="rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
-            <img src="/landing/you-vs-you-trend-cards.png" alt="You vs You trend cards" className="w-full h-auto block" loading="lazy" />
+            <img
+              src="/landing/you-vs-you-trend-cards.png"
+              alt="You vs You trend cards"
+              className="w-full block object-contain max-h-[70vh] sm:max-h-none"
+              loading="lazy"
+            />
             <figcaption className="px-5 py-4 text-sm text-zinc-600">Rolling averages and recent shifts</figcaption>
           </figure>
 
           <figure className="rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
-            <img src="/landing/you-vs-you-heatmap.png" alt="You vs You heatmap" className="w-full h-auto block" loading="lazy" />
+            <img
+              src="/landing/you-vs-you-heatmap.png"
+              alt="You vs You heatmap"
+              className="w-full block object-contain max-h-[70vh] sm:max-h-none"
+              loading="lazy"
+            />
             <figcaption className="px-5 py-4 text-sm text-zinc-600">Daily output heatmap and benchmarks</figcaption>
           </figure>
         </div>
@@ -230,12 +319,22 @@ export default function Landing() {
 
           <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
             <figure className="rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
-              <img src="/landing/you-vs-crew-graph.png" alt="You vs Crew comparison" className="w-full h-auto block" loading="lazy" />
+              <img
+                src="/landing/you-vs-crew-graph.png"
+                alt="You vs Crew comparison"
+                className="w-full block object-contain max-h-[70vh] sm:max-h-none"
+                loading="lazy"
+              />
               <figcaption className="px-5 py-4 text-sm text-zinc-600">Side-by-side period comparison</figcaption>
             </figure>
 
             <figure className="rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
-              <img src="/landing/you-vs-crew-comparison.png" alt="Crew rank" className="w-full h-auto block" loading="lazy" />
+              <img
+                src="/landing/you-vs-crew-comparison.png"
+                alt="Crew rank"
+                className="w-full block object-contain max-h-[70vh] sm:max-h-none"
+                loading="lazy"
+              />
               <figcaption className="px-5 py-4 text-sm text-zinc-600">Crew rank and totals</figcaption>
             </figure>
           </div>
@@ -291,12 +390,22 @@ export default function Landing() {
         {/* Examples */}
         <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
           <figure className="rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
-            <img src="/landing/site-dev-mtd.png" alt="Power BI development MTD example" className="w-full h-auto block" loading="lazy" />
+            <img
+              src="/landing/site-dev-mtd.png"
+              alt="Power BI development MTD example"
+              className="w-full block object-contain max-h-[70vh] sm:max-h-none"
+              loading="lazy"
+            />
             <figcaption className="px-5 py-4 text-sm text-zinc-600">Example: development month-to-date dashboard</figcaption>
           </figure>
 
           <figure className="rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
-            <img src="/landing/site-ore-mtd1.png" alt="Power BI ore tonnes MTD example" className="w-full h-auto block" loading="lazy" />
+            <img
+              src="/landing/site-ore-mtd1.png"
+              alt="Power BI ore tonnes MTD example"
+              className="w-full block object-contain max-h-[70vh] sm:max-h-none"
+              loading="lazy"
+            />
             <figcaption className="px-5 py-4 text-sm text-zinc-600">Example: ore tonnes hauled month-to-date dashboard</figcaption>
           </figure>
         </div>
@@ -407,8 +516,8 @@ export default function Landing() {
             <a href="/how-to" className="text-zinc-600 hover:text-zinc-900" onClick={() => track.click('landing_footer_tutorials')}>
               Tutorials
             </a>
-            <a href="/landing" className="text-zinc-600 hover:text-zinc-900" onClick={() => track.click('landing_footer_landing')}>
-              Landing
+            <a href="/" className="text-zinc-600 hover:text-zinc-900" onClick={() => track.click('landing_footer_home')}>
+              Home
             </a>
           </div>
         </div>

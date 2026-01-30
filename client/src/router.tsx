@@ -136,6 +136,14 @@ function RequireSiteAdminSuper({ children }: { children: JSX.Element }) {
 export default function App() {
   const location = useLocation();
 
+  // Marketing site lives at spectatore.com (root). App lives at app.spectatore.com.
+  // Only show the startup splash on the app host.
+  const isAppHost = (() => {
+    const host = typeof window !== 'undefined' ? window.location.hostname : '';
+    const isLocal = host === 'localhost' || host.includes('127.0.0.1');
+    return host.startsWith('app.') || isLocal;
+  })();
+
   useEffect(() => {
     // Send SPA page_view on route changes
     gaPageView(location.pathname + location.search);
@@ -143,7 +151,7 @@ export default function App() {
 
   return (
     <>
-      <StartupSplash />
+      {isAppHost ? <StartupSplash /> : null}
       <SWUpdateToast />
       <Routes>
       <Route path="/r/:key" element={<RedirectTrack />} />
@@ -167,7 +175,7 @@ export default function App() {
             const host = typeof window !== 'undefined' ? window.location.hostname : '';
             const isLocal = host === 'localhost' || host.includes('127.0.0.1');
             const isAppHost = host.startsWith('app.') || isLocal;
-            return isAppHost ? <Home /> : <Navigate to="/landing" replace />;
+            return isAppHost ? <Home /> : <Navigate to="/" replace />;
           })()
         }
       />
@@ -178,13 +186,25 @@ export default function App() {
             const host = typeof window !== 'undefined' ? window.location.hostname : '';
             const isLocal = host === 'localhost' || host.includes('127.0.0.1');
             const isAppHost = host.startsWith('app.') || isLocal;
-            return isAppHost ? <Navigate to="/Home" replace /> : <Navigate to="/landing" replace />;
+            return isAppHost ? <Navigate to="/Home" replace /> : <Navigate to="/" replace />;
           })()
         }
       />
-      /* Marketing landing page (always accessible, even on localhost) */}
-      <Route path="/landing" element={<Landing />} />
-      <Route path="/Landing" element={<Navigate to="/landing" replace />} />
+      /* Marketing landing page canonical URL */}
+      <Route
+        path="/landing"
+        element={
+          (() => {
+            const host = typeof window !== 'undefined' ? window.location.hostname : '';
+            const isLocal = host === 'localhost' || host.includes('127.0.0.1');
+            const isAppHost = host.startsWith('app.') || isLocal;
+            // If someone hits /landing, keep the browser showing the canonical domain root on marketing,
+            // and send app users back into the app.
+            return isAppHost ? <Navigate to="/Home" replace /> : <Navigate to="/" replace />;
+          })()
+        }
+      />
+      <Route path="/Landing" element={<Navigate to="/" replace />} />
       <Route path="/how-to" element={<HowTo />} />
       <Route path="/howto" element={<Navigate to="/how-to" replace />} />
       {/* QR/site join links (public route; server enforces auth when submitting) */}
