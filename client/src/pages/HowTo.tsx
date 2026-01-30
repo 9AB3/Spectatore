@@ -89,7 +89,7 @@ export default function HowTo() {
                 preload="metadata"
                 onPlay={() => track.videoPlay('howto_install_pwa')}
               >
-               <source src="/tutorials/install-pwa.mp4" type="video/mp4" />
+                <source src="/splash.mp4" type="video/mp4" />
               </video>
             </div>
 
@@ -134,7 +134,7 @@ export default function HowTo() {
                 preload="metadata"
                 onPlay={() => track.videoPlay('howto_example_shift')}
               >
-              <source src="/tutorials/example-shift.mp4" type="video/mp4" />
+                <source src="/landing-drill.mp4" type="video/mp4" />
               </video>
             </div>
 

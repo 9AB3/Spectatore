@@ -964,13 +964,13 @@ export default function YouVsNetwork() {
                                     ? theirAvg
                                     : mode === 'pb'
                                     ? theirPB
-                                    : Number(t.theirPeriodTotal || 0);
+                                    : Number(t.theirPeriodAvg || 0);
                                 const yours =
                                   mode === 'avg'
                                     ? yourAvg
                                     : mode === 'pb'
                                     ? yourPB
-                                    : Number(t.yourPeriodTotal || 0);
+                                    : Number(t.yourPeriodAvg || 0);
 
                                 const delta = pct(yours, their);
 
