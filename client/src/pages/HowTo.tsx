@@ -35,11 +35,11 @@ export default function HowTo() {
 
           <div className="flex items-center gap-2">
             <Link
-              to="/"
+              to="/landing"
               className="px-3 py-2 rounded-xl border border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5 transition"
               onClick={() => track.click('howto_back_to_landing')}
             >
-              Back to landing
+              Home
             </Link>
             <a
               href={`${appUrl}/Register`}
@@ -89,7 +89,7 @@ export default function HowTo() {
                 preload="metadata"
                 onPlay={() => track.videoPlay('howto_install_pwa')}
               >
-                <source src="/tutorials/install-pwa.mp4" type="video/mp4" />
+               <source src="/tutorials/install-pwa.mp4" type="video/mp4" />
               </video>
             </div>
 
@@ -134,7 +134,7 @@ export default function HowTo() {
                 preload="metadata"
                 onPlay={() => track.videoPlay('howto_example_shift')}
               >
-                <source src="/tutorials/example-shift.mp4" type="video/mp4" />
+              <source src="/tutorials/example-shift.mp4" type="video/mp4" />
               </video>
             </div>
 
@@ -160,7 +160,7 @@ export default function HowTo() {
         {/* Footer */}
         <div className="mt-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-sm text-[var(--muted)]">
           <div>Need help or want a demo? Use the contact form on the landing page.</div>
-          <Link to="/" className="underline" onClick={() => track.click('howto_footer_back')}>
+          <Link to="/landing" className="underline" onClick={() => track.click('howto_footer_back')}>
             Back
           </Link>
         </div>

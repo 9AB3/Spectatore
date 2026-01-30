@@ -6,6 +6,13 @@ import { pool } from '../lib/pg.js';
 import { siteAdminMiddleware } from '../lib/auth.js';
 import { auditLog } from '../lib/audit.js';
 
+
+function ymdLocal(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 async function hasLegacySiteColumn(pool: any) {
   const q = `
     SELECT 1
@@ -755,8 +762,8 @@ router.get('/dashboard-summary', siteAdminMiddleware, async (req: any, res) => {
     const mm = Number(mmS);
     const startDate = new Date(Date.UTC(yy, mm - 1, 1));
     const nextMonth = new Date(Date.UTC(yy, mm, 1));
-    const start = startDate.toISOString().slice(0, 10);
-    const end = nextMonth.toISOString().slice(0, 10);
+    const start = ymdLocal(startDate);
+    const end = ymdLocal(nextMonth);
 
     const client = await pool.connect();
     try {
@@ -3300,8 +3307,8 @@ function monthBounds(ym: string) {
   const from = new Date(Date.UTC(y, m - 1, 1));
   const to = new Date(Date.UTC(y, m, 1)); // exclusive
   const daysInMonth = Math.round((to.getTime() - from.getTime()) / (24 * 3600 * 1000));
-  const fromYmd = from.toISOString().slice(0, 10);
-  const toYmd = to.toISOString().slice(0, 10);
+  const fromYmd = ymdLocal(from);
+  const toYmd = ymdLocal(to);
   return { fromYmd, toYmd, daysInMonth, y, m };
 }
 
@@ -3622,7 +3629,7 @@ async function upsertReconciliationAndCompute(opts: {
   if (method === 'month_end') {
     // Allocate everything to last calendar day of the month.
     const lastDay = new Date(Date.UTC(y, m, 0));
-    allocations.push({ date: lastDay.toISOString().slice(0, 10), allocated_value: delta });
+    allocations.push({ date: ymdLocal(lastDay), allocated_value: delta });
   } else {
     // spread_daily (default)
     const perDayRaw = daysInMonth ? delta / daysInMonth : 0;
@@ -3631,7 +3638,7 @@ async function upsertReconciliationAndCompute(opts: {
     let running = 0;
     for (let i = 0; i < daysInMonth; i++) {
       const d = new Date(Date.UTC(y, m - 1, 1 + i));
-      const ymd = d.toISOString().slice(0, 10);
+      const ymd = ymdLocal(d);
       const v = i === daysInMonth - 1 ? roundTo(delta - running, 4) : perDay;
       allocations.push({ date: ymd, allocated_value: v });
       running = roundTo(running + v, 4);

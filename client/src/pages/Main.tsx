@@ -7,6 +7,13 @@ import { getDB } from '../lib/idb';
 import { api } from '../lib/api';
 
 
+function ymdLocal(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 
 function FeedbackIcon({ className = '' }: { className?: string }) {
   return (
@@ -67,6 +74,21 @@ export default function Main() {
   const [datesWithData, setDatesWithData] = useState<Set<string>>(() => new Set());
   const [dupeOpen, setDupeOpen] = useState<boolean>(false);
   const [dupeInfo, setDupeInfo] = useState<any>(null);
+
+  // Measure header + bottom nav heights so mobile tiles can perfectly fit the visible viewport.
+  useEffect(() => {
+    const setVars = () => {
+      const header = document.querySelector('.header-bar') as HTMLElement | null;
+      const bottom = document.querySelector('.bottom-nav') as HTMLElement | null;
+      const h = header?.getBoundingClientRect().height || 0;
+      const b = bottom?.getBoundingClientRect().height || 0;
+      document.documentElement.style.setProperty('--spectatore-header-h', `${Math.round(h)}px`);
+      document.documentElement.style.setProperty('--spectatore-bottomnav-h', `${Math.round(b)}px`);
+    };
+    setVars();
+    window.addEventListener('resize', setVars);
+    return () => window.removeEventListener('resize', setVars);
+  }, []);
 
   // Allow deep-linking to open Start Shift modal from onboarding
   useEffect(() => {
@@ -284,7 +306,7 @@ export default function Main() {
       ) : null}
 
       <Header />
-      <div className="p-4 max-w-5xl mx-auto space-y-5">
+      <div className="main-page main-page-stack p-4 max-w-5xl mx-auto">
         <div className="card">
           <div className="text-xs" style={{ color: 'var(--muted)' }}>Home</div>
           <div className="text-3xl md:text-4xl font-extrabold tracking-tight">Shift Portal</div>
@@ -293,13 +315,13 @@ export default function Main() {
           </div>
         </div>
 
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
+        <div className="main-action-section">
+          <div className="main-action-header flex items-center justify-between">
             <div className="text-sm font-semibold" style={{ color: 'var(--text)' }}>Continue Working</div>
             <div className="text-xs" style={{ color: 'var(--muted)' }}>Tap a tile</div>
           </div>
 
-          <div className="tv-row">
+          <div className="tv-row main-action-tiles">
             <button
               type="button"
               className="tv-tile min-w-[260px] w-[260px] md:w-[320px] text-left transition-transform"
@@ -315,7 +337,7 @@ export default function Main() {
                 <img
                   src={`${import.meta.env.BASE_URL}start-shift.png`}
                   alt=""
-                  className="h-[200px] md:h-[240px] w-full object-contain select-none pointer-events-none"
+                  className="main-action-img object-contain select-none pointer-events-none"
                   draggable={false}
                 />
               </div>
@@ -337,7 +359,7 @@ export default function Main() {
                 <img
                   src={`${import.meta.env.BASE_URL}tag-out.png`}
                   alt=""
-                  className="h-[200px] md:h-[240px] w-full object-contain select-none pointer-events-none"
+                  className="main-action-img object-contain select-none pointer-events-none"
                   draggable={false}
                 />
               </div>
@@ -359,7 +381,7 @@ export default function Main() {
                 <img
                   src={`${import.meta.env.BASE_URL}feedback.png`}
                   alt=""
-                  className="h-[200px] md:h-[240px] w-full object-contain select-none pointer-events-none"
+                  className="main-action-img object-contain select-none pointer-events-none"
                   draggable={false}
                 />
               </div>

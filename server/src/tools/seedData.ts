@@ -1,5 +1,12 @@
 import { pool } from '../lib/pg.js';
 
+
+function ymdLocal(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 type SeedOptions = {
   days: number;
   site: string;
@@ -11,7 +18,7 @@ type SeedOptions = {
 
 /** yyyy-mm-dd */
 function ymd(d: Date) {
-  return d.toISOString().slice(0, 10);
+  return ymdLocal(d);
 }
 
 function n(min: number, max: number) {
@@ -415,23 +422,23 @@ export async function seedData(opts: SeedOptions) {
       // and must be stored alongside totals_json for reporting/validation UI.
       const metaJson = buildMetaJson(acts);
 
+      const shift_key = `${user_id}|${ymd(d)}|${dn}`;
       const shiftRes = await client.query(
-        `INSERT INTO shifts (user_id, user_email, user_name, admin_site_id, date, dn, totals_json, meta_json, updated_at, finalized_at)
-         VALUES ($1,$2,$3,$4,$5::date,$6,$7::jsonb,$8::jsonb, now(), now())
-         ON CONFLICT (user_id, date, dn)
+        `INSERT INTO shifts (user_id, user_email, user_name, admin_site_id, date, dn, totals_json, meta_json, finalized_at, shift_key)
+         VALUES ($1,$2,$3,$4,$5::date,$6,$7::jsonb,$8::jsonb, now(), $9)
+         ON CONFLICT (shift_key)
          DO UPDATE SET user_email=EXCLUDED.user_email,
                        user_name=EXCLUDED.user_name,
-                                              totals_json=EXCLUDED.totals_json,
+                       totals_json=EXCLUDED.totals_json,
                        meta_json=EXCLUDED.meta_json,
                        finalized_at=EXCLUDED.finalized_at,
-                       updated_at=EXCLUDED.updated_at
+                       shift_key=EXCLUDED.shift_key
          RETURNING id`,
-        [user_id, user_email, user_name, admin_site_id, ymd(d), dn, JSON.stringify(rollup), JSON.stringify(metaJson)],
+        [user_id, user_email, user_name, admin_site_id, ymd(d), dn, JSON.stringify(rollup), JSON.stringify(metaJson), shift_key],
       );
-      const shift_id = shiftRes.rows[0].id as number;
 
-      // Replace existing activities for this shift
-      await client.query(`DELETE FROM shift_activities WHERE shift_id=$1`, [shift_id]);
+      const shift_id = Number(shiftRes.rows?.[0]?.id);
+      if (!shift_id) throw new Error('seedData: failed to resolve shift_id');
 
       for (const a of acts) {
         const payload = { sub: a.sub, values: a.values };

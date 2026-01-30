@@ -214,6 +214,100 @@ body::before {
   scroll-snap-type: x proximity;
 }
 
+/*
+ * Main page (Shift Portal): on mobile, make the 3 primary action tiles stack vertically
+ * and fit within the visible iPhone viewport (no vertical scroll).
+ * Desktop layout remains unchanged.
+ */
+@media (max-width: 768px) {
+  .main-page {
+    /*
+      Main.tsx renders <Header /> ABOVE this container.
+      So on mobile, subtract BOTH:
+        - BottomNav height (~5rem)
+        - App header height (approx 64px)
+
+      We also allow vertical scrolling *only if needed* (e.g. Super Admin
+      sees an extra "Users" card below the 3 tiles).
+    */
+    /* These are set at runtime in Main.tsx using real DOM measurements. */
+    height: calc(
+      100dvh
+      - var(--spectatore-header-h, 72px)
+      - var(--spectatore-bottomnav-h, 88px)
+    );
+
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto; /* allow scroll only when extra cards exist (e.g. Admin Users) */
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Let the action section consume remaining space (between the header card and BottomNav) */
+  .main-page .main-action-section {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  /* Reduce the vertical gaps on mobile so content can fit without scrolling */
+  .main-page-stack > * + * {
+    margin-top: 12px;
+  }
+
+  /* Override the default horizontal tile row into a vertical stack */
+  .main-page .tv-row.main-action-tiles {
+    flex: 1;
+    min-height: 0;
+    /* Turn the horizontal tile row into 3 equal-height rows */
+    display: grid;
+    grid-template-rows: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    overflow: hidden;
+    padding-bottom: 0;
+  }
+
+  /* Make each tile fill its grid row */
+  .main-page .tv-row.main-action-tiles > button {
+    min-width: 0 !important;
+    width: 100% !important;
+    height: 100%;
+  }
+
+  /* Tighten tile padding slightly on small screens */
+  .main-page .tv-row.main-action-tiles > button.tv-tile {
+    padding: 14px;
+  }
+
+  /* Keep the image comfortably sized inside the tile regardless of tile height */
+  .main-action-img {
+    /*
+      On mobile, make the artwork the hero.
+      Use height-based sizing (not width-based) so the image grows with the tile
+      and doesn't get shrunk by wide-aspect assets.
+    */
+    height: 88%;
+    max-height: 88%;
+    width: auto;
+    max-width: 92%;
+  }
+}
+
+/* Default sizing for the Main page tile images on larger screens */
+.main-action-img {
+  height: auto;
+  max-height: 78%;
+  width: auto;
+  max-width: 100%;
+}
+
+/* Default spacing stack for Main page on desktop/tablet */
+.main-page-stack > * + * {
+  margin-top: 20px;
+}
+
 .tv-row > * {
   scroll-snap-align: start;
 }
@@ -776,4 +870,55 @@ a.link {
   .tv-date-pill{ font-size: 14px; padding: 9px 10px; }
   .tv-date-input{ font-size: 14px; padding: 9px 10px; }
   .stackVal{ font-size: 18px; }
+}
+
+
+/* Simple segmented buttons */
+.tv-btnPrimary{background:rgba(10,132,255,0.18);border:none;}
+.tv-btnGhost{background:transparent;border:none;opacity:0.75;}
+
+/* Segmented control (mobile-friendly) */
+.tv-seg{
+  display:flex;
+  width: 100%;
+  border-radius: 16px;
+  overflow:hidden;
+  border: 1px solid rgba(148,163,184,0.28);
+  background: rgba(255,255,255,0.03);
+}
+.tv-segBtn{
+  flex: 1 1 0%;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  background: transparent;
+  border: none;
+  color: rgba(226,232,240,0.92);
+}
+.tv-segBtn--active{
+  background: rgba(10,132,255,0.22);
+  box-shadow: inset 0 0 0 1px rgba(10,132,255,0.35);
+}
+.stackCard--tight{
+  padding: 10px;
+}
+
+@media (min-width: 768px){
+  .tv-seg{
+    max-width: 420px;
+  }
+  .tv-segBtn{
+    font-size: 14px;
+    padding: 9px 14px;
+  }
+}
+/* Make comparison content denser */
+.stackCard--tight{
+  padding: 8px;
+}
+.stackCard--tight .stackLabel{
+  margin-bottom: 6px;
+}
+.stackCard--tight .stackVal{
+  font-size: 18px;
 }

@@ -3,10 +3,17 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { track } from '../lib/analytics';
 
+
+function ymdLocal(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 type ShiftRow = { id: number; date: string; dn: string; totals_json: any; activities?: any[] };
 
 function ymd(d: Date) {
-  return d.toISOString().slice(0, 10);
+  return ymdLocal(d);
 }
 function addDays(d: Date, days: number) {
   const x = new Date(d);

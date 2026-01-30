@@ -1,3 +1,10 @@
+
+function ymdLocal(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 import Header from '../components/Header';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
@@ -11,7 +18,7 @@ type Rollup = Record<string, Record<string, Record<string, number>>>;
 type CrewMember = { id: number; name: string };
 
 function formatDate(d: Date) {
-  return d.toISOString().slice(0, 10);
+  return ymdLocal(d);
 }
 function startOfMonth(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), 1);

@@ -630,6 +630,8 @@ export default function YouVsNetwork() {
   });
   const [to, setTo] = useState(() => ymd(new Date()));
   const [metric, setMetric] = useState<Metric>('Tonnes Hauled');
+  const [crewRankMode, setCrewRankMode] = useState<'total' | 'avg' | 'pb'>('total');
+  const [crewCompareMode, setCrewCompareMode] = useState<'total' | 'avg' | 'pb'>('avg');
 
   // Allow deep-linking from push notifications, e.g. /You/Crew?metric=Tonnes%20Hauled
   useEffect(() => {
@@ -673,6 +675,11 @@ export default function YouVsNetwork() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [metric, compareUserId, from, to]);
 
+  const crewAvgDailyRows = useMemo(() => {
+    const tl = data?.timeline || [];
+    return tl.map((r) => ({ x: r.date, a: Number(r.user || 0), b: Number(r.network_avg || 0) }));
+  }, [data]);
+
   const dailyRows = useMemo(() => {
     const tl = data?.timeline || [];
     // If comparing against a specific member, server returns timeline.compare; otherwise we fall back to network_avg.
@@ -698,6 +705,14 @@ export default function YouVsNetwork() {
     const pct = b > 0 ? ((a - b) / b) * 100 : a > 0 ? 100 : 0;
     return { a, b, pct };
   }, [cumulativeRows]);
+
+  // Crew avg should be stable (independent of which compare line is selected)
+  const crewAvgCumTotal = useMemo(() => {
+    let sum = 0;
+    for (const r of crewAvgDailyRows) sum += Number(r.b || 0);
+    return sum;
+  }, [crewAvgDailyRows]);
+
 
   // Daily-mode summary should reflect daily averages (not cumulative totals)
   const dailyAvgSummary = useMemo(() => {
@@ -725,17 +740,44 @@ export default function YouVsNetwork() {
 
 
   const leaderboard = useMemo(() => {
-    const crew = (data?.crewTotals || []).map((m) => ({
+    const mode = crewRankMode;
+
+    const pick = (m: any) => {
+      if (mode === 'avg') return Number(m.avg ?? m.total ?? 0);
+      if (mode === 'pb') return Number(m.pb ?? 0);
+      return Number(m.total ?? 0);
+    };
+
+    const crew = (data?.crewTotals || []).map((m: any) => ({
       key: `crew-${m.id}`,
       label: m.name?.trim() ? m.name : m.email,
-      total: Number(m.total || 0),
+      total: pick(m),
       kind: 'crew' as const,
     }));
 
-    const youTotal = Number(data?.userPeriodTotal ?? cumSummary.a ?? 0);
+    const youTotal =
+      mode === 'avg'
+        ? Number(data?.userPeriodAvg ?? 0)
+        : mode === 'pb'
+        ? Number(data?.userAllTimeBest?.total ?? 0)
+        : Number(data?.userPeriodTotal ?? cumSummary.a ?? 0);
+
+    const crewAvg =
+      mode === 'total'
+        ? Number(crewAvgCumTotal || 0)
+        : mode === 'avg'
+        ? (() => {
+            const vals = (data?.crewTotals || []).map((m: any) => Number(m.avg || 0)).filter((v: number) => v > 0);
+            return vals.length ? vals.reduce((a: number, b: number) => a + b, 0) / vals.length : 0;
+          })()
+        : (() => {
+            const vals = (data?.crewTotals || []).map((m: any) => Number(m.pb || 0)).filter((v: number) => v > 0);
+            return vals.length ? vals.reduce((a: number, b: number) => a + b, 0) / vals.length : 0;
+          })();
+
     const rows = [
       { key: 'you', label: 'You', total: youTotal, kind: 'you' as const },
-      { key: 'avg', label: 'Crew avg', total: Number(cumSummary.b || 0), kind: 'avg' as const },
+      { key: 'avg', label: 'Crew avg', total: crewAvg, kind: 'avg' as const },
       ...crew,
     ].filter((r) => Number.isFinite(r.total));
 
@@ -750,12 +792,9 @@ export default function YouVsNetwork() {
     ensure('you');
     ensure('avg');
 
-    // stable order by total desc again after ensures
-    top.sort((a, b) => (b.total || 0) - (a.total || 0));
-
-    const max = Math.max(1, ...top.map((r) => r.total || 0));
-    return { rows: top, max };
-  }, [data, cumSummary.a, cumSummary.b]);
+    const max = Math.max(1, ...top.map((r) => Number(r.total || 0)));
+    return { rows: top, max, mode };
+  }, [data, cumSummary.a, crewAvgCumTotal, crewRankMode]);
 
   return (
       <div className="space-y-4">
@@ -860,24 +899,41 @@ export default function YouVsNetwork() {
 
             {/* Card 2: crew comparison tiles */}
             <div className="card">
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="text-sm font-semibold">Crew comparison (date range)</div>
                 <div className="text-xs tv-muted">{metric}</div>
               </div>
 
-              {data?.crewTiles?.length ? (
-                <TvTileRow itemWidth={300}>
+              <div className="mb-3">
+                <div className="tv-seg" role="tablist" aria-label="Crew comparison mode">
+                  {(['total','avg','pb'] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setCrewCompareMode(k)}
+                      className={`tv-segBtn ${crewCompareMode === k ? 'tv-segBtn--active' : ''}`}
+                      role="tab"
+                      aria-selected={crewCompareMode === k}
+                    >
+                      {k === 'total' ? 'Total' : k === 'avg' ? 'Avg' : 'PB'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+{data?.crewTiles?.length ? (
+                <TvTileRow itemWidth={280}>
                   {data.crewTiles.map((t) => {
                     return (
                       <div
                         key={t.id}
-                        className="w-full rounded-2xl border p-4"
+                        className="w-full rounded-2xl border p-3"
                         style={{ borderColor: 'rgba(148,163,184,0.35)', background: 'rgba(0,0,0,0.02)' }}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <div className="text-sm font-semibold">{t.name || t.email}</div>
-                            <div className="text-xs tv-muted mt-1">All-time PB + avg in range</div>
+                            <div className="text-xs tv-muted mt-1">{crewCompareMode === "total" ? "Period total" : crewCompareMode === "avg" ? "Period avg" : "All-time PB"}</div>
                           </div>
                         </div>
 
@@ -900,52 +956,52 @@ export default function YouVsNetwork() {
                               : 'rgba(239,68,68,0.98)';
 
                           return (
-                            <div className="grid grid-cols-2 gap-3 mt-3">
-                              {/* PB stack */}
-                              <div className="stackCard">
-                                <div className="stackLabel">PB</div>
+                            <div className="mt-2">
+                              {(() => {
+                                const mode = crewCompareMode;
+                                const their =
+                                  mode === 'avg'
+                                    ? theirAvg
+                                    : mode === 'pb'
+                                    ? theirPB
+                                    : Number(t.theirPeriodTotal || 0);
+                                const yours =
+                                  mode === 'avg'
+                                    ? yourAvg
+                                    : mode === 'pb'
+                                    ? yourPB
+                                    : Number(t.yourPeriodTotal || 0);
 
-                                <div className="stackRow">
-                                  <div className="stackCap">Their</div>
-                                  <div className="stackVal tabular-nums" title={fmtFull(theirPB)}>
-                                    {fmtCompact(theirPB)}
+                                const delta = pct(yours, their);
+
+                                return (
+                                  <div className="stackCard stackCard--tight">
+                                    <div className="stackLabel">
+                                      {mode === 'total' ? 'Total' : mode === 'avg' ? 'Avg' : 'PB'}
+                                    </div>
+
+                                    <div className="stackRow">
+                                      <div className="stackCap">Their</div>
+                                      <div className="stackVal tabular-nums" title={fmtFull(their)}>{fmtCompact(their)}</div>
+                                    </div>
+                                    <div className="stackRow">
+                                      <div className="stackCap">You</div>
+                                      <div className="stackVal tabular-nums" title={fmtFull(yours)}>{fmtCompact(yours)}</div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between mt-2">
+                                      <div className="text-xs tv-muted">Δ vs them</div>
+                                      <div
+                                        className="text-xs font-semibold tabular-nums"
+                                        style={{ color: colorFor(delta) }}
+                                        title={`${delta.toFixed(1)}%`}
+                                      >
+                                        {delta === 0 ? '0%' : `${delta > 0 ? '+' : ''}${delta.toFixed(0)}%`}
+                                      </div>
+                                    </div>
                                   </div>
-                                </div>
-
-                                <div className="stackDelta tabular-nums" style={{ color: colorFor(pbDelta) }}>
-                                  {fmtPct0(pbDelta)}
-                                </div>
-
-                                <div className="stackRow">
-                                  <div className="stackCap">You</div>
-                                  <div className="stackVal tabular-nums" title={fmtFull(yourPB)}>
-                                    {fmtCompact(yourPB)}
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* AVG stack */}
-                              <div className="stackCard">
-                                <div className="stackLabel">Avg (range)</div>
-
-                                <div className="stackRow">
-                                  <div className="stackCap">Their</div>
-                                  <div className="stackVal tabular-nums" title={fmtFull(theirAvg)}>
-                                    {fmtCompact(theirAvg)}
-                                  </div>
-                                </div>
-
-                                <div className="stackDelta tabular-nums" style={{ color: colorFor(avgDelta) }}>
-                                  {fmtPct0(avgDelta)}
-                                </div>
-
-                                <div className="stackRow">
-                                  <div className="stackCap">You</div>
-                                  <div className="stackVal tabular-nums" title={fmtFull(yourAvg)}>
-                                    {fmtCompact(yourAvg)}
-                                  </div>
-                                </div>
-                              </div>
+                                );
+                              })()}
                             </div>
                           );
                         })()}
@@ -960,11 +1016,26 @@ export default function YouVsNetwork() {
 
             {/* Card 3: crew rank */}
             <div className="card">
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-semibold">Crew rank (period total)</div>
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="text-sm font-semibold">Crew rank ({leaderboard.mode === "total" ? "period total" : leaderboard.mode === "avg" ? "period avg" : "all-time PB"})</div>
                 <div className="text-xs opacity-70">{metric}</div>
               </div>
-              <div className="space-y-2">
+
+              
+              <div className="tv-seg mb-1" role="tablist" aria-label="Crew rank mode">
+                {(['total','avg','pb'] as const).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setCrewRankMode(k)}
+                    className={`tv-segBtn ${crewRankMode === k ? 'tv-segBtn--active' : ''}`}
+                    role="tab"
+                    aria-selected={crewRankMode === k}
+                  >
+                    {k === 'total' ? 'Total' : k === 'avg' ? 'Avg' : 'PB'}
+                  </button>
+                ))}
+              </div><div className="space-y-2">
                 {leaderboard.rows.map((r, idx) => {
                   const pct = Math.max(0, Math.min(1, (r.total || 0) / leaderboard.max));
                   return (

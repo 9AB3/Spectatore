@@ -1,7 +1,7 @@
 {
   "name": "Spectatore",
   "short_name": "Spectatore",
-  "start_url": "/",
+  "start_url": "/main",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#111827",
@@ -42,5 +42,6 @@
       "type": "image/png",
       "purpose": "maskable"
     }
-  ]
+  ],
+  "scope": "/"
 }

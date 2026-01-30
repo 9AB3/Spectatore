@@ -10,7 +10,10 @@ function n(v: any) {
   return Number.isFinite(x) ? x : 0;
 }
 function ymd(d: Date) {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 function parseYmd(s: string) {
   const [y, m, d] = String(s || '').split('-').map((v) => parseInt(v, 10));
@@ -418,7 +421,7 @@ router.get('/summary', authMiddleware, async (req: any, res: any) => {
     const shiftR = await pool.query(
       `SELECT id, date::text as date, dn, totals_json
          FROM shifts
-        WHERE user_id=$1 AND date BETWEEN $2::date AND $3::date
+        WHERE user_id=$1 AND date::date BETWEEN $2::date AND $3::date
         ORDER BY date ASC`,
       [targetUserId, from, to],
     );
@@ -527,7 +530,7 @@ router.get('/you-vs-you', authMiddleware, async (req: any, res: any) => {
     const shiftR = await pool.query(
       `SELECT id, date::text as date, dn, totals_json
          FROM shifts
-        WHERE user_id=$1 AND date BETWEEN $2::date AND $3::date
+        WHERE user_id=$1 AND date::date BETWEEN $2::date AND $3::date
         ORDER BY date ASC`,
       [authUserId, from, to],
     );
@@ -611,7 +614,7 @@ router.get('/network', authMiddleware, async (req: any, res: any) => {
       const shiftR = await pool.query(
         `SELECT id, date::text as date, dn, totals_json
            FROM shifts
-          WHERE user_id=$1 AND date BETWEEN $2::date AND $3::date
+          WHERE user_id=$1 AND date::date BETWEEN $2::date AND $3::date
           ORDER BY date ASC`,
         [userId, from, to],
       );
@@ -657,25 +660,49 @@ router.get('/network', authMiddleware, async (req: any, res: any) => {
 
     // All-time best (PB) for this metric (best single-day total across all shifts).
     // Uses totals_json only (fast).
+    // All-time best (PB) for this metric (best single-day total across all shifts).
+    // Must use the same metric computation path as the period series (includes shift_activities),
+    // otherwise PB can be inconsistent with Avg/Total for metrics derived from activities.
     async function loadAllTimeBest(userId: number): Promise<{ total: number; date: string }> {
       const shiftR = await pool.query(
-        `SELECT date::text as date, totals_json
+        `SELECT id, date::text as date, dn, totals_json
            FROM shifts
           WHERE user_id=$1
           ORDER BY date ASC`,
         [userId],
       );
-      const rows = shiftR.rows || [];
-      let best = { total: 0, date: rows?.[0]?.date ? String(rows[0].date) : '' };
-      for (const r of rows) {
-        const mm = computeMilestoneMetricMapForShift({ totals_json: asObj(r.totals_json) }, undefined as any);
+      const shiftRows = shiftR.rows || [];
+      if (!shiftRows.length) return { total: 0, date: '' };
+
+      const ids = shiftRows.map((r: any) => r.id);
+      const actR = await pool.query(
+        `SELECT shift_id, activity, sub_activity, payload_json
+           FROM shift_activities
+          WHERE shift_id = ANY($1::bigint[])`,
+        [ids],
+      );
+      const actByShift: Record<string, any[]> = {};
+      for (const a of actR.rows || []) (actByShift[String(a.shift_id)] ||= []).push(a);
+
+      const daily = new Map<string, number>();
+      for (const r of shiftRows) {
+        const sid = Number(r.id);
+        const acts = actByShift[String(sid)] || [];
+        const mm = computeMilestoneMetricMapForShift(
+          { id: sid, date: String(r.date), dn: String(r.dn || ''), totals_json: asObj(r.totals_json) },
+          acts as any,
+        );
         const v = n((mm as any)[metric] || 0);
-        const d = String(r.date || '');
+        const d = String(r.date);
+        daily.set(d, (daily.get(d) || 0) + v);
+      }
+
+      let best = { total: 0, date: String(shiftRows[0].date || '') };
+      for (const [d, v] of daily.entries()) {
         if (v > best.total) best = { total: v, date: d };
       }
       return best;
-    }
-    const user = await loadDaily(authUserId);
+    }const user = await loadDaily(authUserId);
 
     const crewDailyList: Array<{ id: number; name: string; email: string; daily: Map<string, number>; best: any }> = [];
     for (const m of members) {
@@ -687,6 +714,7 @@ router.get('/network', authMiddleware, async (req: any, res: any) => {
 
     const userAllTimeBest = await loadAllTimeBest(authUserId);
     const userPeriodAvg = avgNonZero(Array.from(user.daily.values()).map((v) => n(v)));
+    const userPeriodTotal = Array.from(user.daily.values()).reduce((acc, v) => acc + n(v), 0);
 
     // Precompute crew all-time PBs and period avgs for tiles
     const crewTiles = [] as Array<{
@@ -695,14 +723,17 @@ router.get('/network', authMiddleware, async (req: any, res: any) => {
       email: string;
       theirAllTimeBest: { total: number; date: string };
       theirPeriodAvg: number;
+      theirPeriodTotal: number;
       yourAllTimeBest: { total: number; date: string };
       yourPeriodAvg: number;
+      yourPeriodTotal: number;
       deltaPct: number;
     }>;
 
     for (const cm of crewDailyList) {
       const theirAllTimeBest = await loadAllTimeBest(cm.id);
       const theirPeriodAvg = avgNonZero(Array.from(cm.daily.values()).map((v) => n(v)));
+      const theirPeriodTotal = Array.from(cm.daily.values()).reduce((acc, v) => acc + n(v), 0);
       const base = theirPeriodAvg;
       const deltaPct = base > 0 ? ((userPeriodAvg - base) / base) * 100 : userPeriodAvg > 0 ? 100 : 0;
       crewTiles.push({
@@ -711,8 +742,10 @@ router.get('/network', authMiddleware, async (req: any, res: any) => {
         email: cm.email,
         theirAllTimeBest,
         theirPeriodAvg,
+        theirPeriodTotal,
         yourAllTimeBest: userAllTimeBest,
         yourPeriodAvg: userPeriodAvg,
+        yourPeriodTotal: userPeriodTotal,
         deltaPct,
       });
     }
@@ -757,15 +790,17 @@ router.get('/network', authMiddleware, async (req: any, res: any) => {
         networkBest = { total: cm.best.total, date: cm.best.date, user_id: cm.id, name: cm.name };
       }
     }
-
     // Period totals (used by the "You vs Crew" ranked list UI)
-    const userPeriodTotal = Array.from(user.daily.values()).reduce((acc, v) => acc + n(v), 0);
+        const crewAllTimePbById = new Map<number, number>(crewTiles.map((t) => [t.id, n(t.theirAllTimeBest?.total)]));
+
     const crewTotals = crewDailyList
       .map((cm) => ({
         id: cm.id,
         name: cm.name,
         email: cm.email,
         total: Array.from(cm.daily.values()).reduce((acc, v) => acc + n(v), 0),
+        avg: avgNonZero(Array.from(cm.daily.values()).map((v) => n(v))),
+        pb: Number(crewAllTimePbById.get(cm.id) || 0),
       }))
       .sort((a, b) => b.total - a.total);
 
