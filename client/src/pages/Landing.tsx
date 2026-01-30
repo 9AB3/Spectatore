@@ -296,7 +296,7 @@ export default function Landing() {
           </figure>
 
           <figure className="rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden">
-            <img src="/landing/site-ore-mtd.png" alt="Power BI ore tonnes MTD example" className="w-full h-auto block" loading="lazy" />
+            <img src="/landing/site-ore-mtd1.png" alt="Power BI ore tonnes MTD example" className="w-full h-auto block" loading="lazy" />
             <figcaption className="px-5 py-4 text-sm text-zinc-600">Example: ore tonnes hauled month-to-date dashboard</figcaption>
           </figure>
         </div>
