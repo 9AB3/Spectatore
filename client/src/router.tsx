@@ -39,7 +39,7 @@ import Notifications from './pages/Notifications';
 import Community from './pages/Community';
 import SiteAdminLogin from './pages/SiteAdminLogin';
 import SiteAdmin from './pages/SiteAdmin';
-import SiteAdminValidate from './pages/SiteAdminValidate';
+import SiteAdminValidate from './pages/SiteAdminValidateV2';
 import SiteAdminExpectedWork from './pages/SiteAdminExpectedWork';
 import SiteAdminAddActivity from './pages/SiteAdminAddActivity';
 import SiteAdminEquipmentLocations from './pages/SiteAdminEquipmentLocations';
